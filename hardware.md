@@ -8,10 +8,16 @@ Components that I was able to identify:
 - 3x Optical endstops
 - 1x Filament sensor
 
+### Interactivity
+
+- 6x buttons
+- 1x Character LCD 4x20
+
 ### Other
 
 - 1x RFID reader
 - 1x Top light bar
+- 1x Reflow fan
 
 I only identified the ones that need to be defined in the firmware, so no cable or passive components.
 
@@ -19,6 +25,7 @@ I verified the pins by first attaching an external motor/sensor and then by plug
 
 ## Sources:
 
-- [Teardown (YouTube)](https://www.youtube.com/watch?v=cn2mYWmanlk)
-- [julialongtin (GitHub)](https://github.com/julialongtin/Davinci_Jr_Hacking)
-- My own disassembly and photos of my unit
+- [Teardown (YouTube)](https://www.youtube.com/watch?v=cn2mYWmanlk) for most of the photos
+- [Luc (Soliforum)](https://www.soliforum.com/post/131637/#p131637) for the original pinouts
+- [julialongtin (GitHub)](https://github.com/julialongtin/Davinci_Jr_Hacking) for organizing the original pinouts
+- My own disassembly, testing and photos of my unit

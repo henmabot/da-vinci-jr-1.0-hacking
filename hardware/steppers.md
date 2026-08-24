@@ -1,6 +1,8 @@
-## Stepper Motors
+# Stepper Motors
 
 They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and E1).
+
+## Pinouts
 
 | Pin Name  | Pin ID | MCU | Pin Desc | Verified? |
 | --------- | ------ | --- | -------- | --------- |
@@ -16,8 +18,6 @@ They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and 
 | E1 Enable |        | 78  | PD16     | ✅        |
 | E1 Step   |        | 76  | PC28     | ✅        |
 | E1 Dir    |        | 74  | PD17     | ✅        |
-
-> _Source: [Luc in Soliforum](https://www.soliforum.com/post/131637/#p131637)_
 
 My other findings:
 
