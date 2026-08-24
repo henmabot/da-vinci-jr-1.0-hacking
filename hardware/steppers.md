@@ -2,7 +2,7 @@
 
 They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and E1).
 
-## Pinouts
+### Pinouts
 
 | Pin Name  | Pin ID | MCU | Pin Desc | Verified? |
 | --------- | ------ | --- | -------- | --------- |
@@ -28,7 +28,7 @@ My other findings:
 - Z driver does a full rotation on 6400 steps (maybe we can increase the resolution of other motors too?)
 - E driver does a full rotation on 3200 steps
 
-## Photos
+### Photos
 
 In this photo the one on the left is E1, the one in the back is Z, and the other two are Y and X. Y and X seem to have the same head.
 ![All steppers after removal (YT)](images/steppers.png)

@@ -2,6 +2,13 @@
 
 Components that I was able to identify:
 
+### Controllers and Processing
+
+- 1x Atmel SAM4E8E MCU
+- 1x NXP LPC1115 MCU
+- 4x Toshiba TB62269FTG Stepper driver
+- 1x Flash memory (no info)
+
 ### Movement
 
 - 4x Stepper motors
@@ -12,6 +19,8 @@ Components that I was able to identify:
 
 - 6x buttons
 - 1x Character LCD 4x20
+- 1x Buzzer
+-
 
 ### Other
 

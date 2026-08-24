@@ -2,7 +2,7 @@
 
 There are 3 optical endstops on the printer. They share one connector labeled "Home Sensor".
 
-## Pinouts
+### Pinouts
 
 | Pin Name  | Pin ID | MCU | Pin Desc | Verified? |
 | --------- | ------ | --- | -------- | --------- |
@@ -10,7 +10,7 @@ There are 3 optical endstops on the printer. They share one connector labeled "H
 | Y Endstop |        | 110 | PD9      | ❌        |
 | Z Endstop |        | 117 | PD19     | ❌        |
 
-## Photos
+### Photos
 
 In this photo all the endstops are visible after removal.
 ![All endstops after removal (YT)](images/endstops.png)
