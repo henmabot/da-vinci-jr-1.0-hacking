@@ -2,22 +2,32 @@
 
 They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and E1).
 
-| Pin       | MCU | Pin Desc | Verified? |
-| --------- | --- | -------- | --------- |
-| X Enable  | 127 | ???      | ❌        |
-| X Step    | 128 | ???      | ❌        |
-| X Dir     | 126 | ???      | ❌        |
-| Y Enable  | 124 | ???      | ❌        |
-| Y Step    | 125 | ???      | ❌        |
-| Y Dir     | 7   | ???      | ❌        |
-| Z Enable  | 121 | PD6      | ✅        |
-| Z Step    | 120 | PC20     | ✅        |
-| Z Dir     | 119 | PD7      | ❌        |
-| E1 Enable | 76  | ???      | ❌        |
-| E1 Step   | 78  | ???      | ❌        |
-| E1 Dir    | 74  | ???      | ❌        |
+| Pin Name  | Pin ID | MCU | Pin Desc | Verified? |
+| --------- | ------ | --- | -------- | --------- |
+| X Enable  |        | 128 | PD3      | ✅        |
+| X Step    |        | 127 | PC23     | ✅        |
+| X Dir     |        | 126 | PD4      | ✅        |
+| Y Enable  |        | 125 | PD5      | ✅        |
+| Y Step    |        | 124 | PC22     | ✅        |
+| Y Dir     |        | 7   | PE2      | ✅        |
+| Z Enable  |        | 121 | PD6      | ✅        |
+| Z Step    |        | 120 | PC20     | ✅        |
+| Z Dir     |        | 119 | PD7      | ✅        |
+| E1 Enable |        | 76  | PC28     | ❌        |
+| E1 Step   |        | 78  | PD16     | ❌        |
+| E1 Dir    |        | 74  | PD17     | ❌        |
 
-Source: [Luc in Soliforum](https://www.soliforum.com/post/131637/#p131637)
+> _Source: [Luc in Soliforum](https://www.soliforum.com/post/131637/#p131637)_
+
+My other findings:
+
+- Drivers are enabled on Enable High
+- Drivers are CW on Dir High
+- X driver does a full rotation on 3200 steps
+- Y driver does a full rotation on 3200 steps
+- Z driver does a full rotation on 6400 steps
+
+## Photos
 
 In this photo the one on the left is E1, the one in the back is Z, and the other two are Y and X. Y and X seem to have the same head.
 ![All steppers after removal (YT)](images/steppers.png)
