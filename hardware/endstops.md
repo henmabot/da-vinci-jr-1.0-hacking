@@ -12,5 +12,5 @@ There are 3 optical endstops on the printer. They share one connector labeled "H
 
 ## Photos
 
-In this photo all the steppers are visible after removal.
-![All steppers after removal (YT)](images/endstops.png)
+In this photo all the endstops are visible after removal.
+![All endstops after removal (YT)](images/endstops.png)
