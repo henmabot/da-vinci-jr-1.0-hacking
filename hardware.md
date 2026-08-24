@@ -13,7 +13,7 @@ More info on the controllers and processing can be found in the [controllers](ha
 
 ### Movement
 
-- 4x Stepper motors
+- 4x NEMA17 Stepper motors
 - 3x Optical endstops
 - 1x Filament sensor
 
@@ -21,11 +21,20 @@ More info on movement can be found in the [movement](hardware/movement.md) secti
 
 ### Interactivity
 
-- 6x buttons
+- 6x Buttons
 - 1x Character LCD 4x20
-- 1x Buzzer
+- 1x AC-1203D RP1 Buzzer
+- 1x SD card reader
 
 More info on interactivity can be found in the [interactivity](hardware/interactivity.md) section.
+
+### Hotend
+
+- 1x Heater
+- 1x NTC
+- 1x Fan
+- 1x Filament sensor (?)
+- 1x Flash chip (?)
 
 ### Other
 
