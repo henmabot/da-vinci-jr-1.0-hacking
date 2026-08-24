@@ -42,9 +42,12 @@ More info on interactivity can be found in the [interactivity](hardware/interact
 - 1x Top light bar
 - 1x Reflow fan
 
-I only identified the ones that need to be defined in the firmware, so no cable or passive components.
+## Notes:
 
-I verified the pins by first attaching an external motor/sensor and then by plugging in the stock hardware and verifying the output is the same.
+- I only identified the ones that need to be defined in the firmware, so no cable or passive components.
+- I verified the pins by first attaching an external motor/sensor and then by plugging in the stock hardware and verifying the output is the same.
+- Since hotend has its own sub-board, and its tiny, I felt like it would be more appropriate to have it as its own group than dissect it into the other groups, and mention it from other docs.
+- I will create a separate sources file later as the sources list keeps growing and duplicated per-document.
 
 ## Sources:
 
