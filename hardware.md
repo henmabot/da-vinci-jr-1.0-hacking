@@ -1,34 +1,36 @@
 # Davinci Jr. 1.0 Hardware
 
-Components that I was able to identify:
+To start off, there are 3 boards in the Davinci Jr. 1.0:
 
-## Controllers and Processing
+- Main board
+- LCD, buttons and SD card board (I will refer to this as the sub-board)
+- Hotend board (I will refer to this as the hotend/hotend board)
+
+## Main Board
+
+Components that I was able to identify on the main board:
 
 - 1x Atmel SAM4E8E MCU
 - 1x NXP LPC1115 MCU
 - 4x Toshiba TB62269FTG Stepper driver
 - 1x Macronix MX25L3206E Flash memory
+- 1x AC-1203D RP1 Buzzer
 
-More info on the controllers and processing can be found in the [controllers](hardware/controllers.md) section.
+More info on the these can be found in the [Main Board](hardware/main-board.md) section.
 
-## Movement
+## Sub-board
 
-- 4x NEMA17 Stepper motors
-- 3x Optical endstops
-- 1x Filament sensor
-
-More info on movement can be found in the [movement](hardware/movement.md) section.
-
-## Interactivity
+Components that I was able to identify on the sub-board:
 
 - 6x Buttons
 - 1x Character LCD 4x20
-- 1x AC-1203D RP1 Buzzer
 - 1x SD card reader
 
-More info on interactivity can be found in the [interactivity](hardware/interactivity.md) section.
+More info on these can be found in the [Sub-Board](hardware/sub-board.md) section.
 
 ## Hotend
+
+Components that I was able to identify on the hotend:
 
 - 1x Heater
 - 1x NTC
@@ -36,18 +38,30 @@ More info on interactivity can be found in the [interactivity](hardware/interact
 - 1x Filament sensor (?)
 - 1x Atmel AT24C02D Flash Memory
 
+More info on these can be found in the [Hotend](hardware/hotend.md) section.
+
 ## Other
 
+The remaining components that do not belong to a board are:
+
+- 4x NEMA17 Stepper motors
+- 3x Optical endstops
+- 1x Filament sensor
 - 1x RFID reader
 - 1x Top light bar
 - 1x Reflow fan
 
+## Extras
+
+I wasn't planning to identify the cables, but i do have to identify the flex cables and sensor cables as they are needed to figure out the pinouts for the sensors, sub-board and hotend.
+
 ## Notes:
 
-- I only identified the ones that need to be defined in the firmware, so no cable or passive components.
+- I only identified the ones that need to be defined in the firmware, so no cable or passive components for now.
 - I verified the pins by first attaching an external motor/sensor and then by plugging in the stock hardware and verifying the output is the same.
-- Since hotend has its own sub-board, and its tiny, I felt like it would be more appropriate to have it as its own group than dissect it into the other groups, and mention it from other docs.
+- Since hotend has its own board, and its tiny, I felt like it would be more appropriate to have it as its own group than dissect it into the other groups, and mention it from other docs.
 - I will create a separate sources file later as the sources list keeps growing and duplicated per-document.
+- My reflow fan controller is burnt, I may or may not be able to verify its pin.
 
 ## Sources:
 
