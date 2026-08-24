@@ -1,0 +1,11 @@
+conf/
+.cache/
+firmware_disasm*
+build/
+asf/
+src/
+vendor/
+compile_commands.json
+Makefile
+Justfile
+fw/

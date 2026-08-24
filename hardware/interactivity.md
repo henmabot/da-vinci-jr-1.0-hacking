@@ -2,6 +2,8 @@
 
 ## Buttons
 
+### Pinout
+
 | Button | Description | MCU | Pin Desc        | Verified? |
 | ------ | ----------- | --- | --------------- | --------- |
 | SW1    | UP          | 28  | PE5             | ❌        |
