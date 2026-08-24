@@ -13,9 +13,9 @@ They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and 
 | Z Enable  |        | 121 | PD6      | ✅        |
 | Z Step    |        | 120 | PC20     | ✅        |
 | Z Dir     |        | 119 | PD7      | ✅        |
-| E1 Enable |        | 76  | PC28     | ❌        |
-| E1 Step   |        | 78  | PD16     | ❌        |
-| E1 Dir    |        | 74  | PD17     | ❌        |
+| E1 Enable |        | 78  | PD16     | ✅        |
+| E1 Step   |        | 76  | PC28     | ✅        |
+| E1 Dir    |        | 74  | PD17     | ✅        |
 
 > _Source: [Luc in Soliforum](https://www.soliforum.com/post/131637/#p131637)_
 
@@ -25,7 +25,8 @@ My other findings:
 - Drivers are CW on Dir High
 - X driver does a full rotation on 3200 steps
 - Y driver does a full rotation on 3200 steps
-- Z driver does a full rotation on 6400 steps
+- Z driver does a full rotation on 6400 steps (maybe we can increase the resolution of other motors too?)
+- E driver does a full rotation on 3200 steps
 
 ## Photos
 
