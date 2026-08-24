@@ -30,18 +30,14 @@ My other findings:
 
 ### Photos
 
-In this photo the one on the left is E1, the one in the back is Z, and the other two are Y and X. Y and X seem to have the same head.
-![All steppers after removal (YT)](images/steppers.png)
+| In this photo the one on the left is E1, the one in the back is Z, and the other two are Y and X. Y and X seem to have the same head. | X motor is on the left side and moves along the Z axis, and stays parallel to the print bed. |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| ![All steppers after removal (YT)](images/steppers.png)                                                                               | ![Back view (YT)](images/x-motor.png)                                                        |
 
-X motor is on the left side and moves along the Z axis, and stays parallel to the print bed.
-![Back view (YT)](images/x-motor.png)
+| Y motor sits in the middle of the print bed, slightly to the right. It's fixed in the place, and sits perpendicular to the print bed. | Z motor sits parallel to the Y motor, and is also fixed in the place. |
+| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| ![Back view (YT)](images/y-motor.png)                                                                                                 | ![Back view (YT)](images/z-motor.png)                                 |
 
-Y motor sits in the middle of the print bed, slightly to the right. It's fixed in the place, and sits perpendicular to the print bed.
-![Back view (YT)](images/y-motor.png)
-
-Z motor sits parallel to the Y motor, and is also fixed in the place.
-![Back view (YT)](images/z-motor.png)
-
-E1 motor sits on the top left side and is perpendicular to the print bed, is fixed in place.
-![Front view (YT)](images/e1-motor-1.png)
-![Side view (YT)](images/e1-motor-2.png)
+| E1 motor sits on the top left side and is perpendicular to the print bed, is fixed in place. | E1 motor from the side view.             |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| ![Front view (YT)](images/e1-motor-1.png)                                                    | ![Side view (YT)](images/e1-motor-2.png) |

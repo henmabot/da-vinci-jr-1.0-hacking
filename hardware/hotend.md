@@ -14,9 +14,6 @@ Refer to the [Atmel AT24C01D/AT24C02D Flash Memory Datasheet](https://ww1.microc
 
 ### Photos
 
-8 Pin SOIC package AT24C02D chip from top-view.
-First pin starts on the left of the bottom side, and goes counterclockwise.
-![Top View](images/AT24C02D.jpeg)
-
-Datasheet diagram with the first pin on top of the left side:
-![Datasheet diagram](images/AT24C02D-datasheet.png)
+| 8 Pin SOIC package AT24C02D chip from top-view. First pin starts on the left of the bottom side, and goes counterclockwise. | Datasheet diagram with the first pin on top of the left side. |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| ![Top View](images/AT24C02D.jpeg)                                                                                           | ![Datasheet diagram](images/AT24C02D-datasheet.png)           |
