@@ -1,8 +1,8 @@
-## Davinci Jr. 1.0 Hardware
+# Davinci Jr. 1.0 Hardware
 
 Components that I was able to identify:
 
-### Controllers and Processing
+## Controllers and Processing
 
 - 1x Atmel SAM4E8E MCU
 - 1x NXP LPC1115 MCU
@@ -11,7 +11,7 @@ Components that I was able to identify:
 
 More info on the controllers and processing can be found in the [controllers](hardware/controllers.md) section.
 
-### Movement
+## Movement
 
 - 4x NEMA17 Stepper motors
 - 3x Optical endstops
@@ -19,7 +19,7 @@ More info on the controllers and processing can be found in the [controllers](ha
 
 More info on movement can be found in the [movement](hardware/movement.md) section.
 
-### Interactivity
+## Interactivity
 
 - 6x Buttons
 - 1x Character LCD 4x20
@@ -28,15 +28,15 @@ More info on movement can be found in the [movement](hardware/movement.md) secti
 
 More info on interactivity can be found in the [interactivity](hardware/interactivity.md) section.
 
-### Hotend
+## Hotend
 
 - 1x Heater
 - 1x NTC
 - 1x Fan
 - 1x Filament sensor (?)
-- 1x Flash chip (?)
+- 1x Atmel AT24C02D Flash Memory
 
-### Other
+## Other
 
 - 1x RFID reader
 - 1x Top light bar
