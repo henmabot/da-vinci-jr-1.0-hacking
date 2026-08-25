@@ -9,3 +9,4 @@ compile_commands.json
 Makefile
 Justfile
 fw/
+lpc1115-dumps/

@@ -16,7 +16,7 @@ Components that I was able to identify on the main board:
 - 1x Macronix MX25L3206E Flash memory
 - 1x AC-1203D RP1 Buzzer
 
-More info on the these can be found in the [Main Board](hardware/main-board.md) section.
+More info on the these can be found in the [Main Board](hardware/board-main.md) section.
 
 ## Sub-board
 
@@ -26,7 +26,7 @@ Components that I was able to identify on the sub-board:
 - 1x Character LCD 4x20
 - 1x SD card reader
 
-More info on these can be found in the [Sub-Board](hardware/sub-board.md) section.
+More info on these can be found in the [Sub-Board](hardware/board-sub.md) section.
 
 ## Hotend
 
@@ -38,7 +38,7 @@ Components that I was able to identify on the hotend:
 - 1x Filament sensor (?)
 - 1x Atmel AT24C02D Flash Memory
 
-More info on these can be found in the [Hotend](hardware/hotend.md) section.
+More info on these can be found in the [Hotend](hardware/board-hotend.md) section.
 
 ## Other
 
@@ -65,7 +65,4 @@ I wasn't planning to identify the cables, but i do have to identify the flex cab
 
 ## Sources:
 
-- [Teardown (YouTube)](https://www.youtube.com/watch?v=cn2mYWmanlk) for most of the photos
-- [Luc (Soliforum)](https://www.soliforum.com/post/131637/#p131637) for the original pinouts
-- [julialongtin (GitHub)](https://github.com/julialongtin/Davinci_Jr_Hacking) for organizing the original pinouts
-- My own disassembly, testing and photos of my unit
+Please refer to [SOURCES.md](SOURCES.md) for the full list of sources.
