@@ -57,13 +57,13 @@
     "zone_display_mode": 0
   },
   "git": {
-    "integration_disabled": false,
+    "integration_disabled": true,
     "repo_type": "",
     "repo_username": "",
     "ssh_key": ""
   },
   "meta": {
-    "filename": "schematic.kicad_prl",
+    "filename": "DaVinciJr1.0.kicad_prl",
     "version": 5
   },
   "net_inspector_panel": {
