@@ -1,0 +1,152 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "1e12c736-bef9-40e8-b505-1000ff77a2bb")
+	(paper "A4")
+	(lib_symbols)
+	(sheet
+		(at 157.48 36.83)
+		(size 62.23 58.42)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "b418c2e6-1ad3-4591-9cff-9544514ed08e")
+		(property "Sheetname" "Sub Board"
+			(at 157.48 36.1184 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "SubBoard.kicad_sch"
+			(at 157.48 95.8346 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "DaVinciJr1.0"
+				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 20.32 22.86)
+		(size 52.07 55.88)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "d610c2e8-63cd-4e0f-98e2-bf1a99df609b")
+		(property "Sheetname" "Main Board"
+			(at 20.32 22.1484 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "MainBoard.kicad_sch"
+			(at 20.32 79.3246 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "DaVinciJr1.0"
+				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 67.31 123.19)
+		(size 50.8 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "d736cec6-6568-4f0d-a198-da2ab34840e1")
+		(property "Sheetname" "Hotend Board"
+			(at 67.31 122.4784 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "HotendBoard.kicad_sch"
+			(at 67.31 164.4146 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "DaVinciJr1.0"
+				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)
