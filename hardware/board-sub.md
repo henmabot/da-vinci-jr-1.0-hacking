@@ -17,3 +17,39 @@ The board is **62mm to 185mm** in size.
 There are some more chips that i didnt see as important, as they are passive or hardware driven.
 
 More information about the connectors on-board can be found in the [connectors](connectors.md) section.
+
+## Winstar WH1604A 16x04 LCD module
+
+The Winstar WH1604A 16x04 LCD module is a character LCD display that is used to display text on the sub-board. It has 16 columns and 4 rows of characters, and is connected to the main board via a 22 pin connector labeled "LCM SLOT CONNECTOR".
+
+Refer to the [Winstar WH1604A 16x04 LCD Module Datasheet](../SOURCES.md#datasheet-winstar-wh1604a) for more information.
+
+### Photos
+
+| Close up photos | will be added |
+| --------------- | ------------- |
+|                 |               |
+
+## SD Card Reader Module
+
+The SD card reader module is used to read full size SD cards and is connected to the main board via a 16 pin connector labeled "SD CARD SLOT CONNECTOR".
+
+It is a generic SD card reader module, so there is no specific datasheet available.
+
+### Photos
+
+| Close up photos | will be added |
+| --------------- | ------------- |
+|                 |               |
+
+## Push Buttons
+
+The push buttons are used to control the sub-board and are connected to the main board via one of the existing connectors.
+
+I doubt a datasheet for a button would be useful even.
+
+### Photos
+
+| Close up photos | will be added |
+| --------------- | ------------- |
+|                 |               |

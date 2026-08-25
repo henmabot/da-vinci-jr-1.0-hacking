@@ -21,7 +21,7 @@ More info about the main board can be found in the [Main Board](hardware/board-m
 
 Main components on the sub-board:
 
-- 1x Character LCD 4x20
+- 1x Character LCD 4x16
 - 1x SD card reader
 - 6x Buttons
 
