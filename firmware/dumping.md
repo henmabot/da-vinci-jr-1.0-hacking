@@ -65,9 +65,9 @@ Find the pin 1 (on my board, its square shaped and has a small '1' printed next 
 
 > _Huge thanks to pyr0ball for this schematic: [Pyr0ball (GitHub)](../SOURCES.md#pyr0ball-schematic)_
 
-| J114 connector with the cables soldered       | Pico with the cables soldered                     |
-| --------------------------------------------- | ------------------------------------------------- |
-| ![J114 connector](images/j114-connector.jpeg) | ![Pico after soldering](images/pico-soldered.jpg) |
+| J114 connector with the cables soldered         | Pico with the cables soldered                      |
+| ----------------------------------------------- | -------------------------------------------------- |
+| ![J114 connection](images/j114-connection.jpeg) | ![Pico after soldering](images/pico-soldering.jpg) |
 
 At this point, you should have a Pico with the SWD pins connected to the board. If you are using a different board, you can refer to the SWD pin column instead.
 
