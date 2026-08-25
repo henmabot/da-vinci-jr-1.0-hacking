@@ -8,25 +8,24 @@ To start off, there are 3 boards in the Davinci Jr. 1.0:
 
 ## Main Board
 
-Components that I was able to identify on the main board:
+Main components on the main board:
 
 - 1x Atmel SAM4E8E MCU
 - 1x NXP LPC1115 MCU
-- 4x Toshiba TB62269FTG Stepper driver
-- 1x Macronix MX25L3206E Flash memory
-- 1x AC-1203D RP1 Buzzer
+- 4x Stepper drivers
+- 1x 4MB Flash memory
 
-More info on the these can be found in the [Main Board](hardware/board-main.md) section.
+More info about the main board can be found in the [Main Board](hardware/board-main.md) section.
 
 ## Sub-board
 
-Components that I was able to identify on the sub-board:
+Main components on the sub-board:
 
-- 6x Buttons
 - 1x Character LCD 4x20
 - 1x SD card reader
+- 6x Buttons
 
-More info on these can be found in the [Sub-Board](hardware/board-sub.md) section.
+More info about the sub-board can be found in the [Sub-Board](hardware/board-sub.md) section.
 
 ## Hotend
 
@@ -36,7 +35,7 @@ Components that I was able to identify on the hotend:
 - 1x NTC
 - 1x Fan
 - 1x Filament sensor (?)
-- 1x Atmel AT24C02D Flash Memory
+- 1x (?)KB Flash Memory
 
 More info on these can be found in the [Hotend](hardware/board-hotend.md) section.
 

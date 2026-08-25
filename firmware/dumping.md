@@ -65,9 +65,9 @@ Find the pin 1 (on my board, its square shaped and has a small '1' printed next 
 
 > _Huge thanks to pyr0ball for this schematic: [Pyr0ball (GitHub)](../SOURCES.md#pyr0ball-schematic)_
 
-| J114 connector with the cables soldered         | Pico with the cables soldered                      |
-| ----------------------------------------------- | -------------------------------------------------- |
-| ![J114 connection](images/j114-connection.jpeg) | ![Pico after soldering](images/pico-soldering.jpg) |
+| J114 connector with the cables soldered            | Pico with the cables soldered                         |
+| -------------------------------------------------- | ----------------------------------------------------- |
+| ![J114 connection](../images/j114-connection.jpeg) | ![Pico after soldering](../images/pico-soldering.jpg) |
 
 At this point, you should have a Pico with the SWD pins connected to the board. If you are using a different board, you can refer to the SWD pin column instead.
 
@@ -120,7 +120,7 @@ Here, we check for CRP (Code Readout Protection) before attempting to dump the f
 > Code Readout Protection is a security feature that prevents the firmware from being read out of the device.
 > Good for protecting IP, bad for reverse engineering or backing up the firmware.
 >
-> ![CRP Levels](images/crp-levels.png)
+> ![CRP Levels](../images/crp-levels.png)
 > _Source: [NXP Application Note AN10968](../SOURCES.md#datasheet-nxp-an10968)_
 > More information can be found at: [NXP User Manual UM10398](../SOURCES.md#datasheet-nxp-um10398)
 
@@ -140,9 +140,9 @@ shutdown command invoked
 
 The part after the '0x000002fc' in the output is the CRP level, which indicates the level of protection the device is using. It has some magic byes that indicate the level of protection as mentioned above in the 'What is CRP?' section.
 
-| Location of the magic bytes on the chip (0x000002fc) | Possible values for the CRP magic bytes        |
-| ---------------------------------------------------- | ---------------------------------------------- |
-| ![CRP Hex Location](images/crp-hex-location.png)     | ![CRP Magic Bytes](images/crp-magic-bytes.png) |
+| Location of the magic bytes on the chip (0x000002fc) | Magic values for the CRP setting                  |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| ![CRP Hex Location](../images/crp-hex-location.png)  | ![CRP Magic Bytes](../images/crp-magic-bytes.png) |
 
 > _Source: [NXP Application Note AN10968](../SOURCES.md#datasheet-nxp-an10968)_
 
@@ -201,7 +201,7 @@ At this point, you should have a `lpc1115_dump.bin` file in your current directo
 >
 > | Dumping the firmware for the first time, and hashing the output file | Dumping the firmware for the second time, and hashing the output file |
 > | -------------------------------------------------------------------- | --------------------------------------------------------------------- |
-> | ![Dumping for the first time](images/dumping-the-firmware-1.png)     | ![Dumping for the second time](images/dumping-the-firmware-2.png)     |
+> | ![Dumping for the first time](../images/dumping-the-firmware-1.png)  | ![Dumping for the second time](../images/dumping-the-firmware-2.png)  |
 
 If you have dumped the firmware, i would appreciate it if you could open a github issue with the sha256sum of your dump attached, in case its different. Sharing the firmware dump itself _on github_ is problematic due to takedown risk.
 
