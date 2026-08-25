@@ -39,7 +39,7 @@ Components that I was able to identify on the hotend:
 
 More info on these can be found in the [Hotend](hardware/board-hotend.md) section.
 
-## Other
+## Other Hardware
 
 The remaining components that do not belong to a board are:
 
@@ -50,9 +50,12 @@ The remaining components that do not belong to a board are:
 - 1x Top light bar
 - 1x Reflow fan
 
+More info on these can be found in the [Other Hardware](hardware/board-other.md) section.
+
 ## Extras
 
 I wasn't planning to identify the cables, but i do have to identify the flex cables and sensor cables as they are needed to figure out the pinouts for the sensors, sub-board and hotend.
+
 More information about these can be found in the [connectors](hardware/connectors.md) section.
 
 ## Notes:
