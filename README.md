@@ -1,4 +1,6 @@
-Info about my progress on Da Vinci Jr. 1.0 reverse engineering can be found in the [hardware](hardware.md) and [firmware](firmware.md) sections. The current readme stays for reference.
+Info about my progress on Da Vinci Jr. 1.0 reverse engineering can be found in the [progress](PROGRESS.md) section.
+
+The more polished information can be found in the[hardware](hardware.md) and [firmware](firmware.md) sections. The current readme stays for reference.
 
 ---
 

@@ -2,7 +2,7 @@
 
 They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and E1).
 
-### Pinouts
+### Pinout
 
 | Pin Name  | Pin ID | MCU | Pin Desc | Verified? |
 | --------- | ------ | --- | -------- | --------- |
