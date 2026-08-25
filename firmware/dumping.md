@@ -65,7 +65,7 @@ Find the pin 1 (on my board, its square shaped and has a small '1' printed next 
 |     5     |     SWDCLK      | SWDCLK  |   GP2    |
 |     6     |      RESET      |    -    |    -     |
 
-> _Huge thanks to pyr0ball for this schematic: [SWD pinout](https://github.com/Duet3D/RepRapFirmware/issues/190#issuecomment-403314752)_
+> _Huge thanks to pyr0ball for this schematic: [Pyr0ball (GitHub)](../SOURCES.md#pyr0ball-schematic)_
 
 ![Pico after soldering](images/pico-soldered.jpg)
 
