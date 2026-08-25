@@ -12,71 +12,13 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 
 ## Pinouts
 
-- **[Luc (Soliforum)](https://www.soliforum.com/post/131637/#p131637)** for most of the main board pinouts
-- **[Julialongtin (GitHub)](https://github.com/julialongtin/Davinci_Jr_Hacking)** for organizing the original pinouts
-- **[Pyr0ball (Soliforum)](https://www.soliforum.com/post/138269/#p138269)** for the sub board pinouts
-- **[Megatron (Soliforum)](https://www.soliforum.com/post/135347/#p135347)** for the hotend board flex connections
+- <a name="luc-main-board"></a> **[Luc (Soliforum)](https://www.soliforum.com/post/131637/#p131637)** for most of the main board pinouts
+- <a name="julialongtin-repo"></a> **[Julialongtin (GitHub)](https://github.com/julialongtin/Davinci_Jr_Hacking)** for organizing the original pinouts
+- <a name="pyr0ball-sub-board"></a> **[Pyr0ball (Soliforum)](https://www.soliforum.com/post/138269/#p138269)** for the sub board pinouts
+- <a name="megatron-hotend-flex"></a> **[Megatron (Soliforum)](https://www.soliforum.com/post/135347/#p135347)** for the hotend board flex connections
 - <a name="pyr0ball-schematic"></a> **[Pyr0ball (GitHub)](https://github.com/Duet3D/RepRapFirmware/issues/190#issuecomment-403314752)** for the partial schematic that enabled me to dump LPC1115 firmware
 
 ## Datasheets
 
-- [NXP Application Note AN10968](https://www.nxp.com/docs/en/application-note/AN10968.pdf)
-- [NXP User Manual UM10398](https://www.usr.cn/Uploads/Attach/201010/user.manual.lpc11xx.lpc11cxx.pdf) (3. party link due to NXP having the link behind a login, the original can be found here: [NXP UM10398](https://www.nxp.com/webapp/Download?colCode=UM10398&location=null))
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
-
-filler rows to test link
+- <a name="datasheet-nxp-an10968"></a> **[NXP Application Note AN10968](https://www.nxp.com/docs/en/application-note/AN10968.pdf)**
+- <a name="datasheet-nxp-um10398"></a> **[NXP User Manual UM10398](https://www.usr.cn/Uploads/Attach/201010/user.manual.lpc11xx.lpc11cxx.pdf)** (3. party link due to NXP having the link behind a login, the original can be found here: [NXP UM10398](https://www.nxp.com/webapp/Download?colCode=UM10398&location=null))

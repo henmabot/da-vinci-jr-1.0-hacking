@@ -52,8 +52,6 @@ Error: Error connecting DP: cannot read IDR
 
 If everything until this point is working, continue by finding the J114 connector on the board. It should be located between the MCU's, and next to the buzzer and the flash memory.
 
-![J114 connector](images/j114-connector.jpeg)
-
 Find the pin 1 (on my board, its square shaped and has a small '1' printed next to it). Then, solder the wires according to this table:
 
 | Board pin | Pin description | SWD pin | Pico pin |
@@ -67,7 +65,9 @@ Find the pin 1 (on my board, its square shaped and has a small '1' printed next 
 
 > _Huge thanks to pyr0ball for this schematic: [Pyr0ball (GitHub)](../SOURCES.md#pyr0ball-schematic)_
 
-![Pico after soldering](images/pico-soldered.jpg)
+| J114 connector with the cables soldered       | Pico with the cables soldered                     |
+| --------------------------------------------- | ------------------------------------------------- |
+| ![J114 connector](images/j114-connector.jpeg) | ![Pico after soldering](images/pico-soldered.jpg) |
 
 At this point, you should have a Pico with the SWD pins connected to the board. If you are using a different board, you can refer to the SWD pin column instead.
 
@@ -121,8 +121,8 @@ Here, we check for CRP (Code Readout Protection) before attempting to dump the f
 > Good for protecting IP, bad for reverse engineering or backing up the firmware.
 >
 > ![CRP Levels](images/crp-levels.png)
-> _Source: [NXP Application Note AN10968](https://www.nxp.com/docs/en/application-note/AN10968.pdf)_
-> More information can be found at: [UM10398](https://www.usr.cn/Uploads/Attach/201010/user.manual.lpc11xx.lpc11cxx.pdf) (3. party link due to NXP having the link behind a login, the original can be found here: [NXP UM10398](https://www.nxp.com/webapp/Download?colCode=UM10398&location=null))
+> _Source: [NXP Application Note AN10968](../SOURCES.md#datasheet-nxp-an10968)_
+> More information can be found at: [NXP User Manual UM10398](../SOURCES.md#datasheet-nxp-um10398)
 
 ```shell
 openocd -f interface/cmsis-dap.cfg -f target/lpc11xx.cfg -c "init" -c "halt" -c "mdw 0x2FC" -c "shutdown"
@@ -144,7 +144,7 @@ The part after the '0x000002fc' in the output is the CRP level, which indicates 
 | ---------------------------------------------------- | ---------------------------------------------- |
 | ![CRP Hex Location](images/crp-hex-location.png)     | ![CRP Magic Bytes](images/crp-magic-bytes.png) |
 
-> _Source: NXP Application note AN10968 (mentioned above)_
+> _Source: [NXP Application Note AN10968](../SOURCES.md#datasheet-nxp-an10968)_
 
 Here, i got 'e7fee7fe' as the CRP level, which is not a valid CRP level. This means the device is not protected by CRP, and the firmware can be dumped without any restrictions.
 
