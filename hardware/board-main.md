@@ -1,10 +1,12 @@
 # Main Board
 
-The main board is the brain of the whole device. It has **2 MCU's, a 4MB Flash memory, 4 stepper drivers**, various voltage regulators and some crystal oscillators. It has a lot of unpopulated headers, connectors and chip sockets, mainly for other versions of the device that use the same board. There are also some debug headers and connectors.
+The main board is the brain of the printer. It has **2 MCU's, a 4MB Flash memory, 4 stepper drivers**, various voltage regulators and some crystal oscillators. It has a lot of unpopulated headers, connectors and chip sockets, mainly for other versions of the device that use the same board. There are also some debug headers and connectors.
 
 | Front view of the board                          | Back view of the board                         |
 | ------------------------------------------------ | ---------------------------------------------- |
 | ![Front view](../images/hd/main-board-front.jpg) | ![Back view](../images/hd/main-board-back.jpg) |
+
+The board is **100mm to 240mm** in size without the headers and connectors. It seems to be only dual layer, which makes it easier to work with. It is 1.5mm thick.
 
 **The components that i was able to identify so far are:**
 
@@ -19,7 +21,7 @@ The main board is the brain of the whole device. It has **2 MCU's, a 4MB Flash m
 - **2x** 12.000 Hz crystal oscillators
 - **1x** unmarked crystal oscillator (for RTC?)
 
-There are some more chips that i didnt see important, as they are passive or hardware driven.
+There are some more chips that i didnt see as important, as they are passive or hardware driven.
 
 ## Atmel SAM4E8E MCU
 

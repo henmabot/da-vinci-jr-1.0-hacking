@@ -53,6 +53,7 @@ The remaining components that do not belong to a board are:
 ## Extras
 
 I wasn't planning to identify the cables, but i do have to identify the flex cables and sensor cables as they are needed to figure out the pinouts for the sensors, sub-board and hotend.
+More information about these can be found in the [connectors](hardware/connectors.md) section.
 
 ## Notes:
 

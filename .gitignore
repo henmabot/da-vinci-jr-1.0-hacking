@@ -10,3 +10,4 @@ Makefile
 Justfile
 fw/
 lpc1115-dumps/
+klipper/
