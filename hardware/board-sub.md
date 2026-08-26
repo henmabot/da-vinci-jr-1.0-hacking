@@ -42,15 +42,15 @@ Pins start from P1 (on the right of the reader) and go to the left, up to P11.
 
 | Pin | Function | Description        | Connector Pin | Verified? |
 | --- | -------- | ------------------ | ------------- | --------- |
-| 01  | CD/DAT3  | Chip Select        |               | ❌        |
-| 02  | CMD      | MOSI               |               | ❌        |
-| 03  | VSS1     | Ground             |               | ❌        |
-| 04  | VDD      | Power              |               | ❌        |
-| 05  | CLK      | SCK                |               | ❌        |
-| 06  | VSS2     | Ground             |               | ❌        |
-| 07  | DAT0     | MISO               |               | ❌        |
-| 08  | DAT1     | -                  |               | ❌        |
-| 09  | DAT2     | -                  |               | ❌        |
+| 01  | DAT2     | -                  | 16            | ✅        |
+| 02  | CD/DAT3  | Chip Select        | 14            | ✅        |
+| 03  | CMD      | MOSI/Data in       | 12            | ✅        |
+| 04  | VSS1     | Ground             |               | ❌        |
+| 05  | VDD      | Power              |               | ❌        |
+| 06  | CLK      | SCK                |               | ❌        |
+| 07  | VSS2     | Ground             |               | ❌        |
+| 08  | DAT0     | MISO               |               | ❌        |
+| 09  | DAT1     | -                  |               | ❌        |
 | 10  | WP       | Write Protect lock |               | ❌        |
 | 11  | CD       | Card Detect        | 10            | ✅        |
 

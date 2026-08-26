@@ -56,11 +56,11 @@ To be added
 | Pin | MCU   | Pin Desc          | Verified? | Connects To | Description | Verified? |
 | --- | ----- | ----------------- | --------- | ----------- | ----------- | --------- |
 | 01  | -     | NC                | ❌        |             |             | ❌        |
-| 02  | GND   | Ground            | ❌        |             |             | ❌        |
+| 02  | GND   | Ground            | ❌        | GND         | Ground      | ✅        |
 | 03  | 118   | PA31/MCDA1        | ❌        |             |             | ❌        |
-| 04  | GND   | Ground            | ❌        |             |             | ❌        |
+| 04  | GND   | Ground            | ❌        | GND         | Ground      | ✅        |
 | 05  | 116   | PA30/MCDA0        | ❌        |             |             | ❌        |
-| 06  | GND   | Ground            | ❌        |             |             | ❌        |
+| 06  | GND   | Ground            | ❌        | GND         | Ground      | ✅        |
 | 07  | 129   | PA29/MCCK         | ❌        |             |             | ❌        |
 | 08  | +3.3V | Power             | ❌        |             |             | ❌        |
 | 09  | +3.3V | Power             | ❌        |             |             | ❌        |
