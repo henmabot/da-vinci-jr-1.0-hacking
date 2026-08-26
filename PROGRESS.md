@@ -7,10 +7,16 @@ Will continue when i figure out a way to power the multimeter.
 Until then i will continue by fixing the broken links and update the docs.
 
 **Update 26.08.2026 13:30 GMT+3:**
+
 I got a battery and now im back in business!
 Going to trace the sub board first as it is the easiest to trace so far
 
 **Update 26.08.2026 15:00 GMT+3:**
+
 I need a better way to note my pins. Having them spread out makes it A LOT harder to keep track of them.
 
 I have decided to desolder the LCM since i cant trace cables under it easily. Ill probably end up breaking something but idonno
+
+**Update 26.08.2026 18:45 GMT+3:**
+
+I have finished tracing the sub board and drawing the KiCAD schematic. I am tired and going to continue tonight/tomorrow.
