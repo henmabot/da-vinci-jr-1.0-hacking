@@ -20,8 +20,8 @@ To be added
 
 | Pin | MCU     | Pin Desc   | Verified? | Connects To | Description | Verified? |
 | --- | ------- | ---------- | --------- | ----------- | ----------- | --------- |
-| 01  | +5V     | Power      | ❌        |             |             | ❌        |
-| 02  | GND     | Ground     | ❌        |             |             | ❌        |
+| 01  | +5V     | Power      | ❌        | LCD 5V      | Power       | ✅        |
+| 02  | GND     | Ground     | ❌        | GND         | Ground      | ✅        |
 | 03  | 111     | PC18       | ❌        |             |             | ❌        |
 | 04  | 82      | PC8        | ❌        |             |             | ❌        |
 | 05  | U1_Pin1 | ???        | ❌        |             |             | ❌        |

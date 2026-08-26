@@ -46,13 +46,20 @@ Pins start from P1 (on the right of the reader) and go to the left, up to P11.
 | 02  | CS/DAT3  | Chip Select        | 14            | ✅        |
 | 03  | CMD      | MOSI/Data in       | 12            | ✅        |
 | 04  | VSS1     | Ground             | GND           | ✅        |
-| 05  | VDD      | Power              | 09            | ❌        |
-| 06  | CLK      | SCK                | 07            | ❌        |
+| 05  | VDD      | Power              | 09            | ✅        |
+| 06  | CLK      | SCK                | 07            | ✅        |
 | 07  | VSS2     | Ground             | GND           | ✅        |
 | 08  | DAT0     | MISO               | 05            | ✅        |
 | 09  | DAT1     | -                  | 03            | ✅        |
 | 10  | WP       | Write Protect lock | N/C           | ✅        |
 | 11  | CD       | Card Detect        | 10            | ✅        |
+
+1
+5
+3
+4
+6
+2
 
 ### Photos
 
