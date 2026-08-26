@@ -8728,10 +8728,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80c")
+			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80d")
 		)
 		(pin "1"
-			(uuid "ca03b26b-149d-4af0-924e-9c22040fa975")
+			(uuid "ca03b26b-149d-4af0-924e-9c22040fa976")
 		)
 		(instances
 			(project "DaVinciJr1.0"
@@ -8888,10 +8888,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80c")
+			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80e")
 		)
 		(pin "1"
-			(uuid "ca03b26b-149d-4af0-924e-9c22040fa975")
+			(uuid "ca03b26b-149d-4af0-924e-9c22040fa977")
 		)
 		(instances
 			(project "DaVinciJr1.0"
@@ -9847,10 +9847,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80c")
+			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80f")
 		)
 		(pin "1"
-			(uuid "ca03b26b-149d-4af0-924e-9c22040fa975")
+			(uuid "ca03b26b-149d-4af0-924e-9c22040fa978")
 		)
 		(instances
 			(project "DaVinciJr1.0"
@@ -10345,10 +10345,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80c")
+			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e810")
 		)
 		(pin "1"
-			(uuid "ca03b26b-149d-4af0-924e-9c22040fa975")
+			(uuid "ca03b26b-149d-4af0-924e-9c22040fa979")
 		)
 		(instances
 			(project "DaVinciJr1.0"
@@ -10427,10 +10427,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e80c")
+			(uuid "63ca85af-b05c-42f4-90b1-ad8a7899e811")
 		)
 		(pin "1"
-			(uuid "ca03b26b-149d-4af0-924e-9c22040fa975")
+			(uuid "ca03b26b-149d-4af0-924e-9c22040fa97a")
 		)
 		(instances
 			(project "DaVinciJr1.0"
