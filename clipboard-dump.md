@@ -13,3 +13,10 @@ The place where I dump my clipboard contents so I don't lose them
 - https://github.com/Duet3D/RepRapFirmware/issues/190
 - https://github.com/luc-github/Repetier-Firmware-4-Davinci/blob/master/lcd-4x16-bn.pdf
 - https://www.ti.com/lit/ds/symlink/txb0108.pdf
+
+1 UP
+5 ENTER
+3 RIGHT
+4 LEFT
+6 ESCAPE
+2 DOWN

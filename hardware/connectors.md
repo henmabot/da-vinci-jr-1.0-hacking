@@ -18,30 +18,30 @@ To be added
 
 ### Pinout
 
-| Pin | MCU     | Pin Desc   | Verified? | Connects To | Description | Verified? |
-| --- | ------- | ---------- | --------- | ----------- | ----------- | --------- |
-| 01  | +5V     | Power      | ❌        | LCD 5V      | Power       | ✅        |
-| 02  | GND     | Ground     | ❌        | GND         | Ground      | ✅        |
-| 03  | 111     | PC18       | ❌        |             |             | ❌        |
-| 04  | 82      | PC8        | ❌        |             |             | ❌        |
-| 05  | U1_Pin1 | ???        | ❌        |             |             | ❌        |
-| 06  | 11      | PC0        | ❌        |             |             | ❌        |
-| 07  | 38      | PC1        | ❌        |             |             | ❌        |
-| 08  | 39      | PC2        | ❌        |             |             | ❌        |
-| 09  | 40      | PC3        | ❌        |             |             | ❌        |
-| 10  | 41      | PC4        | ❌        |             |             | ❌        |
-| 11  | 58      | PC5        | ❌        |             |             | ❌        |
-| 12  | 54      | PC6        | ❌        |             |             | ❌        |
-| 13  | 48      | PC7        | ❌        |             |             | ❌        |
-| 14  | 90      | PC10       | ❌        |             |             | ❌        |
-| 15  | 34      | VDDCORE    | ❌        |             |             | ❌        |
-| 16  | 32      | PA21/PGMD9 | ❌        |             |             | ❌        |
-| 17  | 31      | PB3        | ❌        |             |             | ❌        |
-| 18  | 28      | PE5        | ❌        |             |             | ❌        |
-| 19  | 27      | PE4        | ❌        |             |             | ❌        |
-| 20  | 25      | PA17/PGMD5 | ❌        |             |             | ❌        |
-| 21  | GND     | Ground     | ❌        |             |             | ❌        |
-| 22  | +5V     | Power      | ❌        |             |             | ❌        |
+| Pin | MCU     | Pin Desc   | Verified? | Connects To | Description   | Verified? |
+| --- | ------- | ---------- | --------- | ----------- | ------------- | --------- |
+| 01  | +5V     | Power      | ❌        | 5V          | 5V power      | ✅        |
+| 02  | GND     | Ground     | ❌        | GND         | Ground        | ✅        |
+| 03  | 111     | PC18       | ❌        | E           | LCD enable    | 🚧        |
+| 04  | 82      | PC8        | ❌        | R/W         | LCD R/W       | 🚧        |
+| 05  | U1_Pin1 | ???        | ❌        | RS          | LCD RS        | 🚧        |
+| 06  | 11      | PC0        | ❌        | D0          |               | 🚧        |
+| 07  | 38      | PC1        | ❌        | D1          |               | 🚧        |
+| 08  | 39      | PC2        | ❌        | D2          |               | 🚧        |
+| 09  | 40      | PC3        | ❌        | D3          |               | 🚧        |
+| 10  | 41      | PC4        | ❌        | D4          |               | 🚧        |
+| 11  | 58      | PC5        | ❌        | D5          |               | 🚧        |
+| 12  | 54      | PC6        | ❌        | D6          |               | 🚧        |
+| 13  | 48      | PC7        | ❌        | D7          |               | 🚧        |
+| 14  | 90      | PC10       | ❌        | LCD         | LCD backlight | 🚧        |
+| 15  | 34      | VDDCORE    | ❌        | ESCAPE      | Home button   | 🚧        |
+| 16  | 32      | PA21/PGMD9 | ❌        | DOWN        | Down button   | 🚧        |
+| 17  | 31      | PB3        | ❌        | LEFT        | Left button   | 🚧        |
+| 18  | 28      | PE5        | ❌        | UP          | Up button     | 🚧        |
+| 19  | 27      | PE4        | ❌        | RIGHT       | Right button  | 🚧        |
+| 20  | 25      | PA17/PGMD5 | ❌        | ENTER       | Enter button  | 🚧        |
+| 21  | GND     | Ground     | ❌        | GND         | Ground        | ✅        |
+| 22  | +5V     | Power      | ❌        | 5V          | 5V Power      | ✅        |
 
 ## 16-pin SD card connector
 

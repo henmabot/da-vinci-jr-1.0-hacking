@@ -54,13 +54,6 @@ Pins start from P1 (on the right of the reader) and go to the left, up to P11.
 | 10  | WP       | Write Protect lock | N/C           | ✅        |
 | 11  | CD       | Card Detect        | 10            | ✅        |
 
-1
-5
-3
-4
-6
-2
-
 ### Photos
 
 | Close up photos | will be added |
