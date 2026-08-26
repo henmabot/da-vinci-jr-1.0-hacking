@@ -4663,7 +4663,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "AT24CS01-SSHM"
+		(property "Value" "AT24C02D"
 			(at 135.1981 60.96 0)
 			(show_name no)
 			(do_not_autoplace no)

@@ -978,7 +978,7 @@
 	)
 	(symbol
 		(lib_id "MCU_NXP_LPC:LPC1115FBD48-303")
-		(at 224.79 73.66 0)
+		(at 219.71 76.2 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -988,8 +988,8 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "4fb8e2e3-9490-4b04-a48b-88d72287f3f6")
-		(property "Reference" "U1"
-			(at 229.4733 34.29 0)
+		(property "Reference" "U17"
+			(at 224.3933 36.83 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -1000,7 +1000,7 @@
 			)
 		)
 		(property "Value" "LPC1115FBD48-303"
-			(at 229.4733 36.83 0)
+			(at 224.3933 39.37 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -1011,7 +1011,7 @@
 			)
 		)
 		(property "Footprint" "Package_QFP:LQFP-48_7x7mm_P0.5mm"
-			(at 247.65 35.56 0)
+			(at 242.57 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -1022,7 +1022,7 @@
 			)
 		)
 		(property "Datasheet" "http://www.nxp.com/docs/en/data-sheet/LPC111X.pdf"
-			(at 273.05 58.42 0)
+			(at 267.97 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -1033,7 +1033,7 @@
 			)
 		)
 		(property "Description" "32-bit ARM Cortex-M0 microcontroller, 64KB flash, 8KB SRAM, power profile"
-			(at 224.79 73.66 0)
+			(at 219.71 76.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -1190,7 +1190,7 @@
 		(instances
 			(project "DaVinciJr1.0"
 				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb/d610c2e8-63cd-4e0f-98e2-bf1a99df609b"
-					(reference "U1")
+					(reference "U17")
 					(unit 1)
 				)
 			)
