@@ -36,6 +36,24 @@ The SD card reader module is used to read full size SD cards and is connected to
 
 It is a generic SD card reader module, so there is no specific datasheet available.
 
+### Pinout
+
+Pins start from P1 (on the right of the reader) and go to the left, up to P11.
+
+| Pin | Function | Description        | Connector Pin | Verified? |
+| --- | -------- | ------------------ | ------------- | --------- |
+| 01  | CD/DAT3  | Chip Select        |               | ❌        |
+| 02  | CMD      | MOSI               |               | ❌        |
+| 03  | VSS1     | Ground             |               | ❌        |
+| 04  | VDD      | Power              |               | ❌        |
+| 05  | CLK      | SCK                |               | ❌        |
+| 06  | VSS2     | Ground             |               | ❌        |
+| 07  | DAT0     | MISO               |               | ❌        |
+| 08  | DAT1     | -                  |               | ❌        |
+| 09  | DAT2     | -                  |               | ❌        |
+| 10  | WP       | Write Protect lock |               | ❌        |
+| 11  | CD       | Card Detect        | 10            | ✅        |
+
 ### Photos
 
 | Close up photos | will be added |
