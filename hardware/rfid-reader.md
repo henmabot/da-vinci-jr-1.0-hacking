@@ -3,6 +3,6 @@
 I haven't dug into the RFID reader as I do not plan to use it.
 More details are available [here](https://youtu.be/cn2mYWmanlk?t=556).
 
-| RFID Reader after removal                       |
-| ----------------------------------------------- |
-| ![Front view (YT)](../images/rfid-reader-1.png) |
+| RFID Reader after removal                                  |
+| ---------------------------------------------------------- |
+| ![Front view (YT)](../images/components/rfid-reader-1.png) |

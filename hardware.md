@@ -2,9 +2,9 @@
 
 To start off, there are 3 boards in the Davinci Jr. 1.0:
 
-- Main board
-- LCD, buttons and SD card board (I will refer to this as the sub-board)
-- Hotend board (I will refer to this as the hotend/hotend board)
+- [Main Board](hardware/board-main.md)
+- [Sub-Board](hardware/board-sub.md)
+- [Hotend-Board](hardware/board-hotend.md)
 
 ## Main Board
 

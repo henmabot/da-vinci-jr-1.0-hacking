@@ -38,15 +38,15 @@ It has:
 
 Refer to the [Atmel SAM4E Datasheet](../SOURCES.md#datasheet-atmel-sam4e8e) for more information.
 
-### Pinouts
+### Pinout
 
-It can be found here: [sam4e8e-lqfp-layout.md](./sam4e8e-lqfp-layout.md)
+It can be found here: [sam4e8e-lqfp-layout.md](sam4e8e-lqfp-layout.md)
 
 ### Photos
 
-| 144 Pin LQFP package SAM4E8E chip from top-view. First pin starts on the left of the bottom side, and goes counterclockwise. | Datasheet diagram (no pin numbers).                     |
-| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| ![Top view](../images/ATSAM4E8E.jpeg)                                                                                        | ![Datasheet diagram](../images/ATSAM4E8E-datasheet.png) |
+| 144 Pin LQFP package SAM4E8E chip from top-view. First pin starts on the left of the bottom side, and goes counterclockwise. | Datasheet diagram (no pin numbers).                           |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| ![Top view](../images/chips/ATSAM4E8E.jpeg)                                                                                  | ![Datasheet diagram](../images/chips/ATSAM4E8E-datasheet.png) |
 
 ## NXP LPC1115 MCU
 
@@ -63,11 +63,15 @@ It has:
 
 Refer to the [NXP LPC111x Datasheet](../SOURCES.md#datasheet-nxp-lpc111x) for more information.
 
+### Pinout
+
+It can be found here: [lpc1115-lqfp-layout.md](lpc1115-lqfp-layout.md)
+
 ### Photos
 
 | 48 Pin LQFP package LPC1115 chip from top-view. First pin starts on the left of the bottom side, and goes counterclockwise. | Datasheet diagram with the first pin on top of the left side. |
 | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| ![Top view](../images/LPC1115.jpg)                                                                                          | ![Datasheet diagram](../images/LPC1115-datasheet.png)         |
+| ![Top view](../images/chips/LPC1115.jpg)                                                                                    | ![Datasheet diagram](../images/chips/LPC1115-datasheet.png)   |
 
 ## Toshiba TB62269FTG Driver
 
@@ -75,11 +79,15 @@ A two-phase bipolar stepping motor driver using a PWM chopper. It can run on **f
 
 Refer to the [Toshiba TB62269FTG Datasheet](../SOURCES.md#datasheet-toshiba-tb62269ftg) for more information.
 
+### Pinout
+
+It can be found here: [tb62269ftg-lqfp-pinout.md](tb62269ftg-lqfp-pinout.md)
+
 ### Photos
 
 | 48 Pin WQFN package TB62269FTG chip from top-view. First pin starts on the left of the bottom side, and goes counterclockwise. | Datasheet diagram with the first pin on the left of the bottom side. |
 | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| ![Top view](../images/TB62269FTG.jpeg)                                                                                         | ![Datasheet diagram](../images/TB62269FTG-datasheet.png)             |
+| ![Top view](../images/chips/TB62269FTG.jpeg)                                                                                   | ![Datasheet diagram](../images/chips/TB62269FTG-datasheet.png)       |
 
 ## Macronix MX25L3206E Flash Memory
 
@@ -91,8 +99,39 @@ It has:
 
 Refer to the [Macronix MX25L3206E Datasheet](../SOURCES.md#datasheet-macronix-mx25l3206e) for more information.
 
+### Pinout
+
+| Pin | Name    | Description               | MCU  | Verified? |
+| --- | ------- | ------------------------- | ---- | --------- |
+| 01  | CS#     | Chip Select               |      | ❌        |
+| 02  | SI/SIO0 | Serial Data Input         |      | ❌        |
+| 03  | SO/SIO1 | Serial Data Output        |      | ❌        |
+| 04  | SCLK    | Clock Input               |      | ❌        |
+| 05  | WP#     | Write protection          |      | ❌        |
+| 06  | HOLD#   | Hold, to pause the device |      | ❌        |
+| 07  | VCC     | + 3.3V Power Supply       | 3.3V | ❌        |
+| 08  | GND     | Ground                    | GND  | ❌        |
+
 ### Photos
 
-| 8 Pin SOP package MX25L3206E chip from top-view. First pin starts on top of the left side, and goes counterclockwise. | Datasheet diagram with the first pin on top of the left side. |
-| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| ![Top view](../images/MX25L3206E.jpeg)                                                                                | ![Datasheet diagram](../images/MX25L3206E-datasheet.png)      |
+| 8 Pin SOP package MX25L3206E chip from top-view. First pin starts on top of the left side, and goes counterclockwise. | Datasheet diagram with the first pin on top of the left side.  |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| ![Top view](../images/chips/MX25L3206E.jpeg)                                                                          | ![Datasheet diagram](../images/chips/MX25L3206E-datasheet.png) |
+
+## AC-1203D RP1 Buzzer
+
+Despite not being a critical component, it was fitting to put it here.
+
+Refer to the [AATC AC-1203D RP1 Datasheet](https://aatc.tw/mouser_2025/AC-1203D-RP1.pdf) for more information.
+
+### Pinout
+
+| Pin | Name | Description | MCU | Verified? |
+| --- | ---- | ----------- | --- | --------- |
+| 01  |      |             |     | ❌        |
+
+### Photos
+
+| Top view of the buzzer                             |
+| -------------------------------------------------- |
+| ![Top view](../images/components/AC-1203D-RP1.jpg) |

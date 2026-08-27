@@ -39,4 +39,4 @@
 | 35  | PA7/PGMNVALID | 71  | PD28        | 107 | VDDCORE     | 143 | VDDIO      |
 | 36  | PA8/PGMM0     | 72  | VDDIO       | 108 | PD29        | 144 | PB13       |
 
-- Source: [Atmel SAM4E Datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/ProductDocuments/DataSheets/Atmel-11157-32-bit-Cortex-M4-Microcontroller-SAM4E16-SAM4E8_Datasheet.pdf)
+- Source: [Atmel SAM4E Datasheet](../SOURCES.md#datasheet-atmel-sam4e8e)

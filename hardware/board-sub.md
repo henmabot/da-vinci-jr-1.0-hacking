@@ -14,7 +14,7 @@ The board is **62mm to 185mm** in size.
 - **1x** Generic SD card reader module
 - **6x** Generic 6mm push buttons
 
-There are some more chips that i didnt see as important, as they are passive or hardware driven.
+There are some more chips that i didnt see as important, as they are passive or hardware driven. More information about these can be found in the [schematic](../schematic.md).
 
 More information about the connectors on-board can be found in the [connectors](connectors.md) section.
 
@@ -24,15 +24,44 @@ The Winstar WH1604A 16x04 LCD module is a character LCD display that is used to 
 
 Refer to the [Winstar WH1604A 16x04 LCD Module Datasheet](../SOURCES.md#datasheet-winstar-wh1604a) for more information.
 
+### Pinout
+
+The connector mentioned here is the 22 pin connector.
+
+| Pin | Name | Description                  | Connector Pin | Verified? |
+| --- | ---- | ---------------------------- | ------------- | --------- |
+| 01  | VSS  | Ground                       | GND           | ✅        |
+| 02  | VDD  | Supply Voltage for logic     | 5V            | ✅        |
+| 03  | VO   | Operating voltage            | -             | ✅        |
+| 04  | RS   | H: DATA, L: Instruction code | 05            | ✅        |
+| 05  | R/W  | H: Read L: Write             | 04            | ✅        |
+| 06  | E    | Chip enable signal           | 03            | ✅        |
+| 07  | DB0  | Data bus line                | 06            | ✅        |
+| 08  | DB1  | Data bus line                | 07            | ✅        |
+| 09  | DB2  | Data bus line                | 08            | ✅        |
+| 10  | DB3  | Data bus line                | 09            | ✅        |
+| 11  | DB4  | Data bus line                | 10            | ✅        |
+| 12  | DB5  | Data bus line                | 11            | ✅        |
+| 13  | DB6  | Data bus line                | 12            | ✅        |
+| 14  | DB7  | Data bus line                | 13            | ✅        |
+| 15  | A    | Backlight +                  | 5V            | ✅        |
+| 16  | K    | Backlight -                  | 14            | ✅        |
+
 ### Photos
 
-| Close up photos | will be added |
-| --------------- | ------------- |
-|                 |               |
+| Front view                                               | Back view                                              |
+| -------------------------------------------------------- | ------------------------------------------------------ |
+| ![Front view](../images/components/lcd-module-front.jpg) | ![Back view](../images/components/lcd-module-back.jpg) |
 
 ## SD Card Reader Module
 
 The SD card reader module is used to read full size SD cards and is connected to the main board via a 16 pin connector labeled "SD CARD SLOT CONNECTOR".
+
+The WP and CD pins are grounded when they are triggered, like:
+
+- No card inserted: CD is grounded
+- Card inserted but write-protected: WP is grounded
+- Card inserted and not write-protected: Both are floating/non-grounded
 
 It is a generic SD card reader module, so there is no specific datasheet available.
 
@@ -40,34 +69,51 @@ It is a generic SD card reader module, so there is no specific datasheet availab
 
 Pins start from P1 (on the right of the reader) and go to the left, up to P11.
 
-| Pin | Function | Description        | Connector Pin | Verified? |
-| --- | -------- | ------------------ | ------------- | --------- |
-| 01  | DAT2     | -                  | 16            | ✅        |
-| 02  | CS/DAT3  | Chip Select        | 14            | ✅        |
-| 03  | CMD      | MOSI/Data in       | 12            | ✅        |
-| 04  | VSS1     | Ground             | GND           | ✅        |
-| 05  | VDD      | Power              | 09            | ✅        |
-| 06  | CLK      | SCK                | 07            | ✅        |
-| 07  | VSS2     | Ground             | GND           | ✅        |
-| 08  | DAT0     | MISO               | 05            | ✅        |
-| 09  | DAT1     | -                  | 03            | ✅        |
-| 10  | WP       | Write Protect lock | N/C           | ✅        |
-| 11  | CD       | Card Detect        | 10            | ✅        |
+The connector mentioned here is the 16 pin connector.
+
+| Pin | Name    | Description        | Connector Pin | Verified? |
+| --- | ------- | ------------------ | ------------- | --------- |
+| 01  | DAT2    | -                  | 16            | ✅        |
+| 02  | CS/DAT3 | Chip Select        | 14            | ✅        |
+| 03  | CMD     | MOSI/Data in       | 12            | ✅        |
+| 04  | VSS1    | Ground             | GND           | ✅        |
+| 05  | VDD     | Power              | 09            | ✅        |
+| 06  | CLK     | SCK                | 07            | ✅        |
+| 07  | VSS2    | Ground             | GND           | ✅        |
+| 08  | DAT0    | MISO               | 05            | ✅        |
+| 09  | DAT1    | -                  | 03            | ✅        |
+| 10  | WP      | Write Protect lock | N/C           | ✅        |
+| 11  | CD      | Card Detect        | 10            | ✅        |
 
 ### Photos
 
-| Close up photos | will be added |
-| --------------- | ------------- |
-|                 |               |
+| Top view of the SD card reader                       |
+| ---------------------------------------------------- |
+| ![Top view](../images/components/sd-card-reader.jpg) |
 
 ## Push Buttons
 
 The push buttons are used to control the sub-board and are connected to the main board via one of the existing connectors.
 
+They are pulled up to 5V and grounded when pressed.
+
 I doubt a datasheet for a button would be useful even.
+
+### Pinout
+
+The connector mentioned here is the 22 pin connector.
+
+| Button | Name   | Description  | Connector Pin | Verified? |
+| ------ | ------ | ------------ | ------------- | --------- |
+| SW1    | UP     | Up button    | 18            | ✅        |
+| SW2    | DOWN   | Down button  | 16            | ✅        |
+| SW3    | RIGHT  | Right button | 19            | ✅        |
+| SW4    | LEFT   | Left button  | 17            | ✅        |
+| SW5    | ENTER  | Enter button | 20            | ✅        |
+| SW6    | ESCAPE | Home button  | 15            | ✅        |
 
 ### Photos
 
-| Close up photos | will be added |
-| --------------- | ------------- |
-|                 |               |
+| Top view of the push buttons                       |
+| -------------------------------------------------- |
+| ![Top view](../images/components/push-buttons.jpg) |
