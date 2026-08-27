@@ -8,6 +8,6 @@ There are 4 steppers, 3 endstops, 1 filament sensor on the extruder motor, and a
 
 - [Stepper Motors](stepper-motors.md)
 - [Sensors](sensors.md)
-- RFID reader
+- [RFID reader](rfid-reader.md)
 - Top light bar
 - Reflow fan
