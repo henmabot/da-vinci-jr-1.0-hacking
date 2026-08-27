@@ -40,7 +40,7 @@ Refer to the [Atmel SAM4E Datasheet](../SOURCES.md#datasheet-atmel-sam4e8e) for 
 
 ### Pinout
 
-It can be found here: [sam4e8e-layout.md](pinouts/sam4e8e-layout.md)
+It can be found here: [sam4e8e-pinout.md](pinouts/sam4e8e-pinout.md)
 
 ### Photos
 
@@ -65,7 +65,7 @@ Refer to the [NXP LPC111x Datasheet](../SOURCES.md#datasheet-nxp-lpc111x) for mo
 
 ### Pinout
 
-It can be found here: [lpc1115-layout.md](pinouts/lpc1115-layout.md)
+It can be found here: [lpc1115-pinout.md](pinouts/lpc1115-pinout.md)
 
 ### Photos
 
