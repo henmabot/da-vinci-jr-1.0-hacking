@@ -4,6 +4,10 @@ The built-in firmware is fragmented across multiple chips (not exactly fragmente
 
 Guides on dumping the chips can be found in the [dumping section](firmware/dumping.md).
 
+**WARNING**: Erasing the firmware of the main MCU will make the hotend heat uncontrolled! It is strongly advised to unplug everything from the board before erasing its firmware.
+
+I will create a flashing section for per-chip guide on flashing them, after finishing the dumping section. Until then, you can use the flashing tool mentioned in the [dumping section](firmware/dumping-sam4e8e.md).
+
 I separated this section as:
 
 - Official Firmware

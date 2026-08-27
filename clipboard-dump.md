@@ -3,20 +3,9 @@
 The place where I dump my clipboard contents so I don't lose them
 
 - https://www.soliforum.com/post/135347/#p135347
-- https://aatc.tw/mouser_2025/AC-1203D-RP.pdf
-- https://aatc.tw/mouser_2025/AC-1203D-RP1.pdf
-- https://www.ersaelectronics.com/p/aatc-ac-1203d-rp1-31114658
-- https://eu.mouser.com/en/ProductDetail/AATC/AC-1203D-RP?qs=uwxL4vQweFMooDydq50GYg%3D%3D
 - https://docs.google.com/spreadsheets/d/1Fykc7o-pBj2Sig6lX_1IpMJtMFil4skVm5eA9VKKM8U/edit?usp=drivesdk
 - https://github.com/dc42/RepRapFirmware/files/2174102/DaVinciJr_Research.Schematic.1.pdf
 - https://www.soliforum.com/post/138269/#p138269
 - https://github.com/Duet3D/RepRapFirmware/issues/190
 - https://github.com/luc-github/Repetier-Firmware-4-Davinci/blob/master/lcd-4x16-bn.pdf
 - https://www.ti.com/lit/ds/symlink/txb0108.pdf
-
-1 UP
-5 ENTER
-3 RIGHT
-4 LEFT
-6 ESCAPE
-2 DOWN

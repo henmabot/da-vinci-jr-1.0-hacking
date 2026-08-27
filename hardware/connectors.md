@@ -3,10 +3,21 @@
 There are 3 main data connectors on the Da Vinci Jr 1.0 board.
 
 - 22-pin LCD connector
-- 16-pin SD card connector
-- 51-pin hotend connector
+- 16-pin SD Card connector
+- 51-pin Hotend connector
 
 There are of course a lot more connectors on board, but these are the main ones needing identification.
+
+## 51-pin Hotend connector
+
+The 51-pin Hotend connector connects the main board with the hotend. Its mostly power wires, and a few data wires.
+
+### Photos
+
+| Main board connector                                                              | Sub-board connector                                            |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| ![Main board with text visible](../images/connectors/connector-51-pin-main-1.png) | ![Sub-board](../images/connectors/connector-51-pin-hotend.png) |
+| ![Main board without text](../images/connectors/connector-51-pin-main-2.png)      |                                                                |
 
 ## 22-pin LCD connector
 
@@ -14,7 +25,9 @@ The 22-pin LCD connector connects the main board with the sub-board, and carries
 
 ### Photos
 
-To be added
+| Main board connector                                          | Sub-board connector                                         |
+| ------------------------------------------------------------- | ----------------------------------------------------------- |
+| ![Main board](../images/connectors/connector-22-pin-main.png) | ![Sub-board](../images/connectors/connector-22-pin-sub.png) |
 
 ### Pinout
 
@@ -43,13 +56,15 @@ To be added
 | 21  | GND     | Ground     | ❌        | GND         | Ground        | ✅        |
 | 22  | +5V     | Power      | ❌        | 5V          | 5V Power      | ✅        |
 
-## 16-pin SD card connector
+## 16-pin SD Card connector
 
 The 16-pin LCD connector connects the main board with the sub-board, and carries the SD card data.
 
 ### Photos
 
-To be added
+| Main board connector                                          | Sub-board connector                                         |
+| ------------------------------------------------------------- | ----------------------------------------------------------- |
+| ![Main board](../images/connectors/connector-16-pin-main.png) | ![Sub-board](../images/connectors/connector-16-pin-sub.png) |
 
 ### Pinout
 
