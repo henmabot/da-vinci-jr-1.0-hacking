@@ -1,16 +1,16 @@
-## SAM4E 144-lead LQFP Pinout
+# SAM4E 144-lead LQFP Pinout
 
-| MCU | Pin Desc      | MCU | Pin Desc    | MCU | Pin Desc    | MCU | Pin Desc   |
+| Pin | Pin Desc      | Pin | Pin Desc    | Pin | Pin Desc    | Pin | Pin Desc   |
 | --- | ------------- | --- | ----------- | --- | ----------- | --- | ---------- |
-| 1   | PD0           | 37  | PA22/PGMD10 | 73  | PA5/PGMRDY  | 109 | PB5        |
-| 2   | PD31          | 38  | PC1         | 74  | PD17        | 110 | PD9        |
-| 3   | VDDOUT        | 39  | PC2         | 75  | PA9/PGMM1   | 111 | PC18       |
-| 4   | PE0           | 40  | PC3         | 76  | PC28        | 112 | PA28       |
-| 5   | VDDIN         | 41  | PC4         | 77  | PA4/PGMNCMD | 113 | PD8        |
-| 6   | PE1           | 42  | PA13/PGMD1  | 78  | PD16        | 114 | PA6/PGMNOE |
-| 7   | PE2           | 43  | VDDIO       | 79  | PB6         | 115 | GND        |
-| 8   | GND           | 44  | GND         | 80  | VDDIO       | 116 | PA30       |
-| 9   | ADVREFP       | 45  | PA16/PGMD4  | 81  | VDDCORE     | 117 | PC19       |
+| 01  | PD0           | 37  | PA22/PGMD10 | 73  | PA5/PGMRDY  | 109 | PB5        |
+| 02  | PD31          | 38  | PC1         | 74  | PD17        | 110 | PD9        |
+| 03  | VDDOUT        | 39  | PC2         | 75  | PA9/PGMM1   | 111 | PC18       |
+| 04  | PE0           | 40  | PC3         | 76  | PC28        | 112 | PA28       |
+| 05  | VDDIN         | 41  | PC4         | 77  | PA4/PGMNCMD | 113 | PD8        |
+| 06  | PE1           | 42  | PA13/PGMD1  | 78  | PD16        | 114 | PA6/PGMNOE |
+| 07  | PE2           | 43  | VDDIO       | 79  | PB6         | 115 | GND        |
+| 08  | GND           | 44  | GND         | 80  | VDDIO       | 116 | PA30       |
+| 09  | ADVREFP       | 45  | PA16/PGMD4  | 81  | VDDCORE     | 117 | PC19       |
 | 10  | PE3           | 46  | PA23/PGMD11 | 82  | PC8         | 118 | PA31       |
 | 11  | PC0           | 47  | PD27        | 83  | NRST        | 119 | PD7        |
 | 12  | PC27          | 48  | PC7         | 84  | PD14        | 120 | PC20       |
@@ -39,4 +39,4 @@
 | 35  | PA7/PGMNVALID | 71  | PD28        | 107 | VDDCORE     | 143 | VDDIO      |
 | 36  | PA8/PGMM0     | 72  | VDDIO       | 108 | PD29        | 144 | PB13       |
 
-- Source: [Atmel SAM4E Datasheet](../SOURCES.md#datasheet-atmel-sam4e8e)
+- Source: [Atmel SAM4E Datasheet](../../SOURCES.md#datasheet-atmel-sam4e8e)

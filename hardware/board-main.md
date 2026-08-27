@@ -81,7 +81,7 @@ Refer to the [Toshiba TB62269FTG Datasheet](../SOURCES.md#datasheet-toshiba-tb62
 
 ### Pinout
 
-It can be found here: [tb62269ftg-lqfp-pinout.md](tb62269ftg-lqfp-pinout.md)
+It can be found here: [tb62269ftg-pinout.md](tb62269ftg-pinout.md)
 
 ### Photos
 
