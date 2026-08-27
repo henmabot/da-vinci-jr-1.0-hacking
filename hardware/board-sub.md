@@ -2,9 +2,10 @@
 
 The sub-board is the board for the interactivity of the printer. It has **6 push buttons, a 16x4 LCD display, and a full-size SD card slot**. It also has a **16 pin connector** labeled "SD CARD SLOT CONNECTOR", and a **22 pin connector** labeled "LCM SLOT CONNECTOR". It has no visible MCU's, only some power related chips and components. It also has no visible unpopulated headers, connectors and chip sockets.
 
-| Front view of the board                         | Back view of the board                        |
-| ----------------------------------------------- | --------------------------------------------- |
-| ![Front view](../images/hd/sub-board-front.jpg) | ![Back view](../images/hd/sub-board-back.jpg) |
+| Front view of the board                                               | Back view of the board                        |
+| --------------------------------------------------------------------- | --------------------------------------------- |
+| ![Front view](../images/hd/sub-board-front.jpg)                       | ![Back view](../images/hd/sub-board-back.jpg) |
+| ![Front desoldered view](../images/hd/sub-board-front-desoldered.jpg) |                                               |
 
 The board is **62mm to 185mm** in size.
 

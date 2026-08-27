@@ -20,7 +20,7 @@ I try to add source links whenever possible.
 
 ## More Information
 
-More information can be found in the[hardware](hardware.md) and [firmware](firmware.md) sections.
+More information can be found in the [hardware](hardware.md) and [firmware](firmware.md) sections.
 
 In case of doubts, refer to the KiCAD schematics for pinout information. All the pinouts in the schematics are verified, while some of the docs might be outdated or have typos.
 
