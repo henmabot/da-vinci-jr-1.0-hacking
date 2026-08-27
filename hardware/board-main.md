@@ -40,7 +40,7 @@ Refer to the [Atmel SAM4E Datasheet](../SOURCES.md#datasheet-atmel-sam4e8e) for 
 
 ### Pinout
 
-It can be found here: [sam4e8e-lqfp-layout.md](sam4e8e-lqfp-layout.md)
+It can be found here: [sam4e8e-layout.md](pinouts/sam4e8e-layout.md)
 
 ### Photos
 
@@ -55,8 +55,8 @@ A 32-bit ARM Cortex-M0 MCU with Thumb instruction set. It can run at up to 50 MH
 It has:
 
 - **64KB of Flash**
-- **128 Kbytes of SRAM**
-- **16 Kbytes of ROM** with embedded boot loader (UART) and IAP routines
+- **8KB of SRAM**
+- **16KB of ROM** with embedded boot loader (UART) and IAP routines
 - **Up to 42 GPIO pins** available
 - **10-bit ADC**, no confirmed DAC
 -
@@ -65,7 +65,7 @@ Refer to the [NXP LPC111x Datasheet](../SOURCES.md#datasheet-nxp-lpc111x) for mo
 
 ### Pinout
 
-It can be found here: [lpc1115-lqfp-layout.md](lpc1115-lqfp-layout.md)
+It can be found here: [lpc1115-layout.md](pinouts/lpc1115-layout.md)
 
 ### Photos
 
@@ -81,7 +81,7 @@ Refer to the [Toshiba TB62269FTG Datasheet](../SOURCES.md#datasheet-toshiba-tb62
 
 ### Pinout
 
-It can be found here: [tb62269ftg-pinout.md](tb62269ftg-pinout.md)
+It can be found here: [tb62269ftg-pinout.md](pinouts/tb62269ftg-pinout.md)
 
 ### Photos
 
