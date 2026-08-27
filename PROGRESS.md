@@ -26,3 +26,7 @@ I have finished tracing the sub board and drawing the KiCAD schematic. I am tire
 I drew the hotend board and almost finished it, and started working on the main board drawings. At the same time im also cleaning up the repo structure. Its too lonely working like this but somehow i dont feel it
 
 Tomorrow i will continue on working on the secondary MCU and its dumped firmware.
+
+**Update 27.08.2026 14:30 GMT+3:**
+
+I will proceed by decompiling the secondary mcu firmware.
