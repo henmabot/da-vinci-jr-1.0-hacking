@@ -1,5 +1,44 @@
-# Davinci Jr. 1.0 Firmware
+# Da Vinci Jr. 1.0 Firmware
 
 The built-in firmware is fragmented across multiple chips (not exactly fragmented, but all the parts need to exist to be fully functional), and so dumping the firmware is **strongly recommended** if you plan to work on the printer.
 
 Guides on dumping the chips can be found in the [dumping section](firmware/dumping.md).
+
+I separated this section as:
+
+- Official Firmware
+- Demo Firmware
+- Unofficial Firmware
+
+Official firmware is the one the printer ships with. Demo are ones that I write for testing, like for testing a single motor or a sensor. Unofficial ones are Klipper, RepRapFirmware, Marlin, etc.
+
+## Official Firmware
+
+I am working on reading the decompiled official firmware for the SAM4E8E, and decompiling the LPC1115 dumps. I don't have enough to document yet, but I will update this section as I progress.
+
+## Demo Firmware
+
+I have successfully built and flashed multiple demo firmwares for the SAM4E8E. It is fairly easy to flash it, but building/writing code for it is torturing.
+
+If you are interested in writing or building a demo firmware, let me warn you: **Do NOT use MPLAB X/IDE**. Despite Atmel advertising it as supporting SAM4E series, SAM4E support is deprecated.
+
+Instead, you can use:
+
+- [Atmel/Microchip Studio](https://www.microchip.com/en-us/tools-resources/develop/microchip-studio) if you want a full and easier IDE experience. Windows only, and I couldn't get it to run under Wine due to Visual Studio Shell requirements.
+- [Atmel Software Framework](https://github.com/avrxml/asf) if you want to use a more barebones approach. You need to write your own Makefile etc for this. I just asked Claude to scrap some things together, but its too ugly to commit, and I might commit it only when I have a better understanding of the toolchain and when I rewrite it myself.
+- A plan for the future here, but I am planning on gutting Klipper and adding custom commands so I can use it similarly to Firmata.
+
+## Unofficial Firmware
+
+There are several firmware options available for the Da Vinci Jr. 1.0 printer, and these are the ones that I am actively targeting:
+
+- [Klipper](https://www.klipper3d.org/)
+- [RepRapFirmware](https://www.reprapfirmware.org/)
+
+### Klipper
+
+I have built Klipper for the main MCU and flashed it successfully, and got the host communication working. I haven't tried building a config yet, since I want to get the full pinout first.
+
+### RepRapFirmware
+
+I have no work on this yet, but it should be straightforward to build RepRapFirmware for the main MCU since it natively supports the SAM4E8E. We still need the pinout though.

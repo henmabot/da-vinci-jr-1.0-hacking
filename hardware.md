@@ -1,4 +1,4 @@
-# Davinci Jr. 1.0 Hardware
+# Da Vinci Jr. 1.0 Hardware
 
 To start off, there are 3 boards in the Davinci Jr. 1.0:
 
