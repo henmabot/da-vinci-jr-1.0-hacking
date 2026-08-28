@@ -142,6 +142,8 @@ Here, i got 'e7fee7fe' as the CRP level, which is not a valid CRP level. This me
 > I have absolutely no idea. You can try erasing the magic bytes since the firmware still allows erasing/writing in CRP1, but it doesnt use SWD. If you have CRP2, you have no way other than full erase (i think). If you have CRP3, just throw that chip in the bin and move on as that is the best you can do to preserve your sanity.
 >
 > Jokes aside, you should still be able to bypass the chip and directly solder the heater pins etc to the main MCU and ignore the LPC chip completely.
+>
+> I have also found [this video](https://www.youtube.com/watch?v=98eqp4WmHoQ), which I havent checked yet but might be helpful.
 
 ## Dumping the Firmware
 

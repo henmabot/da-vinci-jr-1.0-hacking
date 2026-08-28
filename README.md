@@ -12,11 +12,11 @@ I try to add source links whenever possible.
 
 ## Status
 
-| Task Name  | Description                             | Status                     | Main Board | Sub Board | Hotend Board |
-| ---------- | --------------------------------------- | -------------------------- | ---------- | --------- | ------------ |
-| Pinouts    | Trace all of the pinouts of the printer | 70%                        | 30%        | 100%      | 80%          |
-| Schematics | Draw the schematics of the printer      | 65%                        | 20%        | 100%      | 75%          |
-| Klipper    | Build Klipper for the printer           | [40%](firmware.md#klipper) | -          | -         | -            |
+| Task Name  | Description                             | Status | Main Board | Sub Board | Hotend Board |
+| ---------- | --------------------------------------- | ------ | ---------- | --------- | ------------ |
+| Pinouts    | Trace all of the pinouts of the printer | 70%    | 30%        | 100%      | 80%          |
+| Schematics | Draw the schematics of the printer      | 65%    | 20%        | 100%      | 75%          |
+| Klipper    | Build Klipper for the printer           | 40%    | -          | -         | -            |
 
 ## More Information
 
