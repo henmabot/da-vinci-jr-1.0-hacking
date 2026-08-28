@@ -30,3 +30,7 @@ Tomorrow i will continue on working on the secondary MCU and its dumped firmware
 **Update 27.08.2026 14:30 GMT+3:**
 
 I will proceed by decompiling the secondary mcu firmware.
+
+**Update 28.08.2026 18:54 GMT+3:**
+
+I decompiled the secondary mcu firmware, but im realizing i first need to have some idea on which pins might be for what functions.

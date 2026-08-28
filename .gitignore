@@ -1,13 +1,24 @@
-conf/
+# Language server
 .cache/
-firmware_disasm*
-build/
+compile_commands.json
+
+
+# Firmware Demos
+conf/
 asf/
+asf-full/
 src/
 vendor/
-compile_commands.json
 Makefile
 Justfile
-fw/
-lpc1115-dumps/
+build/
+
+# Klipper
 klipper/
+
+# Dumps and decompiled firmware
+fw/
+ghidra/
+
+# DFP files
+*_DFP.*
