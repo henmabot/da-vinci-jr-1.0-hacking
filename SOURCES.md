@@ -25,5 +25,13 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 - <a name="datasheet-toshiba-tb62269ftg"></a> **[Toshiba TB62269FTG Datasheet](https://toshiba.semicon-storage.com/info/TB62269FTG_datasheet_en_20140318.pdf?did=14719&prodName=TB62269FTG)**
 - <a name="datasheet-macronix-mx25l3206e"></a> **[Macronix MX25L3206E Datasheet](https://www.mxic.com.tw/Lists/Datasheet/Attachments/8616/MX25L3206E,%203V,%2032Mb,%20v1.5.pdf)**
 - <a name="datasheet-winstar-wh1604a"></a> **[Winstar WH1604A 16x04 LCD Module Datasheet](https://www.winstar.com.tw/uploads/files/a1a569d2ea5185895d028815d76787c9.pdf)**
+
+## Extras
+
 - <a name="datasheet-nxp-an10968"></a> **[NXP Application Note AN10968](https://www.nxp.com/docs/en/application-note/AN10968.pdf)**
 - <a name="datasheet-nxp-um10398"></a> **[NXP User Manual UM10398](https://www.usr.cn/Uploads/Attach/201010/user.manual.lpc11xx.lpc11cxx.pdf)** (3. party link due to NXP having the link behind a login, the original can be found here: [NXP UM10398](https://www.nxp.com/webapp/Download?colCode=UM10398&location=null))
+
+## Firmware Archives
+
+- <a name="archive-archiveorg"></a> **[Da Vinci Jr. Firmware Archive (Archive.org)](https://archive.org/details/da-vinci-jr-firmware)**
+- <a name="archive-hidrive"></a> **[XYZ Firmware Archive by modfreakz (HiDrive)](https://my.hidrive.com/share/j8ee51tz13#$/)**

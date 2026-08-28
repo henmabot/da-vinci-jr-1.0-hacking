@@ -15,6 +15,8 @@ There are 4 chips that we can dump the firmware of:
 
 Dumping before doing anything is very strongly suggested, since this is a very experimental project and any mistakes can be very difficult to recover from. Having a working dump for each chip is essential for debugging and recovery.
 
+**An archive of official firmware dumps can be found [here](sources.md#archive-archiveorg).**
+
 ## Decompiling the Firmware
 
 You can use [Ghidra](https://github.com/nationalsecurityagency/ghidra) to decompile the official firmware.
