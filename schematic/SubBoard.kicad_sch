@@ -3365,6 +3365,178 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "Push_Button_1"
+			(pin_names
+				(offset 0)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "SW5"
+				(at 0 8.89 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "Rocker"
+				(at 0 6.35 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 -7.62 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Switch, single pole double throw"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "switch single-pole double-throw spdt ON-ON"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "Push_Button_1_0_1"
+				(circle
+					(center -2.032 0)
+					(radius 0.4572)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy -1.651 0.254) (xy 1.651 2.286)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(circle
+					(center 2.032 2.54)
+					(radius 0.4572)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(circle
+					(center 2.032 -2.54)
+					(radius 0.4572)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "Push_Button_1_1_1"
+				(rectangle
+					(start -3.175 3.81)
+					(end 3.175 -3.81)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type background)
+					)
+				)
+				(pin passive line
+					(at -5.08 0 0)
+					(length 2.54)
+					(name "A"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 5.08 -2.54 180)
+					(length 2.54)
+					(name "B"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "Transistor_BJT:2SC4213"
 			(pin_names
 				(offset 0)
@@ -10746,6 +10918,7 @@
 		)
 	)
 	(symbol
+		(lib_name "Push_Button_1")
 		(lib_id "PCM_SL_Devices:Push_Button")
 		(at 252.73 72.39 0)
 		(unit 1)
@@ -10758,7 +10931,7 @@
 		(fields_autoplaced yes)
 		(uuid "fcdc8c19-4f19-48e9-b46b-86224f200547")
 		(property "Reference" "SW5"
-			(at 252.73 64.77 0)
+			(at 252.73 63.5 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10767,8 +10940,8 @@
 				)
 			)
 		)
-		(property "Value" "ENTER"
-			(at 252.73 67.31 0)
+		(property "Value" "Rocker"
+			(at 252.73 66.04 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10777,18 +10950,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Button_Switch_THT:SW_PUSH_6mm"
-			(at 252.603 75.565 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
+		(property "Footprint" ""
 			(at 252.73 72.39 0)
 			(hide yes)
 			(show_name no)
@@ -10799,7 +10961,18 @@
 				)
 			)
 		)
-		(property "Description" "Common 6mmx6mm Push Button"
+		(property "Datasheet" ""
+			(at 252.73 80.01 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Switch, single pole double throw"
 			(at 252.73 72.39 0)
 			(hide yes)
 			(show_name no)
@@ -10819,6 +10992,10 @@
 		(instances
 			(project "DaVinciJr1.0"
 				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb/b418c2e6-1ad3-4591-9cff-9544514ed08e"
+					(reference "SW5")
+					(unit 1)
+				)
+				(path "/1e12c736-bef9-40e8-b505-1000ff77a2bb/d610c2e8-63cd-4e0f-98e2-bf1a99df609b"
 					(reference "SW5")
 					(unit 1)
 				)
