@@ -21,14 +21,14 @@ The board has a 6 pin connector going to the main board, and a 2 pin antenna con
 
 From what i know so far, it probably connects to the secondary MCU.
 
-| Pin | Description | MCU | Pin Desc | Verified? |
-| --- | ----------- | --- | -------- | --------- |
-| 01  |             |     |          | ❌        |
-| 02  |             |     |          | ❌        |
-| 03  |             |     |          | ❌        |
-| 04  |             |     |          | ❌        |
-| 05  |             |     |          | ❌        |
-| 06  |             |     |          | ❌        |
+| Pin | Name   | Description | MCU | Pin Desc | Verified? |
+| --- | ------ | ----------- | --- | -------- | --------- |
+| 01  | VIN    | Power input |     |          | ❌        |
+| 02  | GND    | Ground      |     |          | ✅        |
+| 03  | NRSTPD |             |     |          | ❌        |
+| 04  | ALE    |             |     |          | ❌        |
+| 05  | IRQ    |             |     |          | ❌        |
+| 06  | D7     |             |     |          | ❌        |
 
 ## PN512 NFC Chip
 
@@ -43,3 +43,11 @@ It can be found in the [datasheet](../SOURCES.md#datasheet-nxp-pn512).
 | 32 Pin HVQFN package PN512 chip from top-view. First pin starts on the top of the left side, and goes counterclockwise | Datasheet diagram                                         |
 | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | ![Top view](../images/chips/PN512.jpg)                                                                                 | ![Datasheet diagram](../images/chips/PN512-datasheet.png) |
+
+## Extras
+
+This board also has a LDO regulator (RT9179). It took me some time to figure out the chip since its very small and a discontinued part.
+
+Information about the chip can be found [here](https://basicaodaeletronica.com.br/smd/pdfs/rt9179_richtek.pdf). I wont add it to sources as its not a mission-critical part, but it is still important when tracing the pins for this specific board.
+
+It has 68 kΩ to Vout, 45.3 kΩ to GND; which calculates to a little below 3.0V.

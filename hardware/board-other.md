@@ -11,3 +11,5 @@ There are 4 steppers, 3 endstops, 1 filament sensor on the extruder motor, and a
 - [RFID reader](rfid-reader.md)
 - Top light bar
 - Reflow fan
+
+Top light bar connects to **pin PD23**. It is active-high.
