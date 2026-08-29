@@ -8,6 +8,7 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 
 - [Teardown (YouTube)](https://www.youtube.com/watch?v=cn2mYWmanlk) for most of the external photos
 - [<UndefinedDeluxe> (Soliforum)](https://www.soliforum.com/post/135251/#p135251) for the hotend board photo
+- [Pilotkid2015 (Reddit)](https://www.reddit.com/r/3Dprinting/comments/3qrdu0/3f1j0_xyz_davinci_jr_nfc_reader_with_arduino/) for some of the RFID reader photos
 - The close-up component/board photos are from my own unit
 
 ## Pinouts
@@ -25,6 +26,7 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 - <a name="datasheet-toshiba-tb62269ftg"></a> **[Toshiba TB62269FTG Datasheet](https://toshiba.semicon-storage.com/info/TB62269FTG_datasheet_en_20140318.pdf?did=14719&prodName=TB62269FTG)**
 - <a name="datasheet-macronix-mx25l3206e"></a> **[Macronix MX25L3206E Datasheet](https://www.mxic.com.tw/Lists/Datasheet/Attachments/8616/MX25L3206E,%203V,%2032Mb,%20v1.5.pdf)**
 - <a name="datasheet-winstar-wh1604a"></a> **[Winstar WH1604A 16x04 LCD Module Datasheet](https://www.winstar.com.tw/uploads/files/a1a569d2ea5185895d028815d76787c9.pdf)**
+- <a name="datasheet-nxp-pn512"></a> **[NXP PN512 Datasheet](https://www.nxp.com/docs/en/data-sheet/PN512.pdf)**
 
 ## Extras
 
