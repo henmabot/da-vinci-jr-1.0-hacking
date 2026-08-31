@@ -4,20 +4,20 @@ They seem to be Nema 17's. There are 4 of them, one for each axis (X, Y, Z, and 
 
 ## Pinout
 
-| Pin Name | Pin ID | MCU | Pin Desc | Verified? |
-| -------- | ------ | --- | -------- | --------- |
-| X Enable |        | 128 | PD3      | ✅        |
-| X Step   |        | 127 | PC23     | ✅        |
-| X Dir    |        | 126 | PD4      | ✅        |
-| Y Enable |        | 125 | PD5      | ✅        |
-| Y Step   |        | 124 | PC22     | ✅        |
-| Y Dir    |        | 7   | PE2      | ✅        |
-| Z Enable |        | 121 | PD6      | ✅        |
-| Z Step   |        | 120 | PC20     | ✅        |
-| Z Dir    |        | 119 | PD7      | ✅        |
-| E Enable |        | 78  | PD16     | ✅        |
-| E Step   |        | 76  | PC28     | ✅        |
-| E Dir    |        | 74  | PD17     | ✅        |
+| Pin Name  | Driver        | MCU | Pin Desc | Verified? |
+| --------- | ------------- | --- | -------- | --------- |
+| X Enable  | U10 3 ENABLE  | 128 | PD3      | ✅        |
+| X Step    | U10 2 CLK_IN  | 127 | PC23     | ✅        |
+| X Dir     | U10 44 CW/CCW | 126 | PD4      | ✅        |
+| Y Enable  | U11 3 ENABLE  | 125 | PD5      | ✅        |
+| Y Step    | U11 2 CLK_IN  | 124 | PC22     | ✅        |
+| Y Dir     | U11 44 CW/CCW | 7   | PE2      | ✅        |
+| Z Enable  | U12 3 ENABLE  | 121 | PD6      | ✅        |
+| Z Step    | U12 2 CLK_IN  | 120 | PC20     | ✅        |
+| Z Dir     | U12 44 CW/CCW | 119 | PD7      | ✅        |
+| E1 Enable | U14 3 ENABLE  | 78  | PD16     | ✅        |
+| E1 Step   | U14 2 CLK_IN  | 76  | PC28     | ✅        |
+| E1 Dir    | U14 44 CW/CCW | 74  | PD17     | ✅        |
 
 My other findings:
 

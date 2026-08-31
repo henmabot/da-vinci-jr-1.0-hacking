@@ -72,7 +72,7 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 | 54  | PC6         | -            | Not connected | ❌      | ❌        |
 | 55  | PD24        | -            | Not connected | ❌      | ❌        |
 | 56  | PA24/PGMD12 | -            | Not connected | ❌      | ❌        |
-| 57  | PD23        | ?            | Unknown       | ❌      | ❌        |
+| 57  | PD23        | J5 1 ?       | Top lamp      | ❌      | ✅        |
 | 58  | PC5         | -            | Not connected | ❌      | ❌        |
 | 59  | PA25/PGMD13 | -            | Not connected | ❌      | ❌        |
 | 60  | PD22        | ?            | Unknown       | ❌      | ❌        |
@@ -82,7 +82,7 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 | 64  | PA11/PGMM3  | -            | Not connected | ❌      | ❌        |
 | 65  | PD20        | ?            | Unknown       | ❌      | ❌        |
 | 66  | PA10/PGMM2  | ?            | Unknown       | ❌      | ❌        |
-| 67  | PD19        | ?            | Unknown       | ❌      | ❌        |
+| 67  | PD19        | J37 ? ?      | Z endstop     | ❌      | ❌        |
 | 68  | PA12/PGMD0  | -            | Not connected | ❌      | ❌        |
 | 69  | PD18        | ?            | Unknown       | ❌      | ❌        |
 | 70  | PA27/PGMD15 | -            | Not connected | ❌      | ❌        |
@@ -91,54 +91,54 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 
 ## Side 3
 
-| Pin | Pin Desc    | Connected To | Description   | Traced? | Verified? |
-| --- | ----------- | ------------ | ------------- | ------- | --------- |
-| 73  | PA5/PGMRDY  | -            | Not connected | ❌      | ❌        |
-| 74  | PD17        | -            | Not connected | ❌      | ❌        |
-| 75  | PA9/PGMM1   | ?            | Unknown       | ❌      | ❌        |
-| 76  | PC28        | -            | Not connected | ❌      | ❌        |
-| 77  | PA4/PGMNCMD | -            | Not connected | ❌      | ❌        |
-| 78  | PD16        | -            | Not connected | ❌      | ❌        |
-| 79  | PB6         | ?            | Unknown       | ❌      | ❌        |
-| 80  | VDDIO       | ?            | Unknown       | ❌      | ❌        |
-| 81  | VDDCORE     | ?            | Unknown       | ❌      | ❌        |
-| 82  | PC8         | -            | Not connected | ❌      | ❌        |
-| 83  | NRST        | ?            | Unknown       | ❌      | ❌        |
-| 84  | PD14        | -            | Not connected | ❌      | ❌        |
-| 85  | TEST        | ?            | Unknown       | ❌      | ❌        |
-| 86  | PC9         | -            | Not connected | ❌      | ❌        |
-| 87  | PB12        | ?            | Unknown       | ❌      | ❌        |
-| 88  | PD13        | -            | Not connected | ❌      | ❌        |
-| 89  | PB7         | ?            | Unknown       | ❌      | ❌        |
-| 90  | PC10        | -            | Not connected | ❌      | ❌        |
-| 91  | PA3         | -            | Not connected | ❌      | ❌        |
-| 92  | PD12        | ?            | Unknown       | ❌      | ❌        |
-| 93  | PA2         | -            | Not connected | ❌      | ❌        |
-| 94  | PC11        | ?            | Unknown       | ❌      | ❌        |
-| 95  | GND         | ?            | Unknown       | ❌      | ❌        |
-| 96  | VDDIO       | ?            | Unknown       | ❌      | ❌        |
-| 97  | PC14        | ?            | Unknown       | ❌      | ❌        |
-| 98  | PD11        | -            | Not connected | ❌      | ❌        |
-| 99  | PA1/PGMEN1  | ?            | Unknown       | ❌      | ❌        |
-| 100 | PC16        | ?            | Unknown       | ❌      | ❌        |
-| 101 | PD10        | ?            | Unknown       | ❌      | ❌        |
-| 102 | PA0/PGMEN0  | ?            | Unknown       | ❌      | ❌        |
-| 103 | PC17        | ?            | Unknown       | ❌      | ❌        |
-| 104 | JTAGSEL     | ?            | Unknown       | ❌      | ❌        |
-| 105 | PB4         | ?            | Unknown       | ❌      | ❌        |
-| 106 | PD15        | ?            | Unknown       | ❌      | ❌        |
-| 107 | VDDCORE     | ?            | Unknown       | ❌      | ❌        |
-| 108 | PD29        | ?            | Unknown       | ❌      | ❌        |
+| Pin | Pin Desc    | Connected To  | Description     | Traced? | Verified? |
+| --- | ----------- | ------------- | --------------- | ------- | --------- |
+| 73  | PA5/PGMRDY  | -             | Not connected   | ❌      | ❌        |
+| 74  | PD17        | U14 44 CW/CCW | E1 motor dir    | ❌      | ✅        |
+| 75  | PA9/PGMM1   | ?             | Unknown         | ❌      | ❌        |
+| 76  | PC28        | U14 2 CLK_IN  | E1 motor step   | ❌      | ✅        |
+| 77  | PA4/PGMNCMD | -             | Not connected   | ❌      | ❌        |
+| 78  | PD16        | U14 3 ENABLE  | E1 motor enable | ❌      | ✅        |
+| 79  | PB6         | ?             | Unknown         | ❌      | ❌        |
+| 80  | VDDIO       | ?             | Unknown         | ❌      | ❌        |
+| 81  | VDDCORE     | ?             | Unknown         | ❌      | ❌        |
+| 82  | PC8         | -             | Not connected   | ❌      | ❌        |
+| 83  | NRST        | ?             | Unknown         | ❌      | ❌        |
+| 84  | PD14        | -             | Not connected   | ❌      | ❌        |
+| 85  | TEST        | ?             | Unknown         | ❌      | ❌        |
+| 86  | PC9         | -             | Not connected   | ❌      | ❌        |
+| 87  | PB12        | ?             | Unknown         | ❌      | ❌        |
+| 88  | PD13        | -             | Not connected   | ❌      | ❌        |
+| 89  | PB7         | ?             | Unknown         | ❌      | ❌        |
+| 90  | PC10        | -             | Not connected   | ❌      | ❌        |
+| 91  | PA3         | -             | Not connected   | ❌      | ❌        |
+| 92  | PD12        | ?             | Unknown         | ❌      | ❌        |
+| 93  | PA2         | -             | Not connected   | ❌      | ❌        |
+| 94  | PC11        | ?             | Unknown         | ❌      | ❌        |
+| 95  | GND         | ?             | Unknown         | ❌      | ❌        |
+| 96  | VDDIO       | ?             | Unknown         | ❌      | ❌        |
+| 97  | PC14        | ?             | Unknown         | ❌      | ❌        |
+| 98  | PD11        | -             | Not connected   | ❌      | ❌        |
+| 99  | PA1/PGMEN1  | ?             | Unknown         | ❌      | ❌        |
+| 100 | PC16        | ?             | Unknown         | ❌      | ❌        |
+| 101 | PD10        | ?             | Unknown         | ❌      | ❌        |
+| 102 | PA0/PGMEN0  | ?             | Unknown         | ❌      | ❌        |
+| 103 | PC17        | ?             | Unknown         | ❌      | ❌        |
+| 104 | JTAGSEL     | ?             | Unknown         | ❌      | ❌        |
+| 105 | PB4         | ?             | Unknown         | ❌      | ❌        |
+| 106 | PD15        | ?             | Unknown         | ❌      | ❌        |
+| 107 | VDDCORE     | ?             | Unknown         | ❌      | ❌        |
+| 108 | PD29        | ?             | Unknown         | ❌      | ❌        |
 
 ## Side 4
 
 | Pin | Pin Desc   | Connected To  | Description    | Traced? | Verified? |
 | --- | ---------- | ------------- | -------------- | ------- | --------- |
 | 109 | PB5        | ?             | Unknown        | ❌      | ❌        |
-| 110 | PD9        | ?             | Unknown        | ❌      | ❌        |
+| 110 | PD9        | J37 ? ?       | Y endstop      | ❌      | ❌        |
 | 111 | PC18       | -             | Not connected  | ❌      | ❌        |
 | 112 | PA28       | -             | Not connected  | ❌      | ❌        |
-| 113 | PD8        | ?             | Unknown        | ❌      | ❌        |
+| 113 | PD8        | J37 ? ?       | X endstop      | ❌      | ❌        |
 | 114 | PA6/PGMNOE | -             | Not connected  | ❌      | ❌        |
 | 115 | GND        | -             | Not connected  | ❌      | ❌        |
 | 116 | PA30       | -             | Not connected  | ❌      | ❌        |

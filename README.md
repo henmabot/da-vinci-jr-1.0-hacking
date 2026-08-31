@@ -14,9 +14,9 @@ I try to add source links whenever possible.
 
 | Task Name  | Description                             | Status | Main Board | Sub Board | Hotend Board |
 | ---------- | --------------------------------------- | ------ | ---------- | --------- | ------------ |
-| Pinouts    | Trace all of the pinouts of the printer | 70%    | 30%        | 100%      | 80%          |
-| Schematics | Draw the schematics of the printer      | 65%    | 20%        | 100%      | 75%          |
-| Klipper    | Build Klipper for the printer           | 40%    | -          | -         | -            |
+| Pinouts    | Trace all of the pinouts of the printer | 75%    | 40%        | 100%      | 80%          |
+| Schematics | Draw the schematics of the printer      | 70%    | 30%        | 100%      | 75%          |
+| Configs    | Build firmware configs for the printer  | 0%     | -          | -         | -            |
 
 ## More Information
 

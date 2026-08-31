@@ -34,3 +34,15 @@ I will proceed by decompiling the secondary mcu firmware.
 **Update 28.08.2026 18:54 GMT+3:**
 
 I decompiled the secondary mcu firmware, but im realizing i first need to have some idea on which pins might be for what functions.
+
+**Update 31.08.2026 19:00 GMT+3:**
+
+I stopped decompiling work, and continued with pinout tracing. So far we have all the essential pins traced (including buttons/lcd/sd), but i want to trace everything before creating a schematic. The LPC MCU is also easily flashable via UART and SWD, which will make things easier.
+
+**Update 31.08.2026 20:00 GMT+3:**
+
+Due to the split MCU design, klipper support looks hard without hardware modding. I will continue by searching about RRF instead.
+
+**Update 31.08.2026 23:20 GMT+3:**
+
+I need to fork RRF since the dual mcu stuff, and write custom firmware for the LPC chip and manage it over uart.
