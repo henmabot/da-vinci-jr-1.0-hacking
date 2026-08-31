@@ -6,7 +6,7 @@ There are 4 steppers, 3 endstops, 1 filament sensor on the extruder motor, and a
 
 **Current known components:**
 
-- [Stepper Motors](stepper-motors.md)
+- [Stepper Motors](steppers.md)
 - [Sensors](sensors.md)
 - [RFID reader](rfid-reader.md)
 - Top light bar

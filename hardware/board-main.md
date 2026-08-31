@@ -81,7 +81,9 @@ Refer to the [Toshiba TB62269FTG Datasheet](../SOURCES.md#datasheet-toshiba-tb62
 
 ### Pinout
 
-It can be found here: [tb62269ftg-pinout.md](pinouts/tb62269ftg-pinout.md)
+Per-chip connections: [steppers.md](pinouts/steppers.md)
+
+General pinout: [tb62269ftg-pinout.md](pinouts/tb62269ftg-pinout.md)
 
 ### Photos
 
