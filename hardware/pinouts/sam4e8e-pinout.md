@@ -9,44 +9,44 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 
 ## Side 1
 
-| Pin | Pin Desc      | Connected To | Description   | Traced? | Verified? |
-| --- | ------------- | ------------ | ------------- | ------- | --------- |
-| 01  | PD0           | ?            | Unknown       | ❌      | ❌        |
-| 02  | PD31          | ?            | Unknown       | ❌      | ❌        |
-| 03  | VDDOUT        | ?            | Unknown       | ❌      | ❌        |
-| 04  | PE0           | ?            | Unknown       | ❌      | ❌        |
-| 05  | VDDIN         | ?            | Unknown       | ❌      | ❌        |
-| 06  | PE1           | ?            | Unknown       | ❌      | ❌        |
-| 07  | PE2           | -            | Not connected | ❌      | ❌        |
-| 08  | GND           | ?            | Unknown       | ❌      | ❌        |
-| 09  | ADVREFP       | ?            | Unknown       | ❌      | ❌        |
-| 10  | PE3           | -            | Not connected | ❌      | ❌        |
-| 11  | PC0           | -            | Not connected | ❌      | ❌        |
-| 12  | PC27          | ?            | Unknown       | ❌      | ❌        |
-| 13  | PC26          | -            | Not connected | ❌      | ❌        |
-| 14  | PC31          | ?            | Unknown       | ❌      | ❌        |
-| 15  | PC30          | ?            | Unknown       | ❌      | ❌        |
-| 16  | PC29          | ?            | Unknown       | ❌      | ❌        |
-| 17  | PC12          | ?            | Unknown       | ❌      | ❌        |
-| 18  | PC15          | ?            | Unknown       | ❌      | ❌        |
-| 19  | PC13          | ?            | Unknown       | ❌      | ❌        |
-| 20  | PB1           | -            | Not connected | ❌      | ❌        |
-| 21  | PB0           | -            | Not connected | ❌      | ❌        |
-| 22  | PA20/PGMD8    | ?            | Unknown       | ❌      | ❌        |
-| 23  | PA19/PGMD7    | ?            | Unknown       | ❌      | ❌        |
-| 24  | PA18/PGMD6    | ?            | Unknown       | ❌      | ❌        |
-| 25  | PA17/PGMD5    | -            | Not connected | ❌      | ❌        |
-| 26  | PB2           | -            | Not connected | ❌      | ❌        |
-| 27  | PE4           | -            | Not connected | ❌      | ❌        |
-| 28  | PE5           | ?            | Unknown       | ❌      | ❌        |
-| 29  | VDDCORE       | ?            | Unknown       | ❌      | ❌        |
-| 30  | VDDIO         | ?            | Unknown       | ❌      | ❌        |
-| 31  | PB3           | -            | Not connected | ❌      | ❌        |
-| 32  | PA21/PGMD9    | -            | Not connected | ❌      | ❌        |
-| 33  | VDDCORE       | ?            | Unknown       | ❌      | ❌        |
-| 34  | PD30          | -            | Not connected | ❌      | ❌        |
-| 35  | PA7/PGMNVALID | ?            | Unknown       | ❌      | ❌        |
-| 36  | PA8/PGMM0     | ?            | Unknown       | ❌      | ❌        |
+| Pin | Pin Desc   | Connected To | Description   | Traced? | Verified? |
+| --- | ---------- | ------------ | ------------- | ------- | --------- |
+| 01  | PD0        | ?            | Unknown       | ❌      | ❌        |
+| 02  | PD31       | ?            | Unknown       | ❌      | ❌        |
+| 03  | VDDOUT     | ?            | Unknown       | ❌      | ❌        |
+| 04  | PE0        | ?            | Unknown       | ❌      | ❌        |
+| 05  | VDDIN      | ?            | Unknown       | ❌      | ❌        |
+| 06  | PE1        | ?            | Unknown       | ❌      | ❌        |
+| 07  | PE2        | -            | Not connected | ❌      | ❌        |
+| 08  | GND        | ?            | Unknown       | ❌      | ❌        |
+| 09  | ADVREFP    | ?            | Unknown       | ❌      | ❌        |
+| 10  | PE3        | -            | Not connected | ❌      | ❌        |
+| 11  | PC0        | -            | Not connected | ❌      | ❌        |
+| 12  | PC27       | ?            | Unknown       | ❌      | ❌        |
+| 13  | PC26       | -            | Not connected | ❌      | ❌        |
+| 14  | PC31       | ?            | Unknown       | ❌      | ❌        |
+| 15  | PC30       | ?            | Unknown       | ❌      | ❌        |
+| 16  | PC29       | ?            | Unknown       | ❌      | ❌        |
+| 17  | PC12       | ?            | Unknown       | ❌      | ❌        |
+| 18  | PC15       | ?            | Unknown       | ❌      | ❌        |
+| 19  | PC13       | ?            | Unknown       | ❌      | ❌        |
+| 20  | PB1        | -            | Not connected | ❌      | ❌        |
+| 21  | PB0        | -            | Not connected | ❌      | ❌        |
+| 22  | PA20/PGMD8 | ?            | Unknown       | ❌      | ❌        |
+| 23  | PA19/PGMD7 | ?            | Unknown       | ❌      | ❌        |
+| 24  | PA18/PGMD6 | ?            | Unknown       | ❌      | ❌        |
+| 25  | PA17/PGMD5 | -            | Not connected | ❌      | ❌        |
+| 26  | PB2        | -            | Not connected | ❌      | ❌        |
+| 27  | PE4        | -            | Not connected | ❌      | ❌        |
+| 28  | PE5        | ?            | Unknown       | ❌      | ❌        |
+| 29  | VDDCORE    | ?            | Unknown       | ❌      | ❌        |
+| 30  | VDDIO      | 3.3V         | 3.3V Power    | ✅      | ❌        |
+| 31  | PB3        | -            | Not connected | ❌      | ❌        |
+| 32  | PA21/PGMD9 | -            | Not connected | ❌      | ❌        |
+| 33  | VDDCORE    | ?            | Unknown       | ❌      | ❌        |
+| 34  | PD30       | -            | Not connected | ❌      | ❌        |
+| 35  | PA7/XIN32  | Y2 1 XTAL1   | 32kHz Crystal | ✅      | ❌        |
+| 36  | PA8/XOUT32 | Y2 2 XTAL2   | 32kHz Crystal | ✅      | ❌        |
 
 ## Side 2
 
@@ -58,7 +58,7 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 | 40  | PC3         | -            | Not connected | ❌      | ❌        |
 | 41  | PC4         | -            | Not connected | ❌      | ❌        |
 | 42  | PA13/PGMD1  | -            | Not connected | ❌      | ❌        |
-| 43  | VDDIO       | ?            | Unknown       | ❌      | ❌        |
+| 43  | VDDIO       | 3.3V         | 3.3V Power    | ✅      | ❌        |
 | 44  | GND         | ?            | Unknown       | ❌      | ❌        |
 | 45  | PA16/PGMD4  | -            | Not connected | ❌      | ❌        |
 | 46  | PA23/PGMD11 | ?            | Unknown       | ❌      | ❌        |
@@ -87,7 +87,7 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 | 69  | PD18        | ?            | Unknown       | ❌      | ❌        |
 | 70  | PA27/PGMD15 | -            | Not connected | ❌      | ❌        |
 | 71  | PD28        | ?            | Unknown       | ❌      | ❌        |
-| 72  | VDDIO       | ?            | Unknown       | ❌      | ❌        |
+| 72  | VDDIO       | 3.3V         | 3.3V Power    | ✅      | ❌        |
 
 ## Side 3
 
@@ -166,9 +166,9 @@ Due to the chip size, I have separated the pinout into four sections for easier 
 | 138 | GND        | ?             | Unknown        | ❌      | ❌        |
 | 139 | VDDPLL     | ?             | Unknown        | ❌      | ❌        |
 | 140 | PB14       | -             | Not connected  | ❌      | ❌        |
-| 141 | PB8        | ?             | Unknown        | ❌      | ❌        |
-| 142 | PB9        | ?             | Unknown        | ❌      | ❌        |
-| 143 | VDDIO      | ?             | Unknown        | ❌      | ❌        |
+| 141 | PB8/XOUT   | Y1 1 XTAL1    | 12MHz Crystal  | ✅      | ❌        |
+| 142 | PB9/XIN    | Y1 2 XTAL2    | 12MHz Crystal  | ✅      | ❌        |
+| 143 | VDDIO      | 3.3V          | 3.3V Power     | ✅      | ❌        |
 | 144 | PB13       | ?             | Unknown        | ❌      | ❌        |
 
 - Pin Source: [Atmel SAM4E Datasheet](../../SOURCES.md#datasheet-atmel-sam4e8e)
