@@ -22,7 +22,9 @@ The 51-pin Hotend connector connects the main board with the hotend. Its mostly 
 ### Pinout
 
 > Pins 1-6 and 46-51 are connected to each other, and they connect to the power via a fuse labeled R292 on board.
+>
 > IR sensor is the filament sensor. Its other end is connected to GND on the hotend, and its active low.
+>
 > J5 is a connector that I have no idea what it is for yet. I'm guessing its for calibrating the bed.
 
 | Pin | Main board | Description   | Verified? | Hotend | Description   | Verified? |
@@ -35,15 +37,15 @@ The 51-pin Hotend connector connects the main board with the hotend. Its mostly 
 | 06  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
 | 07  | -          | Not connected | ✅        | -      | Not connected | ✅        |
 | 08  | -          | Not connected | ✅        | -      | Not connected | ✅        |
-| 09  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 10  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 11  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 12  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 13  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 14  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 09  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
+| 10  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
+| 11  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
+| 12  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
+| 13  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
+| 14  | Q8 5-8     | Mosfet drain  | ✅        | -      | Not connected | ✅        |
 | 15  | -          | Not connected | ✅        | -      | Not connected | ✅        |
-| 16  | -          | -             | ❌        | J2 1   | Fan GND       | ✅        |
-| 17  | -          | -             | ❌        | J2 1   | Fan GND       | ✅        |
+| 16  | Q2 3       | Transistor C  | ✅        | J2 1   | Fan GND       | ✅        |
+| 17  | Q2 3       | Transistor C  | ✅        | J2 1   | Fan GND       | ✅        |
 | 18  | -          | Not connected | ✅        | -      | Not connected | ✅        |
 | 19  | -          | -             | ❌        | GND    | Ground        | ✅        |
 | 20  | -          | -             | ❌        | U1 3   | IR Signal     | ✅        |
@@ -61,15 +63,15 @@ The 51-pin Hotend connector connects the main board with the hotend. Its mostly 
 | 32  | -          | -             | ❌        | GND    | Ground        | ✅        |
 | 33  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
 | 34  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
-| 35  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 36  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 37  | -          | -             | ❌        | -      | Not connected | ✅        |
-| 38  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
-| 39  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
-| 40  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
-| 41  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
-| 42  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
-| 43  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 35  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 36  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 37  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 38  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
+| 39  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
+| 40  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
+| 41  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
+| 42  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
+| 43  | Q8 5-8     | Mosfet drain  | ✅        | J4 1   | Heater GND    | ✅        |
 | 44  | -          | Not connected | ✅        | -      | Not connected | ✅        |
 | 45  | -          | Not connected | ✅        | -      | Not connected | ✅        |
 | 46  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
