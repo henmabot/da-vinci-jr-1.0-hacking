@@ -51,16 +51,16 @@ The 51-pin Hotend connector connects the main board with the hotend. Its mostly 
 | 20  | -          | -             | ❌        | U1 3   | IR Signal     | ✅        |
 | 21  | -          | -             | ❌        | U1 3   | IR Signal     | ✅        |
 | 22  | -          | -             | ❌        | GND    | Ground        | ✅        |
-| 23  | -          | -             | ❌        | -      | -             | ❌        |
-| 24  | -          | -             | ❌        | -      | -             | ❌        |
-| 25  | -          | -             | ❌        | -      | -             | ❌        |
-| 26  | -          | -             | ❌        | -      | -             | ❌        |
-| 27  | -          | -             | ❌        | -      | -             | ❌        |
-| 28  | -          | -             | ❌        | -      | -             | ❌        |
+| 23  | -          | -             | ❌        | U2 5   | EEPROM SDA    | ✅        |
+| 24  | -          | -             | ❌        | U2 5   | EEPROM SDA    | ✅        |
+| 25  |            | -             | ❌        | U2 8   | EEPROM VCC    | ✅        |
+| 26  | -          | -             | ❌        | U2 8   | EEPROM VCC    | ✅        |
+| 27  | -          | -             | ❌        | U2 6   | EEPROM SCL    | ✅        |
+| 28  | -          | -             | ❌        | U2 6   | EEPROM SCL    | ✅        |
 | 29  | -          | -             | ❌        | GND    | Ground        | ✅        |
 | 30  | -          | -             | ❌        | J3 1   | NTC signal    | ✅        |
 | 31  | -          | -             | ❌        | J3 1   | NTC signal    | ✅        |
-| 32  | -          | -             | ❌        | GND    | Ground        | ✅        |
+| 32  | GND        | Ground        | ✅        | GND    | Ground        | ✅        |
 | 33  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
 | 34  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
 | 35  | -          | Not connected | ✅        | -      | Not connected | ✅        |

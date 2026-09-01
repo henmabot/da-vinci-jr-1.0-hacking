@@ -14,7 +14,7 @@ I try to add source links whenever possible.
 
 | Task Name  | Description                             | Status | Main Board | Sub Board | Hotend Board |
 | ---------- | --------------------------------------- | ------ | ---------- | --------- | ------------ |
-| Pinouts    | Trace all of the pinouts of the printer | 80%    | 40%        | 100%      | 85%          |
+| Pinouts    | Trace all of the pinouts of the printer | 85%    | 40%        | 100%      | 90%          |
 | Schematics | Draw the schematics of the printer      | 85%    | 30%        | 100%      | 100%         |
 | Configs    | Build firmware configs for the printer  | 0%     | -          | -         | -            |
 
