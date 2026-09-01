@@ -95,8 +95,8 @@ The 22-pin LCD connector connects the main board with the sub-board, and carries
 
 | Pin | Main Board | Description | Verified? | Sub-board | Description   | Verified? |
 | --- | ---------- | ----------- | --------- | --------- | ------------- | --------- |
-| 01  | +5V        | Power       | ❌        | 5V        | 5V power      | ✅        |
-| 02  | GND        | Ground      | ❌        | GND       | Ground        | ✅        |
+| 01  | +5V        | 5V Power    | ✅        | 5V        | 5V power      | ✅        |
+| 02  | GND        | Ground      | ✅        | GND       | Ground        | ✅        |
 | 03  | 111        | PC18        | ❌        | E         | LCD enable    | 🚧        |
 | 04  | 82         | PC8         | ❌        | R/W       | LCD R/W       | 🚧        |
 | 05  | U1_Pin1    | ???         | ❌        | RS        | LCD RS        | 🚧        |
@@ -132,12 +132,12 @@ The 16-pin LCD connector connects the main board with the sub-board, and carries
 
 | Pin | Main Board | Description       | Verified? | Sub-board | Description   | Verified? |
 | --- | ---------- | ----------------- | --------- | --------- | ------------- | --------- |
-| 01  | -          | Not connected     | ❌        | -         | Not connected | ✅        |
-| 02  | GND        | Ground            | ❌        | GND       | Ground        | ✅        |
+| 01  | -          | Not connected     | ✅        | -         | Not connected | ✅        |
+| 02  | GND        | Ground            | ✅        | GND       | Ground        | ✅        |
 | 03  | 118        | PA31/MCDA1        | ❌        | DAT1      | SD Card DAT1  | ✅        |
-| 04  | GND        | Ground            | ❌        | GND       | Ground        | ✅        |
+| 04  | GND        | Ground            | ✅        | GND       | Ground        | ✅        |
 | 05  | 116        | PA30/MCDA0        | ❌        | DAT0      | SD Card DAT0  | ✅        |
-| 06  | GND        | Ground            | ❌        | GND       | Ground        | ✅        |
+| 06  | GND        | Ground            | ✅        | GND       | Ground        | ✅        |
 | 07  | 129        | PA29/MCCK         | ❌        | CLK       | SD Card CLK   | ✅        |
 | 08  | +3.3V      | Power             | ❌        | +3.3V     | 3.3V Power    | ✅        |
 | 09  | +3.3V      | Power             | ❌        | +3.3V     | 3.3V Power    | ✅        |

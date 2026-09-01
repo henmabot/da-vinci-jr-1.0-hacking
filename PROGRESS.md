@@ -56,3 +56,7 @@ There are 4 fuses so far from what i can tell. One for heater, one for reflow fa
 This fixed me being stuck about the schematics, as i did not know what was some of the main power lanes were connected to. Now i got a bigger problem about marking power lanes or drawing them all fully. ig ill end up drawing them all and only labeling the raw one as 12v.
 
 Update: okay they are all fused, i was just blind. on a side note, all my fuses seem to be intact.
+
+### Update 01.09.2026 22:00 GMT+3:
+
+Its getting tiring to trace everything manually on the main board since its too big to keep track of, especially since the high amount of vias. I keep losing track of which pin goes where, especially power pins, which makes it look like stuff are getting power from some divine place or something, i cant find the source of the power. I will continue tracing by creating a serial firmware to poke at the pins. For now ill do something basic that prints the triggered pins to serial, in the future i can make some firmata style interface or a firmata fork for it if i need to.
