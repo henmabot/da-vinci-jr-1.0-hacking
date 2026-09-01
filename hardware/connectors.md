@@ -21,59 +21,63 @@ The 51-pin Hotend connector connects the main board with the hotend. Its mostly 
 
 ### Pinout
 
-| Pin | Main board | Description | Verified? | Hotend | Description   | Verified? |
-| --- | ---------- | ----------- | --------- | ------ | ------------- | --------- |
-| 01  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 02  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 03  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 04  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 05  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 06  | -          | -           | ❌        | -      | Not connected | ❌        |
-| 07  | -          | -           | ❌        | -      | -             | ❌        |
-| 08  | -          | -           | ❌        | -      | -             | ❌        |
-| 09  | -          | -           | ❌        | -      | -             | ❌        |
-| 10  | -          | -           | ❌        | -      | -             | ❌        |
-| 11  | -          | -           | ❌        | -      | -             | ❌        |
-| 12  | -          | -           | ❌        | -      | -             | ❌        |
-| 13  | -          | -           | ❌        | -      | -             | ❌        |
-| 14  | -          | -           | ❌        | -      | -             | ❌        |
-| 15  | -          | -           | ❌        | -      | -             | ❌        |
-| 16  | -          | -           | ❌        | -      | -             | ❌        |
-| 17  | -          | -           | ❌        | -      | -             | ❌        |
-| 18  | -          | -           | ❌        | -      | -             | ❌        |
-| 19  | -          | -           | ❌        | GND    | Ground        | ✅        |
-| 20  | -          | -           | ❌        | -      | -             | ❌        |
-| 21  | -          | -           | ❌        | -      | -             | ❌        |
-| 22  | -          | -           | ❌        | GND    | Ground        | ✅        |
-| 23  | -          | -           | ❌        | -      | -             | ❌        |
-| 24  | -          | -           | ❌        | -      | -             | ❌        |
-| 25  | -          | -           | ❌        | -      | -             | ❌        |
-| 26  | -          | -           | ❌        | -      | -             | ❌        |
-| 27  | -          | -           | ❌        | -      | -             | ❌        |
-| 28  | -          | -           | ❌        | -      | -             | ❌        |
-| 29  | -          | -           | ❌        | GND    | Ground        | ✅        |
-| 30  | -          | -           | ❌        | J3 1   | NTC signal    | ✅        |
-| 31  | -          | -           | ❌        | J3 1   | NTC signal    | ✅        |
-| 32  | -          | -           | ❌        | GND    | Ground        | ✅        |
-| 33  | -          | -           | ❌        | J5 1   | Unknown       | ✅        |
-| 34  | -          | -           | ❌        | J5 1   | Unknown       | ✅        |
-| 35  | -          | -           | ❌        | -      | Not connected | ✅        |
-| 36  | -          | -           | ❌        | -      | Not connected | ✅        |
-| 37  | -          | -           | ❌        | -      | Not connected | ✅        |
-| 38  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 39  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 40  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 41  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 42  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 43  | -          | -           | ❌        | J4 1   | Heater GND    | ❌        |
-| 44  | -          | -           | ❌        | -      | Not connected | ✅        |
-| 45  | -          | -           | ❌        | -      | Not connected | ✅        |
-| 46  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
-| 47  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
-| 48  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
-| 49  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
-| 50  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
-| 51  | -          | -           | ❌        | 12V    | Heater 12V    | ✅        |
+> Pins 1-6 and 46-51 are connected to each other, and they connect to the power via a fuse labeled R292 on board.
+> IR sensor is the filament sensor. Its other end is connected to GND on the hotend, and its active low.
+> J5 is a connector that I have no idea what it is for yet. I'm guessing its for calibrating the bed.
+
+| Pin | Main board | Description   | Verified? | Hotend | Description   | Verified? |
+| --- | ---------- | ------------- | --------- | ------ | ------------- | --------- |
+| 01  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 02  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 03  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 04  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 05  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 06  | 12V        | Power 12V     | ✅        | -      | Not connected | ✅        |
+| 07  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 08  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 09  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 10  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 11  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 12  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 13  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 14  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 15  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 16  | -          | -             | ❌        | J2 1   | Fan GND       | ✅        |
+| 17  | -          | -             | ❌        | J2 1   | Fan GND       | ✅        |
+| 18  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 19  | -          | -             | ❌        | GND    | Ground        | ✅        |
+| 20  | -          | -             | ❌        | U1 3   | IR Signal     | ✅        |
+| 21  | -          | -             | ❌        | U1 3   | IR Signal     | ✅        |
+| 22  | -          | -             | ❌        | GND    | Ground        | ✅        |
+| 23  | -          | -             | ❌        | -      | -             | ❌        |
+| 24  | -          | -             | ❌        | -      | -             | ❌        |
+| 25  | -          | -             | ❌        | -      | -             | ❌        |
+| 26  | -          | -             | ❌        | -      | -             | ❌        |
+| 27  | -          | -             | ❌        | -      | -             | ❌        |
+| 28  | -          | -             | ❌        | -      | -             | ❌        |
+| 29  | -          | -             | ❌        | GND    | Ground        | ✅        |
+| 30  | -          | -             | ❌        | J3 1   | NTC signal    | ✅        |
+| 31  | -          | -             | ❌        | J3 1   | NTC signal    | ✅        |
+| 32  | -          | -             | ❌        | GND    | Ground        | ✅        |
+| 33  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
+| 34  | -          | -             | ❌        | J5 1   | Unknown conn  | ✅        |
+| 35  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 36  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 37  | -          | -             | ❌        | -      | Not connected | ✅        |
+| 38  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 39  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 40  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 41  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 42  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 43  | -          | -             | ❌        | J4 1   | Heater GND    | ✅        |
+| 44  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 45  | -          | Not connected | ✅        | -      | Not connected | ✅        |
+| 46  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
+| 47  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
+| 48  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
+| 49  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
+| 50  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
+| 51  | 12V        | Power 12V     | ✅        | 12V    | Power 12V     | ✅        |
 
 ## 22-pin LCD connector
 
