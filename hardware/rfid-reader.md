@@ -9,7 +9,7 @@ The important chip on this board is **PN512 NFC Chip**.
 | ------------------------------------------------------ | ----------------------------------------------------- |
 | ![Front view](../images/components/rfid-reader-2.jpeg) | ![Back view](../images/components/rfid-reader-3.jpeg) |
 
-| Front view of the board while its mounted (YouTube)        | Back view of the board while its mounted (Reddit)             | Front view of the board while its mounted (YouTube)            | Back view of the board while its mounted (Reddit)             |
+| Front view of the board while its mounted (YouTube)        | Back view of the board while its mounted (Reddit)             | Front view of the board while its mounted (Reddit)             | Back view of the board while its mounted (Reddit)             |
 | ---------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------- |
 | ![Front view (YT)](../images/components/rfid-reader-1.png) | ![Back view (Reddit)](../images/components/rfid-reader-4.jpg) | ![Front view (Reddit)](../images/components/rfid-reader-6.jpg) | ![Back view (Reddit)](../images/components/rfid-reader-5.jpg) |
 
