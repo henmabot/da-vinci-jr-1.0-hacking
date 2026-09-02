@@ -515,10 +515,9 @@ size_t usb_cdc_write(const void *data, size_t length)
     const uint32_t irq_state = irq_save();
 
     usb_tx_kick();
-    if (length > ((tx_tail - tx_head - 1u) & USB_BUFFER_MASK)) {
-        irq_restore(irq_state);
-        return 0u;
-    }
+    const size_t available = (tx_tail - tx_head - 1u) & USB_BUFFER_MASK;
+    if (length > available)
+        length = available;
     for (size_t i = 0; i < length; ++i) {
         tx_buffer[tx_head] = bytes[i];
         tx_head = (tx_head + 1u) & USB_BUFFER_MASK;
