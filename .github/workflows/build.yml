@@ -13,10 +13,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install build tools
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
-        with:
-          packages: gcc-arm-none-eabi just
-          version: 1.0
+        run: sudo apt-get update && sudo apt-get install --yes gcc-arm-none-eabi just
 
       - name: Build firmware
         run: just build
