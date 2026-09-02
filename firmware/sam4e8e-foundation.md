@@ -43,8 +43,8 @@ USB output is non-blocking. If the host stops consuming data, the example keeps 
 
 Application code uses two small interfaces:
 
-- `include/gpio.h`: configure input/output, enable input pull-up, write, toggle, and read GPIOs;
-- `include/usb_cdc.h`: initialize CDC, check configuration state, write bytes, query received bytes, and read bytes.
+- `include/gpio.h`: configure input/output, enable input pull-up, write, and read GPIOs;
+- `include/usb_cdc.h`: initialize CDC, write bytes, query received bytes, and read bytes.
 
 These cover the immediate low-level needs found in ConfigurableFirmata's digital input/output modules and its byte-stream transport. A later Firmata adapter can add Arduino-style `Stream` glue without changing the SAM4E8E GPIO or USB implementation.
 
@@ -66,9 +66,9 @@ Klipper-derived source files retain their GPLv3 copyright/license notices. Impor
 
 ## Clock and USB path
 
-The clock setup uses Klipper's SAM4E path: a 12 MHz crystal feeds PLLA, producing 240 MHz PLLA and a 120 MHz master clock. USB divides PLLA by five to obtain the required 48 MHz device clock.
+The clock setup uses Klipper's SAM4E path: the board pinout documents its 12 MHz crystal on PB8/XOUT and PB9/XIN, which feeds PLLA at 240 MHz. The master clock divides PLLA by two to 120 MHz, while USB divides PLLA by five to the required 48 MHz device clock.
 
-USB CDC is the only serial transport. PB10/PB11 are the SAM4E USB data pins used by the UDP peripheral; no UART/USART initialization or logging code is compiled.
+USB CDC is the only serial transport. Klipper reserves PB10/PB11 for SAM4E USB, and the SAM4E device definitions identify those system pins as DDM/DDP when they are not reassigned to GPIO. This firmware leaves them on the USB system function; no UART/USART initialization or logging code is compiled.
 
 The USB descriptor currently uses the VID/PID pair used by Klipper (`1d50:614e`) as a development identity. A product-specific USB identity must be chosen before distributing this as a distinct USB product.
 

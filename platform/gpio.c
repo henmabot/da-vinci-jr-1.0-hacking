@@ -78,12 +78,6 @@ void gpio_write(gpio_pin_t pin, bool high)
         port->PIO_CODR = mask;
 }
 
-void gpio_toggle(gpio_pin_t pin)
-{
-    Pio *const port = gpio_port(pin);
-    port->PIO_ODSR ^= gpio_mask(pin);
-}
-
 bool gpio_read(gpio_pin_t pin)
 {
     Pio *const port = gpio_port(pin);

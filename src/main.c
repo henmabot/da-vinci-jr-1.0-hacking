@@ -50,10 +50,12 @@ int main(void)
     gpio_input(GPIO_PD8, GPIO_PULL_NONE);
     usb_cdc_init();
 
+    bool led_high = false;
     uint32_t counter = 1u;
     for (;;) {
-        gpio_toggle(GPIO_PD23);
-        if (usb_cdc_ready() && report_pin(counter, gpio_read(GPIO_PD8)))
+        led_high = !led_high;
+        gpio_write(GPIO_PD23, led_high);
+        if (report_pin(counter, gpio_read(GPIO_PD8)))
             ++counter;
         delay();
     }

@@ -506,10 +506,6 @@ void usb_cdc_init(void)
     NVIC_EnableIRQ(UDP_IRQn);
 }
 
-bool usb_cdc_ready(void)
-{
-    return configured;
-}
 
 size_t usb_cdc_write(const void *data, size_t length)
 {
