@@ -5,6 +5,8 @@ compile_commands.json
 
 # Firmware Demos
 build/
+asf/
+reference/
 
 # Klipper
 klipper/
