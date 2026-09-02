@@ -27,14 +27,16 @@ The analog-mapping response marks every pin as non-analog. Analog I/O, pulse-wid
 
 ## Pin numbering
 
-Firmata pin numbers are the SAM4E PIO indices used by `gpio_pin_t`:
+The GPIO layer uses the SAM4E device header as the pin source of truth. It uses definitions such as `PIO_PA0_IDX` and `PIO_PB0_IDX` instead of redefining pin numbers. `gpio_pin_t` is wide enough for all SAM4E8E PIO indices, including PE0-PE5.
+
+Firmata itself uses a flat 7-bit pin number on the wire. For the pins Firmata can represent, those numbers map directly to the SAM4E PIO indices:
 
 - PA0-PA31: 0-31
 - PB0-PB14: 32-46
 - PC0-PC31: 64-95
 - PD0-PD31: 96-127
 
-The SAM4E8E package has no PB15-PB31 pins, so Firmata marks those indices as unsupported. The 12 MHz crystal uses PB8/PB9. USB uses PB10/PB11, so Firmata also marks those pins as unsupported. PE0-PE5 use indices outside Firmata's 0-127 pin range, so this port does not expose them.
+The SAM4E8E package has no PB15-PB31 pins, so Firmata marks those indices as unsupported. The 12 MHz crystal uses PB8/PB9. USB uses PB10/PB11, so Firmata also marks those pins as unsupported. The GPIO layer can address PE0-PE5, but standard Firmata pin numbers stop at 127, so this Firmata transport cannot expose them.
 
 A system reset puts every exposed Firmata pin into high-impedance digital input mode. This is safer for the printer board than driving all digital pins during reset. The host can then select output or pull-up modes explicitly.
 

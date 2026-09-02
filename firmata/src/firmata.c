@@ -39,6 +39,137 @@
 #define FIRMATA_SYSEX_CAPACITY 64u
 #define FIRMATA_TX_CAPACITY (FIRMATA_PIN_COUNT * 7u + 3u)
 
+typedef struct {
+    gpio_pin_t gpio;
+    bool available;
+} firmata_pin_mapping_t;
+
+#define FIRMATA_GPIO(pin) [pin] = {.gpio = (gpio_pin_t)(pin), .available = true}
+
+static const firmata_pin_mapping_t firmata_pins[FIRMATA_PIN_COUNT] = {
+    /* PIOA */
+    FIRMATA_GPIO(PIO_PA0_IDX),
+    FIRMATA_GPIO(PIO_PA1_IDX),
+    FIRMATA_GPIO(PIO_PA2_IDX),
+    FIRMATA_GPIO(PIO_PA3_IDX),
+    FIRMATA_GPIO(PIO_PA4_IDX),
+    FIRMATA_GPIO(PIO_PA5_IDX),
+    FIRMATA_GPIO(PIO_PA6_IDX),
+    FIRMATA_GPIO(PIO_PA7_IDX),
+    FIRMATA_GPIO(PIO_PA8_IDX),
+    FIRMATA_GPIO(PIO_PA9_IDX),
+    FIRMATA_GPIO(PIO_PA10_IDX),
+    FIRMATA_GPIO(PIO_PA11_IDX),
+    FIRMATA_GPIO(PIO_PA12_IDX),
+    FIRMATA_GPIO(PIO_PA13_IDX),
+    FIRMATA_GPIO(PIO_PA14_IDX),
+    FIRMATA_GPIO(PIO_PA15_IDX),
+    FIRMATA_GPIO(PIO_PA16_IDX),
+    FIRMATA_GPIO(PIO_PA17_IDX),
+    FIRMATA_GPIO(PIO_PA18_IDX),
+    FIRMATA_GPIO(PIO_PA19_IDX),
+    FIRMATA_GPIO(PIO_PA20_IDX),
+    FIRMATA_GPIO(PIO_PA21_IDX),
+    FIRMATA_GPIO(PIO_PA22_IDX),
+    FIRMATA_GPIO(PIO_PA23_IDX),
+    FIRMATA_GPIO(PIO_PA24_IDX),
+    FIRMATA_GPIO(PIO_PA25_IDX),
+    FIRMATA_GPIO(PIO_PA26_IDX),
+    FIRMATA_GPIO(PIO_PA27_IDX),
+    FIRMATA_GPIO(PIO_PA28_IDX),
+    FIRMATA_GPIO(PIO_PA29_IDX),
+    FIRMATA_GPIO(PIO_PA30_IDX),
+    FIRMATA_GPIO(PIO_PA31_IDX),
+
+    /* PIOB. PB8/PB9 are the crystal; PB10/PB11 are USB. */
+    FIRMATA_GPIO(PIO_PB0_IDX),
+    FIRMATA_GPIO(PIO_PB1_IDX),
+    FIRMATA_GPIO(PIO_PB2_IDX),
+    FIRMATA_GPIO(PIO_PB3_IDX),
+    FIRMATA_GPIO(PIO_PB4_IDX),
+    FIRMATA_GPIO(PIO_PB5_IDX),
+    FIRMATA_GPIO(PIO_PB6_IDX),
+    FIRMATA_GPIO(PIO_PB7_IDX),
+    FIRMATA_GPIO(PIO_PB12_IDX),
+    FIRMATA_GPIO(PIO_PB13_IDX),
+    FIRMATA_GPIO(PIO_PB14_IDX),
+
+    /* PIOC */
+    FIRMATA_GPIO(PIO_PC0_IDX),
+    FIRMATA_GPIO(PIO_PC1_IDX),
+    FIRMATA_GPIO(PIO_PC2_IDX),
+    FIRMATA_GPIO(PIO_PC3_IDX),
+    FIRMATA_GPIO(PIO_PC4_IDX),
+    FIRMATA_GPIO(PIO_PC5_IDX),
+    FIRMATA_GPIO(PIO_PC6_IDX),
+    FIRMATA_GPIO(PIO_PC7_IDX),
+    FIRMATA_GPIO(PIO_PC8_IDX),
+    FIRMATA_GPIO(PIO_PC9_IDX),
+    FIRMATA_GPIO(PIO_PC10_IDX),
+    FIRMATA_GPIO(PIO_PC11_IDX),
+    FIRMATA_GPIO(PIO_PC12_IDX),
+    FIRMATA_GPIO(PIO_PC13_IDX),
+    FIRMATA_GPIO(PIO_PC14_IDX),
+    FIRMATA_GPIO(PIO_PC15_IDX),
+    FIRMATA_GPIO(PIO_PC16_IDX),
+    FIRMATA_GPIO(PIO_PC17_IDX),
+    FIRMATA_GPIO(PIO_PC18_IDX),
+    FIRMATA_GPIO(PIO_PC19_IDX),
+    FIRMATA_GPIO(PIO_PC20_IDX),
+    FIRMATA_GPIO(PIO_PC21_IDX),
+    FIRMATA_GPIO(PIO_PC22_IDX),
+    FIRMATA_GPIO(PIO_PC23_IDX),
+    FIRMATA_GPIO(PIO_PC24_IDX),
+    FIRMATA_GPIO(PIO_PC25_IDX),
+    FIRMATA_GPIO(PIO_PC26_IDX),
+    FIRMATA_GPIO(PIO_PC27_IDX),
+    FIRMATA_GPIO(PIO_PC28_IDX),
+    FIRMATA_GPIO(PIO_PC29_IDX),
+    FIRMATA_GPIO(PIO_PC30_IDX),
+    FIRMATA_GPIO(PIO_PC31_IDX),
+
+    /* PIOD */
+    FIRMATA_GPIO(PIO_PD0_IDX),
+    FIRMATA_GPIO(PIO_PD1_IDX),
+    FIRMATA_GPIO(PIO_PD2_IDX),
+    FIRMATA_GPIO(PIO_PD3_IDX),
+    FIRMATA_GPIO(PIO_PD4_IDX),
+    FIRMATA_GPIO(PIO_PD5_IDX),
+    FIRMATA_GPIO(PIO_PD6_IDX),
+    FIRMATA_GPIO(PIO_PD7_IDX),
+    FIRMATA_GPIO(PIO_PD8_IDX),
+    FIRMATA_GPIO(PIO_PD9_IDX),
+    FIRMATA_GPIO(PIO_PD10_IDX),
+    FIRMATA_GPIO(PIO_PD11_IDX),
+    FIRMATA_GPIO(PIO_PD12_IDX),
+    FIRMATA_GPIO(PIO_PD13_IDX),
+    FIRMATA_GPIO(PIO_PD14_IDX),
+    FIRMATA_GPIO(PIO_PD15_IDX),
+    FIRMATA_GPIO(PIO_PD16_IDX),
+    FIRMATA_GPIO(PIO_PD17_IDX),
+    FIRMATA_GPIO(PIO_PD18_IDX),
+    FIRMATA_GPIO(PIO_PD19_IDX),
+    FIRMATA_GPIO(PIO_PD20_IDX),
+    FIRMATA_GPIO(PIO_PD21_IDX),
+    FIRMATA_GPIO(PIO_PD22_IDX),
+    FIRMATA_GPIO(PIO_PD23_IDX),
+    FIRMATA_GPIO(PIO_PD24_IDX),
+    FIRMATA_GPIO(PIO_PD25_IDX),
+    FIRMATA_GPIO(PIO_PD26_IDX),
+    FIRMATA_GPIO(PIO_PD27_IDX),
+    FIRMATA_GPIO(PIO_PD28_IDX),
+    FIRMATA_GPIO(PIO_PD29_IDX),
+    FIRMATA_GPIO(PIO_PD30_IDX),
+    FIRMATA_GPIO(PIO_PD31_IDX),
+};
+
+#undef FIRMATA_GPIO
+
+_Static_assert(PIO_PD31_IDX == FIRMATA_PIN_COUNT - 1u,
+               "Firmata pin range must end at PD31");
+_Static_assert(PIO_PE0_IDX == FIRMATA_PIN_COUNT,
+               "PE pins must remain outside the 7-bit Firmata pin range");
+
 static const char firmware_name[] = "ConfigurableFirmata";
 
 static uint8_t pin_mode[FIRMATA_PIN_COUNT];
@@ -60,13 +191,9 @@ static uint8_t tx_buffer[FIRMATA_TX_CAPACITY];
 static size_t tx_length;
 static size_t tx_offset;
 
-static bool pin_available(uint8_t pin)
+static bool firmata_pin_available(uint8_t firmata_pin)
 {
-    if (!gpio_valid((gpio_pin_t)pin))
-        return false;
-
-    return pin != GPIO_PB8 && pin != GPIO_PB9 &&
-           pin != GPIO_PB10 && pin != GPIO_PB11;
+    return firmata_pins[firmata_pin].available;
 }
 
 static bool tx_pending(void)
@@ -133,7 +260,7 @@ static void queue_capability_response(void)
 {
     tx_sysex_begin(CAPABILITY_RESPONSE);
     for (uint16_t pin = 0u; pin < FIRMATA_PIN_COUNT; ++pin) {
-        if (pin_available((uint8_t)pin)) {
+        if (firmata_pin_available((uint8_t)pin)) {
             tx_byte(PIN_MODE_INPUT);
             tx_byte(1u);
             tx_byte(PIN_MODE_OUTPUT);
@@ -154,15 +281,12 @@ static void queue_analog_mapping_response(void)
     tx_sysex_end();
 }
 
-static void queue_pin_state_response(uint8_t pin)
+static void queue_pin_state_response(uint8_t firmata_pin)
 {
-    if (pin >= FIRMATA_PIN_COUNT)
-        return;
-
     tx_sysex_begin(PIN_STATE_RESPONSE);
-    tx_byte(pin);
-    tx_byte(pin_mode[pin]);
-    tx_byte(pin_state[pin] & 0x7fu);
+    tx_byte(firmata_pin);
+    tx_byte(pin_mode[firmata_pin]);
+    tx_byte(pin_state[firmata_pin] & 0x7fu);
     tx_sysex_end();
 }
 
@@ -172,12 +296,13 @@ static uint8_t read_port(uint8_t port)
     const uint8_t first_pin = (uint8_t)(port * 8u);
 
     for (uint8_t bit = 0u; bit < 8u; ++bit) {
-        const uint8_t pin = (uint8_t)(first_pin + bit);
-        if (!pin_available(pin))
+        const uint8_t firmata_pin = (uint8_t)(first_pin + bit);
+        if (!firmata_pin_available(firmata_pin))
             continue;
-        if (pin_mode[pin] != PIN_MODE_INPUT && pin_mode[pin] != PIN_MODE_PULLUP)
+        if (pin_mode[firmata_pin] != PIN_MODE_INPUT &&
+            pin_mode[firmata_pin] != PIN_MODE_PULLUP)
             continue;
-        if (gpio_read((gpio_pin_t)pin))
+        if (gpio_read(firmata_pins[firmata_pin].gpio))
             value |= (uint8_t)(1u << bit);
     }
     return value;
@@ -190,51 +315,53 @@ static void append_digital_port(uint8_t port, uint8_t value)
     tx_byte(value >> 7);
 }
 
-static void set_pin_mode(uint8_t pin, uint8_t mode)
+static void set_pin_mode(uint8_t firmata_pin, uint8_t mode)
 {
-    if (pin >= FIRMATA_PIN_COUNT || !pin_available(pin))
+    if (!firmata_pin_available(firmata_pin))
         return;
+
+    const gpio_pin_t gpio_pin = firmata_pins[firmata_pin].gpio;
 
     switch (mode) {
     case PIN_MODE_INPUT:
-        gpio_input((gpio_pin_t)pin, GPIO_PULL_NONE);
-        pin_mode[pin] = PIN_MODE_INPUT;
-        pin_state[pin] = 0u;
+        gpio_input(gpio_pin, GPIO_PULL_NONE);
+        pin_mode[firmata_pin] = PIN_MODE_INPUT;
+        pin_state[firmata_pin] = 0u;
         break;
     case PIN_MODE_OUTPUT:
-        gpio_output((gpio_pin_t)pin, false);
-        pin_mode[pin] = PIN_MODE_OUTPUT;
-        pin_state[pin] = 0u;
+        gpio_output(gpio_pin, false);
+        pin_mode[firmata_pin] = PIN_MODE_OUTPUT;
+        pin_state[firmata_pin] = 0u;
         break;
     case PIN_MODE_PULLUP:
-        gpio_input((gpio_pin_t)pin, GPIO_PULL_UP);
-        pin_mode[pin] = PIN_MODE_PULLUP;
-        pin_state[pin] = 1u;
+        gpio_input(gpio_pin, GPIO_PULL_UP);
+        pin_mode[firmata_pin] = PIN_MODE_PULLUP;
+        pin_state[firmata_pin] = 1u;
         break;
     default:
         break;
     }
 }
 
-static void set_pin_value(uint8_t pin, uint8_t value)
+static void set_pin_value(uint8_t firmata_pin, uint8_t value)
 {
-    if (pin >= FIRMATA_PIN_COUNT || !pin_available(pin))
+    if (!firmata_pin_available(firmata_pin))
         return;
-    if (pin_mode[pin] != PIN_MODE_OUTPUT)
+    if (pin_mode[firmata_pin] != PIN_MODE_OUTPUT)
         return;
 
     const bool high = value != 0u;
-    gpio_write((gpio_pin_t)pin, high);
-    pin_state[pin] = high ? 1u : 0u;
+    gpio_write(firmata_pins[firmata_pin].gpio, high);
+    pin_state[firmata_pin] = high ? 1u : 0u;
 }
 
 static void write_digital_port(uint8_t port, uint16_t value)
 {
     const uint8_t first_pin = (uint8_t)(port * 8u);
     for (uint8_t bit = 0u; bit < 8u; ++bit) {
-        const uint8_t pin = (uint8_t)(first_pin + bit);
-        if (pin_mode[pin] == PIN_MODE_OUTPUT)
-            set_pin_value(pin, (uint8_t)((value >> bit) & 1u));
+        const uint8_t firmata_pin = (uint8_t)(first_pin + bit);
+        if (pin_mode[firmata_pin] == PIN_MODE_OUTPUT)
+            set_pin_value(firmata_pin, (uint8_t)((value >> bit) & 1u));
     }
 }
 
@@ -257,14 +384,14 @@ static void reset_system(void)
     pending_needed = 0u;
     parsing_sysex = false;
     sysex_length = 0u;
-    for (uint16_t pin = 0u; pin < FIRMATA_PIN_COUNT; ++pin) {
-        if (pin_available((uint8_t)pin)) {
-            gpio_input((gpio_pin_t)pin, GPIO_PULL_NONE);
-            pin_mode[pin] = PIN_MODE_INPUT;
+    for (uint16_t firmata_pin = 0u; firmata_pin < FIRMATA_PIN_COUNT; ++firmata_pin) {
+        if (firmata_pin_available((uint8_t)firmata_pin)) {
+            gpio_input(firmata_pins[firmata_pin].gpio, GPIO_PULL_NONE);
+            pin_mode[firmata_pin] = PIN_MODE_INPUT;
         } else {
-            pin_mode[pin] = PIN_MODE_IGNORE;
+            pin_mode[firmata_pin] = PIN_MODE_IGNORE;
         }
-        pin_state[pin] = 0u;
+        pin_state[firmata_pin] = 0u;
     }
     for (uint8_t port = 0u; port < FIRMATA_PORT_COUNT; ++port) {
         report_ports[port] = 0u;
