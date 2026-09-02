@@ -1,3 +1,4 @@
+device := "/dev/tty.usbmodem101"
 cross_compile := env_var_or_default("CROSS_COMPILE", "arm-none-eabi-")
 cc := cross_compile + "gcc"
 objcopy := cross_compile + "objcopy"
@@ -13,17 +14,17 @@ default:
 
 build:
     mkdir -p build/src build/platform
-    {{cc}} {{cppflags}} {{cflags}} -c src/main.c -o build/src/main.o
-    {{cc}} {{cppflags}} {{cflags}} -c platform/startup.c -o build/platform/startup.o
-    {{cc}} {{cppflags}} {{cflags}} -c platform/clock.c -o build/platform/clock.o
-    {{cc}} {{cppflags}} {{cflags}} -c platform/gpio.c -o build/platform/gpio.o
-    {{cc}} {{cppflags}} {{cflags}} -c platform/usb_cdc.c -o build/platform/usb_cdc.o
-    {{cc}} {{ldflags}} build/src/main.o build/platform/startup.o build/platform/clock.o build/platform/gpio.o build/platform/usb_cdc.o -lgcc -o build/firmware.elf
-    {{objcopy}} -O binary build/firmware.elf build/firmware.bin
-    {{size}} build/firmware.elf
+    {{ cc }} {{ cppflags }} {{ cflags }} -c src/main.c -o build/src/main.o
+    {{ cc }} {{ cppflags }} {{ cflags }} -c platform/startup.c -o build/platform/startup.o
+    {{ cc }} {{ cppflags }} {{ cflags }} -c platform/clock.c -o build/platform/clock.o
+    {{ cc }} {{ cppflags }} {{ cflags }} -c platform/gpio.c -o build/platform/gpio.o
+    {{ cc }} {{ cppflags }} {{ cflags }} -c platform/usb_cdc.c -o build/platform/usb_cdc.o
+    {{ cc }} {{ ldflags }} build/src/main.o build/platform/startup.o build/platform/clock.o build/platform/gpio.o build/platform/usb_cdc.o -lgcc -o build/firmware.elf
+    {{ objcopy }} -O binary build/firmware.elf build/firmware.bin
+    {{ size }} build/firmware.elf
 
-flash device file="build/firmware.bin": build
-    bossac --port={{ device }} -e -w -v -b {{ file }}
+flash port=device file="build/firmware.bin": build
+    bossac --port={{ port }} -e -w -v -b {{ file }}
 
 clean:
     rm -rf build
