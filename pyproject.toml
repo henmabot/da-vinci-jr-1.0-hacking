@@ -1,0 +1,9 @@
+[project]
+name = "da-vinci-jr-1-0-hacking"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pyfirmata2>=2.5.1",
+]

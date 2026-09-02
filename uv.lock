@@ -1,0 +1,35 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[[package]]
+name = "da-vinci-jr-1-0-hacking"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "pyfirmata2" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyfirmata2", specifier = ">=2.5.1" }]
+
+[[package]]
+name = "pyfirmata2"
+version = "2.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyserial" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/16/60f33d9b37dccffeeabdc46c4ea751ddeb585fc72ac47243eecfdf718079/pyFirmata2-2.5.1.tar.gz", hash = "sha256:5ef8fc5caec084e72c6b7f199362a743854c9bd63a93cacbaa0c7bbb99efef75", size = 15523, upload-time = "2024-11-27T08:15:25.179Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/3b/fca22decea624feffb82f5feb3e898a167b0b0e9f93614faec86a2a13e66/pyFirmata2-2.5.1-py3-none-any.whl", hash = "sha256:0b5479b152afb6902b5c7c458d4fd496957776db98287e4b317c21269ebe908e", size = 14640, upload-time = "2024-11-27T08:15:09.752Z" },
+]
+
+[[package]]
+name = "pyserial"
+version = "3.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/7d/ae3f0a63f41e4d2f6cb66a5b57197850f919f59e558159a4dd3a818f5082/pyserial-3.5.tar.gz", hash = "sha256:3c77e014170dfffbd816e6ffc205e9842efb10be9f58ec16d3e8675b4925cddb", size = 159125, upload-time = "2020-11-23T03:59:15.045Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/bc/587a445451b253b285629263eb51c2d8e9bcea4fc97826266d186f96f558/pyserial-3.5-py2.py3-none-any.whl", hash = "sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0", size = 90585, upload-time = "2020-11-23T03:59:13.41Z" },
+]
