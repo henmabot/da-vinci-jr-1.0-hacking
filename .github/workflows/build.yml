@@ -1,0 +1,32 @@
+name: Build firmware
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: gcc-arm-none-eabi just
+          version: 1.0
+
+      - name: Build firmware
+        run: just build
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: sam4e8e-firmware
+          path: |
+            build/firmware.elf
+            build/firmware.bin
+            build/firmware.map
+          if-no-files-found: error
