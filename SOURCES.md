@@ -33,6 +33,12 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 - <a name="datasheet-nxp-an10968"></a> **[NXP Application Note AN10968](https://www.nxp.com/docs/en/application-note/AN10968.pdf)**
 - <a name="datasheet-nxp-um10398"></a> **[NXP User Manual UM10398](https://www.usr.cn/Uploads/Attach/201010/user.manual.lpc11xx.lpc11cxx.pdf)** (3. party link due to NXP having the link behind a login, the original can be found here: [NXP UM10398](https://www.nxp.com/webapp/Download?colCode=UM10398&location=null))
 
+## Firmware development
+
+- **[Klipper](https://github.com/klipper3d/klipper)**: primary source/reference for the SAM4E8E clock, Cortex-M startup/linker, GPIO register sequencing, and USB CDC/UDP implementation used by the SAM4E8E firmware foundation. Klipper-derived files retain their GPLv3 notices.
+- **[Atmel Software Framework](https://github.com/avrxml/asf)**: cross-reference for SAM4E8E device definitions, memory layout, and clock/USB behavior. Imported Atmel device files retain their original license headers.
+- **[ConfigurableFirmata](https://github.com/firmata/ConfigurableFirmata)** and **[Firmata protocol](https://github.com/firmata/protocol)**: sources for the digital GPIO and byte-stream facilities required by the later Firmata port.
+
 ## Firmware Archives
 
 - <a name="archive-archiveorg"></a> **[Da Vinci Jr. Firmware Archive (Archive.org)](https://archive.org/details/da-vinci-jr-firmware)**
