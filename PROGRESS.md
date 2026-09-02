@@ -60,3 +60,7 @@ Update: okay they are all fused, i was just blind. on a side note, all my fuses 
 ### Update 01.09.2026 22:00 GMT+3:
 
 Its getting tiring to trace everything manually on the main board since its too big to keep track of, especially since the high amount of vias. I keep losing track of which pin goes where, especially power pins, which makes it look like stuff are getting power from some divine place or something, i cant find the source of the power. I will continue tracing by creating a serial firmware to poke at the pins. For now ill do something basic that prints the triggered pins to serial, in the future i can make some firmata style interface or a firmata fork for it if i need to.
+
+### Update 02.09.2026 13:00 GMT+3:
+
+I checked the klipper source, firmata source and RRF source and decided to take the klipper gpio and uart code, take their linker and compiling scripts, gut klipper specific stuff from them and implement firmata on it. It will take a while probably since im not too familiar with raw C toolchain and their flags.

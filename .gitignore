@@ -4,13 +4,6 @@ compile_commands.json
 
 
 # Firmware Demos
-conf/
-asf/
-asf-full/
-src/
-vendor/
-Makefile
-Justfile
 build/
 
 # Klipper
@@ -22,3 +15,7 @@ ghidra/
 
 # DFP files
 *_DFP.*
+
+# KiCAD stuff
+schematic/*.lck
+schematic/.history/
