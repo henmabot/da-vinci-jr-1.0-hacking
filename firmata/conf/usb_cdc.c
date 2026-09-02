@@ -134,7 +134,7 @@ static uint32_t usb_read_packet(uint32_t endpoint, uint32_t csr, uint8_t *data, 
     const uint32_t length = packet_length < max_length ? packet_length : max_length;
 
     for (uint32_t i = 0; i < length; ++i)
-        data[i] = UDP->UDP_FDR[endpoint];
+        data[i] = (uint8_t)UDP->UDP_FDR[endpoint];
     return length;
 }
 
@@ -254,7 +254,7 @@ static void usb_rx_kick(void)
             return;
 
         for (uint32_t i = 0; i < length; ++i) {
-            rx_buffer[rx_head] = UDP->UDP_FDR[USB_EP_BULK_OUT];
+            rx_buffer[rx_head] = (uint8_t)UDP->UDP_FDR[USB_EP_BULK_OUT];
             rx_head = (rx_head + 1u) & USB_BUFFER_MASK;
         }
 

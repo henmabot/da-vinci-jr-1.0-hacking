@@ -190,12 +190,6 @@ static void append_digital_port(uint8_t port, uint8_t value)
     tx_byte(value >> 7);
 }
 
-static void queue_digital_port(uint8_t port, uint8_t value)
-{
-    tx_clear();
-    append_digital_port(port, value);
-}
-
 static void set_pin_mode(uint8_t pin, uint8_t mode)
 {
     if (pin >= FIRMATA_PIN_COUNT || !pin_available(pin))
@@ -250,11 +244,12 @@ static void set_report_digital(uint8_t port, uint8_t enabled)
     if (report_ports[port] != 0u) {
         const uint8_t value = read_port(port);
         previous_ports[port] = value;
-        queue_digital_port(port, value);
+        tx_clear();
+        append_digital_port(port, value);
     }
 }
 
-static void reset_parser(void)
+static void reset_system(void)
 {
     pending_command = 0u;
     pending_channel = 0u;
@@ -262,11 +257,6 @@ static void reset_parser(void)
     pending_needed = 0u;
     parsing_sysex = false;
     sysex_length = 0u;
-}
-
-static void reset_system(void)
-{
-    reset_parser();
     for (uint16_t pin = 0u; pin < FIRMATA_PIN_COUNT; ++pin) {
         if (pin_available((uint8_t)pin)) {
             gpio_input((gpio_pin_t)pin, GPIO_PULL_NONE);

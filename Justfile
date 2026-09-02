@@ -10,7 +10,7 @@ size := cross_compile + "size"
 
 cpu_flags := "-mcpu=cortex-m4 -mthumb -mfloat-abi=soft"
 cppflags := "-I" + src_dir + " -I" + conf_dir + " -I" + vendor_dir + "/sam4e/include -I" + vendor_dir + "/cmsis-core"
-cflags := cpu_flags + " -std=gnu11 -ffreestanding -Os -g3 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fno-common -fno-unwind-tables -fno-asynchronous-unwind-tables"
+cflags := cpu_flags + " -std=gnu11 -ffreestanding -Os -g3 -Wall -Wextra -Werror -Wshadow -Wconversion -Wsign-conversion -Wcast-align=strict -Wformat=2 -Wundef -Wstrict-prototypes -Wpointer-arith -Wwrite-strings -Wswitch-enum -Wdouble-promotion -Wvla -ffunction-sections -fdata-sections -fno-common -fno-unwind-tables -fno-asynchronous-unwind-tables"
 ldflags := cpu_flags + " -nostdlib -T" + conf_dir + "/sam4e8e.ld -Wl,--gc-sections -Wl,--build-id=none -Wl,-Map,build/firmware.map"
 
 default:
