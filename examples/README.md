@@ -6,6 +6,12 @@ The available examples are:
 
 - [Blink](blink.bin) ([source](https://github.com/itsyumiki/da-vinci-jr-1.0-hacking/tree/bca9b8ce5da0e177e398c52942f69a1dbfcbf0b6))
 
+> **How to flash?**
+>
+> You can use [BOSSA](https://github.com/shumatech/BOSSA) to flash the firmware: `bossac -p <port> -i -e -w -v blink.bin`
+>
+> More instructions about flashing and erasing the chip will be added in the future.
+
 ## Blink
 
 The Blink example is a simple firmware that blinks the top light of the board. It also has USB CDC test, and repeatedly prints the status of the X axis endstop to the serial console.
