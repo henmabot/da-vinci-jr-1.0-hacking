@@ -1,0 +1,85 @@
+# SAM4E8E Firmware Foundation
+
+This repository now contains a small bare-metal firmware base for the ATSAM4E8E on the Da Vinci Jr. main board. It is intended as the platform layer for a later Firmata port; Firmata itself is not included.
+
+## Build
+
+Install an ARM embedded GCC toolchain that provides `arm-none-eabi-gcc`, then run:
+
+```sh
+make
+```
+
+The build produces:
+
+- `build/firmware.elf`
+- `build/firmware.bin`
+- `build/firmware.map`
+
+Run `make clean` to remove generated files.
+
+The build is deliberately explicit: `Makefile` lists every compiled source, include directory, CPU flag, and the `linker/sam4e8e.ld` linker script. There is no UART build path.
+
+## Example
+
+`src/main.c`:
+
+- configures PD23 as an output;
+- configures PD8 as a digital input;
+- initializes USB CDC ACM;
+- toggles PD23 continuously;
+- reports PD8 over USB CDC with a monotonically increasing counter.
+
+The output is of the form:
+
+```text
+hello world 1, pd8 is high
+hello world 2, pd8 is low
+```
+
+USB output is non-blocking. If the host stops consuming data, the example keeps blinking PD23 instead of blocking on serial output.
+
+## Platform interfaces
+
+Application code uses two small interfaces:
+
+- `include/gpio.h`: configure input/output, enable input pull-up, write, toggle, and read GPIOs;
+- `include/usb_cdc.h`: initialize CDC, check configuration state, write bytes, query received bytes, and read bytes.
+
+These cover the immediate low-level needs found in ConfigurableFirmata's digital input/output modules and its byte-stream transport. A later Firmata adapter can add Arduino-style `Stream` glue without changing the SAM4E8E GPIO or USB implementation.
+
+## Implementation sources
+
+The implementation was intentionally reduced to SAM4E8E + USB CDC rather than importing a complete MCU framework.
+
+- Klipper commit `f0892d82b0f1c1228454f09eb508eddde2250f4b` was the primary working reference.
+  - `platform/usb_cdc.c` is substantially adapted from `src/atsam/sam4_usb.c` and the CDC control/descriptor logic in `src/generic/usb_cdc.c`.
+  - `platform/gpio.c` follows the SAM4 register sequences in `src/atsam/gpio.c`.
+  - `platform/startup.c` and `linker/sam4e8e.ld` are adapted from Klipper's generic Cortex-M startup/linker path.
+  - `platform/clock.c` is reduced from Klipper's vendored `lib/sam4e/gcc/system_sam4e.c` to the 120 MHz `SystemInit` path used here.
+  - `vendor/sam4e/` contains a SAM4E8E-specific trimmed device header plus only the Atmel PIO/PMC/UDP/WDT/EFC and pin-definition headers this build reaches. `vendor/cmsis-core/` contains only the CMSIS Cortex-M4 transitive headers reached by the compiler.
+- ASF commit `68cddb46ae5ebc24ef8287a8d4c61a6efa5e2848` was inspected to cross-check the SAM4E8E memory map, device definitions, and linker layout. No ASF driver/service tree is compiled.
+- The local `reference/` project supplied for this work was inspected for board-specific evidence, especially PD23 and prior USB CDC bring-up. Its project structure and ASF driver stack were not copied into this implementation.
+- ConfigurableFirmata commit `3734757348263e890d276f7e4fbc1f7e2bf5f2b9` and Firmata protocol commit `7908873e8faae33111143aa6cc236148b12118f2` were inspected for platform requirements only.
+
+Klipper-derived source files retain their GPLv3 copyright/license notices. Imported Atmel and Arm CMSIS files retain their original license headers.
+
+## Clock and USB path
+
+The clock setup uses Klipper's SAM4E path: a 12 MHz crystal feeds PLLA, producing 240 MHz PLLA and a 120 MHz master clock. USB divides PLLA by five to obtain the required 48 MHz device clock.
+
+USB CDC is the only serial transport. PB10/PB11 are the SAM4E USB data pins used by the UDP peripheral; no UART/USART initialization or logging code is compiled.
+
+The USB descriptor currently uses the VID/PID pair used by Klipper (`1d50:614e`) as a development identity. A product-specific USB identity must be chosen before distributing this as a distinct USB product.
+
+## Verification status
+
+The firmware has been compiler/linker verified with ARM GCC. Static ELF/map/disassembly checks verify that:
+
+- the vector table starts at flash address `0x00400000`;
+- `Reset_Handler`, `SystemInit`, and `UDP_Handler` are linked;
+- the linker uses 512 KiB flash at `0x00400000` and 128 KiB RAM at `0x20000000`;
+- the USB CDC implementation is present;
+- PD8 and PD23 compile to SAM4E8E pin indices 104 and 119, matching `PIO_PD8_IDX` and `PIO_PD23_IDX` from the imported device definitions.
+
+No SAM4E8E board or debug probe was available in the build environment. USB enumeration, actual CDC output, PD23 blinking, and PD8 electrical state changes therefore still require physical-board validation.

@@ -34,6 +34,12 @@ Current progress on official firmware:
 
 I will create a flashing section for per-chip guide on flashing them, after finishing the dumping section. Until then, you can use the flashing tool mentioned in the [dumping section](firmware/dumping-sam4e8e.md).
 
+## SAM4E8E Firmware Foundation
+
+A minimal SAM4E8E + USB CDC firmware base for future Firmata work is documented in [firmware/sam4e8e-foundation.md](firmware/sam4e8e-foundation.md).
+
+It includes explicit ARM GCC build rules, startup/vector/linker support, GPIO access, USB CDC byte I/O, and a PD23/PD8 example without a hardware UART dependency.
+
 ## Possible Firmware Options
 
 I separated this section as:
