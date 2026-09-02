@@ -4,10 +4,10 @@ This repository now contains a small bare-metal firmware base for the ATSAM4E8E 
 
 ## Build
 
-Install an ARM embedded GCC toolchain that provides `arm-none-eabi-gcc`, then run:
+Install `just` and an ARM embedded GCC toolchain that provides `arm-none-eabi-gcc`, then run:
 
 ```sh
-make
+just build
 ```
 
 The build produces:
@@ -16,9 +16,9 @@ The build produces:
 - `build/firmware.bin`
 - `build/firmware.map`
 
-Run `make clean` to remove generated files.
+Run `just clean` to remove generated files.
 
-The build is deliberately explicit: `Makefile` lists every compiled source, include directory, CPU flag, and the `linker/sam4e8e.ld` linker script. There is no UART build path.
+The build is deliberately explicit: `Justfile` lists every compiled source, include directory, CPU flag, and the `linker/sam4e8e.ld` linker script. There is no UART build path.
 
 ## Example
 
