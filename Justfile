@@ -1,5 +1,5 @@
 device := "/dev/tty.usbmodem101"
-cross_compile := env_var_or_default("CROSS_COMPILE", "arm-none-eabi-")
+cross_compile := env("CROSS_COMPILE", "arm-none-eabi-")
 cc := cross_compile + "gcc"
 objcopy := cross_compile + "objcopy"
 size := cross_compile + "size"
