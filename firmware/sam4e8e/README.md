@@ -18,11 +18,11 @@ The build produces:
 
 Run `just clean` to remove generated files.
 
-The build is deliberately explicit: `Justfile` lists every compiled source, include directory, CPU flag, and the `linker/sam4e8e.ld` linker script. There is no UART build path.
+The build is deliberately explicit: `Justfile` lists every compiled source, include directory, CPU flag, and the `sam4e8e.ld` linker script. There is no UART build path.
 
 ## Example
 
-`src/main.c`:
+`main.c`:
 
 - configures PD23 as an output;
 - configures PD8 as a digital input;
@@ -43,8 +43,8 @@ USB output is non-blocking. If the host stops consuming data, the example keeps 
 
 Application code uses two small interfaces:
 
-- `include/gpio.h`: configure input/output, enable input pull-up, write, and read GPIOs;
-- `include/usb_cdc.h`: initialize CDC, write bytes, query received bytes, and read bytes.
+- `gpio.h`: configure input/output, enable input pull-up, write, and read GPIOs;
+- `usb_cdc.h`: initialize CDC, write bytes, query received bytes, and read bytes.
 
 These cover the immediate low-level needs found in ConfigurableFirmata's digital input/output modules and its byte-stream transport. A later Firmata adapter can add Arduino-style `Stream` glue without changing the SAM4E8E GPIO or USB implementation.
 
@@ -53,10 +53,10 @@ These cover the immediate low-level needs found in ConfigurableFirmata's digital
 The implementation was intentionally reduced to SAM4E8E + USB CDC rather than importing a complete MCU framework.
 
 - Klipper commit `f0892d82b0f1c1228454f09eb508eddde2250f4b` was the primary working reference.
-  - `platform/usb_cdc.c` is substantially adapted from `src/atsam/sam4_usb.c` and the CDC control/descriptor logic in `src/generic/usb_cdc.c`.
-  - `platform/gpio.c` follows the SAM4 register sequences in `src/atsam/gpio.c`.
-  - `platform/startup.c` and `linker/sam4e8e.ld` are adapted from Klipper's generic Cortex-M startup/linker path.
-  - `platform/clock.c` is reduced from Klipper's vendored `lib/sam4e/gcc/system_sam4e.c` to the 120 MHz `SystemInit` path used here.
+  - `usb_cdc.c` is substantially adapted from `src/atsam/sam4_usb.c` and the CDC control/descriptor logic in `src/generic/usb_cdc.c`.
+  - `gpio.c` follows the SAM4 register sequences in `src/atsam/gpio.c`.
+  - `startup.c` and `sam4e8e.ld` are adapted from Klipper's generic Cortex-M startup/linker path.
+  - `clock.c` is reduced from Klipper's vendored `lib/sam4e/gcc/system_sam4e.c` to the 120 MHz `SystemInit` path used here.
   - `vendor/sam4e/` contains a SAM4E8E-specific trimmed device header plus only the Atmel PIO/PMC/UDP/WDT/EFC and pin-definition headers this build reaches. `vendor/cmsis-core/` contains only the CMSIS Cortex-M4 transitive headers reached by the compiler.
 - ASF commit `68cddb46ae5ebc24ef8287a8d4c61a6efa5e2848` was inspected to cross-check the SAM4E8E memory map, device definitions, and linker layout. No ASF driver/service tree is compiled.
 - The local `reference/` project supplied for this work was inspected for board-specific evidence, especially PD23 and prior USB CDC bring-up. Its project structure and ASF driver stack were not copied into this implementation.

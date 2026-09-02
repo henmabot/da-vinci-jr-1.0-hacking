@@ -36,7 +36,7 @@ I will create a flashing section for per-chip guide on flashing them, after fini
 
 ## SAM4E8E Firmware Foundation
 
-A minimal SAM4E8E + USB CDC firmware base for future Firmata work is documented in [firmware/sam4e8e-foundation.md](firmware/sam4e8e-foundation.md).
+A minimal SAM4E8E + USB CDC firmware base for future Firmata work is documented in [firmware/sam4e8e/README.md](firmware/sam4e8e/README.md).
 
 It includes explicit ARM GCC build rules, startup/vector/linker support, GPIO access, USB CDC byte I/O, and a PD23/PD8 example without a hardware UART dependency.
 
