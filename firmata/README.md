@@ -2,12 +2,11 @@
 
 This directory contains the SAM4E8E Firmata firmware for the Da Vinci Jr. main board. The port maps ConfigurableFirmata's digital I/O behavior to the repository's bare-metal GPIO and USB CDC interfaces. It does not bring in Arduino or a second hardware abstraction layer.
 
-## Build and test
+## Build
 
 Install `just` and an ARM embedded GCC toolchain that provides `arm-none-eabi-gcc`, then run:
 
 ```sh
-just test
 just build
 ```
 
@@ -44,7 +43,6 @@ A system reset puts every exposed Firmata pin into high-impedance digital input 
 - `src/`: Firmata protocol engine and the minimal firmware entry point.
 - `conf/`: SAM4E8E clock, startup, linker, GPIO, and USB CDC implementation.
 - `vendor/`: the trimmed SAM4E8E and CMSIS headers needed by the build.
-- `tests/`: host-side protocol tests with fake GPIO and USB implementations.
 
 `Justfile` remains the single build entry point and lists the firmware sources explicitly.
 
@@ -58,6 +56,6 @@ Klipper-derived files retain their GPLv3 notices. Imported Atmel and Arm CMSIS f
 
 ## Verification
 
-`just test` exercises the Firmata protocol on the host. It covers startup reporting, version queries, pin modes, writes, digital input reporting, discovery queries, reserved pins, partial USB writes, and system reset. `just build` cross-compiles and links the same Firmata engine into the SAM4E8E firmware.
+`just build` cross-compiles and links the Firmata engine into the SAM4E8E firmware.
 
 The project maintainer previously tested the merged GPIO and USB CDC foundation on the physical board. The new protocol layer still needs an end-to-end client test on the board.

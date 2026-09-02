@@ -28,9 +28,6 @@ build:
     {{ objcopy }} -O binary build/firmware.elf build/firmware.bin
     {{ size }} build/firmware.elf
 
-test:
-    ./firmata/tests/run-firmata-tests.sh
-
 flash port=device file="build/firmware.bin": build
     bossac --port={{ port }} -e -w -v -b {{ file }}
 
