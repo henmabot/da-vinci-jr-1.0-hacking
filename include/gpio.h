@@ -18,7 +18,6 @@ typedef enum {
 void gpio_output(gpio_pin_t pin, bool initial_high);
 void gpio_input(gpio_pin_t pin, gpio_pull_t pull);
 void gpio_write(gpio_pin_t pin, bool high);
-
 bool gpio_read(gpio_pin_t pin);
 
 #endif
