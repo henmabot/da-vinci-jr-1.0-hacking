@@ -28,8 +28,8 @@ build:
     {{ objcopy }} -O binary build/firmware.elf build/firmware.bin
     {{ size }} build/firmware.elf
 
-flash port=device file="build/firmware.bin": build
-    bossac --port={{ port }} -e -w -v -b {{ file }}
+flash file="build/firmware.bin":
+    bossac --port={{ device }} -e -w -v -b {{ file }}
 
 clean:
     rm -rf build
