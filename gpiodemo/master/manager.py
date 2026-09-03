@@ -28,6 +28,7 @@
 # column-groups (first half / second half) inside a single shared
 # scrollable frame, so there's one scrollbar instead of two.
 
+import tkinter as tk
 from tkinter import ttk
 
 import customtkinter as ctk
@@ -40,6 +41,7 @@ INPUT_MODES = {"INPUT", "IN_PULLUP"}
 _DEFAULT_BUTTON_COLOR = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
 _PENDING_COLOR = "gray30"
 _ACTIVE_COLOR = ("#2fa572", "#106a43")
+_LABEL_TEXT_COLOR = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
 
 
 class PinsFrame(ctk.CTkFrame):
@@ -95,6 +97,7 @@ class PinsFrame(ctk.CTkFrame):
         self.on_toggle = on_toggle
 
         self.pin_map = pin_map
+        self._pin_label_color = _LABEL_TEXT_COLOR[ctk.get_appearance_mode() == "Dark"]
         self._rows = {}  # pin_name -> row state dict
 
         self.grid_rowconfigure(0, weight=1)
@@ -163,7 +166,14 @@ class PinsFrame(ctk.CTkFrame):
         table._next_row += 1
 
         pin_id = self.pin_map[pin][0]
-        pin_label = ctk.CTkLabel(table, text=f"{pin} ({pin_id})", anchor="w")
+        pin_label = tk.Label(
+            table,
+            text=f"{pin} ({pin_id})",
+            anchor="w",
+            bg=tk.Frame.cget(table, "bg"),
+            fg=self._pin_label_color,
+            bd=0,
+        )
         pin_label.grid(row=row_index, column=0, sticky="w", padx=4, pady=4)
 
         mode_var = ctk.StringVar(value=mode)
@@ -183,7 +193,7 @@ class PinsFrame(ctk.CTkFrame):
         status_label = ctk.CTkLabel(table, text="--", anchor="w")
         status_label.grid(row=row_index, column=2, sticky="w", padx=4, pady=4)
 
-        action_container = ctk.CTkFrame(table, fg_color="transparent")
+        action_container = ctk.CTkFrame(table, fg_color="transparent", corner_radius=0)
         action_container.grid(row=row_index, column=3, sticky="w", padx=4, pady=4)
 
         self._rows[pin] = {
@@ -221,28 +231,33 @@ class PinsFrame(ctk.CTkFrame):
                 container,
                 text="Read",
                 width=40,
+                corner_radius=0,
                 command=lambda p=pin: self._handle_read(p),
             )
             read_btn.pack(side="left", padx=(0, 6))
             row["read_btn"] = read_btn
-            self._refresh_read_button(pin)
 
             listen_btn = ctk.CTkButton(
-                container, width=50, command=lambda p=pin: self._handle_listen_toggle(p)
+                container,
+                text="Listen",
+                width=50,
+                corner_radius=0,
+                command=lambda p=pin: self._handle_listen_toggle(p),
             )
             listen_btn.pack(side="left")
             row["listen_btn"] = listen_btn
-            self._refresh_listen_button(pin)
+            if row["listen_pending"] or row["listening"]:
+                self._refresh_listen_button(pin)
         else:  # OUTPUT
             toggle_btn = ctk.CTkButton(
                 container,
                 text="Toggle",
                 width=50,
+                corner_radius=0,
                 command=lambda p=pin: self._handle_toggle(p),
             )
             toggle_btn.pack(side="left")
             row["toggle_btn"] = toggle_btn
-            self._refresh_toggle_button(pin)
 
     # ------------------------------------------------------------------
     # Button visual refreshers -- each reflects (pending, active) state
