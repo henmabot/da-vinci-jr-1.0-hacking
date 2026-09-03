@@ -28,6 +28,8 @@
 # column-groups (first half / second half) inside a single shared
 # scrollable frame, so there's one scrollbar instead of two.
 
+from tkinter import ttk
+
 import customtkinter as ctk
 
 __all__ = ["PinsFrame"]
@@ -165,12 +167,16 @@ class PinsFrame(ctk.CTkFrame):
         pin_label.grid(row=row_index, column=0, sticky="w", padx=4, pady=4)
 
         mode_var = ctk.StringVar(value=mode)
-        mode_menu = ctk.CTkOptionMenu(
+        mode_menu = ttk.Combobox(
             table,
             values=MODES,
-            variable=mode_var,
-            command=lambda selected, p=pin: self._handle_mode_change(p, selected),
-            width=120,
+            textvariable=mode_var,
+            state="readonly",
+            width=13,
+        )
+        mode_menu.bind(
+            "<<ComboboxSelected>>",
+            lambda _event, p=pin, var=mode_var: self._handle_mode_change(p, var.get()),
         )
         mode_menu.grid(row=row_index, column=1, sticky="w", padx=4, pady=4)
 
@@ -277,7 +283,7 @@ class PinsFrame(ctk.CTkFrame):
     def _refresh_mode_menu(self, pin):
         row = self._rows[pin]
         row["mode_menu"].configure(
-            state="disabled" if row["mode_pending"] else "normal"
+            state="disabled" if row["mode_pending"] else "readonly"
         )
 
     # ------------------------------------------------------------------
