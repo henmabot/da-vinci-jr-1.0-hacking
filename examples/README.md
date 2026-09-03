@@ -5,6 +5,7 @@ This folder contains example firmware builds that you can download and flash.
 The available examples are:
 
 - [Blink](blink.bin) ([source](https://github.com/itsyumiki/da-vinci-jr-1.0-hacking/tree/bca9b8ce5da0e177e398c52942f69a1dbfcbf0b6))
+- [Firmata](firmata.bin) ([source](https://github.com/itsyumiki/da-vinci-jr-1.0-hacking/tree/439d8da23159f4fe04f99cd8853af537ff3f54d0))
 
 > **How to flash?**
 >
@@ -35,3 +36,9 @@ hello world 11, pd8 is low
 ```
 
 > Its source code is available [here](https://github.com/itsyumiki/da-vinci-jr-1.0-hacking/tree/bca9b8ce5da0e177e398c52942f69a1dbfcbf0b6).
+
+## Firmata
+
+The Firmata example is a firmware that implements the Firmata protocol, allowing you to control the board via a serial connection. I couldnt get it to work properly, so I stopped working on it.
+
+> Its source code is available [here](https://github.com/itsyumiki/da-vinci-jr-1.0-hacking/tree/439d8da23159f4fe04f99cd8853af537ff3f54d0).
