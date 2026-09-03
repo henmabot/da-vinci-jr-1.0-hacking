@@ -1,4 +1,3 @@
-import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -18,11 +17,12 @@ _ACTIVE_COLOR = ("#2fa572", "#106a43")
 _HALF_WIDTH = 450
 _HEADER_HEIGHT = 36
 _ROW_HEIGHT = 36
+_ROWS_PER_HALF = 18
 _COLUMN_X = (4, 96, 220, 300)
 
 
 class PinsFrame(ctk.CTkFrame):
-    """Scrollable GPIO pin table with asynchronous backend callbacks."""
+    """Paginated GPIO pin table with asynchronous backend callbacks."""
 
     def __init__(
         self,
@@ -42,22 +42,40 @@ class PinsFrame(ctk.CTkFrame):
         self.on_listen = on_listen
         self.on_toggle = on_toggle
         self.pin_map = pin_map
-        self._rows = {}
         self._text_color = self._color(_LABEL_TEXT_COLOR)
+        self._visible_pins = set()
+        self._pin_names = list(pin_map)
+        page_size = _ROWS_PER_HALF * 2
+        self._pages = [
+            self._pin_names[index : index + page_size]
+            for index in range(0, len(self._pin_names), page_size)
+        ] or [[]]
+        self._page_index = 0
+        self._rows = {
+            pin: {
+                "mode_var": ctk.StringVar(value=default_mode),
+                "mode_menu": None,
+                "status": "--",
+                "status_item": None,
+                "primary_rect": None,
+                "primary_text": None,
+                "secondary_rect": None,
+                "secondary_text": None,
+                "listening": False,
+                "mode_pending": False,
+                "read_pending": False,
+                "listen_pending": False,
+                "toggle_pending": False,
+            }
+            for pin in self._pin_names
+        }
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        pin_names = list(pin_map)
-        split = (len(pin_names) + 1) // 2
-        left_pins = pin_names[:split]
-        right_pins = pin_names[split:]
-
-        self._build_canvas(max(len(left_pins), len(right_pins)))
-        for row_index, pin in enumerate(left_pins):
-            self._add_row(pin, default_mode, 0, row_index)
-        for row_index, pin in enumerate(right_pins):
-            self._add_row(pin, default_mode, 1, row_index)
+        self._build_canvas()
+        self._build_pager()
+        self._show_page(0)
 
     @staticmethod
     def _color(color):
@@ -65,7 +83,7 @@ class PinsFrame(ctk.CTkFrame):
             return color[ctk.get_appearance_mode() == "Dark"]
         return color
 
-    def _build_canvas(self, row_count):
+    def _build_canvas(self):
         background = self.cget("fg_color")
         if background == "transparent":
             background = tk.Frame.cget(self, "bg")
@@ -77,12 +95,9 @@ class PinsFrame(ctk.CTkFrame):
             bg=background,
             bd=0,
             highlightthickness=0,
-            yscrollincrement=30,
+            height=_HEADER_HEIGHT + _ROWS_PER_HALF * _ROW_HEIGHT,
         )
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
-        scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 8), pady=8)
+        self.canvas.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
         for half in range(2):
             half_x = half * _HALF_WIDTH
@@ -96,35 +111,58 @@ class PinsFrame(ctk.CTkFrame):
                     font=("TkDefaultFont", 10, "bold"),
                 )
 
-        self.canvas.configure(
-            scrollregion=(
-                0,
-                0,
-                _HALF_WIDTH * 2,
-                _HEADER_HEIGHT + row_count * _ROW_HEIGHT,
-            )
+    def _build_pager(self):
+        pager = ttk.Frame(self)
+        pager.grid(row=1, column=0, sticky="e", padx=8, pady=(0, 8))
+        self._prev_button = ttk.Button(
+            pager,
+            text="Previous",
+            command=lambda: self._show_page(self._page_index - 1),
         )
-        self._bind_scroll(self.canvas)
-        self._bind_scroll(scrollbar)
+        self._prev_button.pack(side="left")
+        self._page_label = ttk.Label(pager)
+        self._page_label.pack(side="left", padx=10)
+        self._next_button = ttk.Button(
+            pager,
+            text="Next",
+            command=lambda: self._show_page(self._page_index + 1),
+        )
+        self._next_button.pack(side="left")
 
-    def _bind_scroll(self, widget):
-        widget.bind("<MouseWheel>", self._on_mousewheel, add=True)
-        widget.bind("<Button-4>", self._on_mousewheel, add=True)
-        widget.bind("<Button-5>", self._on_mousewheel, add=True)
+    def _show_page(self, page_index):
+        if not 0 <= page_index < len(self._pages):
+            return
 
-    def _on_mousewheel(self, event):
-        if getattr(event, "num", None) == 4:
-            amount = -1
-        elif getattr(event, "num", None) == 5:
-            amount = 1
-        elif sys.platform == "darwin":
-            amount = -event.delta
-        else:
-            amount = -int(event.delta / 120)
+        for pin in self._visible_pins:
+            row = self._rows[pin]
+            row["mode_menu"].destroy()
+            for key in (
+                "mode_menu",
+                "status_item",
+                "primary_rect",
+                "primary_text",
+                "secondary_rect",
+                "secondary_text",
+            ):
+                row[key] = None
+        self.canvas.delete("row")
 
-        if amount:
-            self.canvas.yview_scroll(amount, "units")
-        return "break"
+        self._page_index = page_index
+        page = self._pages[page_index]
+        left_pins = page[:_ROWS_PER_HALF]
+        right_pins = page[_ROWS_PER_HALF:]
+        self._visible_pins = set(page)
+
+        for row_index, pin in enumerate(left_pins):
+            self._add_row(pin, 0, row_index)
+        for row_index, pin in enumerate(right_pins):
+            self._add_row(pin, 1, row_index)
+
+        self._page_label.configure(text=f"Page {page_index + 1}/{len(self._pages)}")
+        self._prev_button.configure(state="normal" if page_index else "disabled")
+        self._next_button.configure(
+            state="normal" if page_index + 1 < len(self._pages) else "disabled"
+        )
 
     def _create_action_button(self, x, y, width, text, tag):
         rect = self.canvas.create_rectangle(
@@ -134,21 +172,22 @@ class PinsFrame(ctk.CTkFrame):
             y + 14,
             fill=self._color(_DEFAULT_BUTTON_COLOR),
             outline="",
-            tags=(tag,),
+            tags=("row", tag),
         )
         label = self.canvas.create_text(
             x + width / 2,
             y,
             text=text,
             fill=self._color(_BUTTON_TEXT_COLOR),
-            tags=(tag,),
+            tags=("row", tag),
         )
         return rect, label
 
-    def _add_row(self, pin, mode, half, row_index):
+    def _add_row(self, pin, half, row_index):
         half_x = half * _HALF_WIDTH
         y = _HEADER_HEIGHT + row_index * _ROW_HEIGHT + _ROW_HEIGHT / 2
         pin_id = self.pin_map[pin][0]
+        row = self._rows[pin]
 
         self.canvas.create_text(
             half_x + _COLUMN_X[0],
@@ -156,34 +195,37 @@ class PinsFrame(ctk.CTkFrame):
             text=f"{pin} ({pin_id})",
             anchor="w",
             fill=self._text_color,
+            tags=("row",),
         )
 
-        mode_var = ctk.StringVar(value=mode)
         mode_menu = ttk.Combobox(
             self.canvas,
             values=MODES,
-            textvariable=mode_var,
+            textvariable=row["mode_var"],
             state="readonly",
             width=13,
         )
         mode_menu.bind(
             "<<ComboboxSelected>>",
-            lambda _event, p=pin, var=mode_var: self._handle_mode_change(p, var.get()),
+            lambda _event, p=pin, var=row["mode_var"]: self._handle_mode_change(
+                p, var.get()
+            ),
         )
-        self._bind_scroll(mode_menu)
         self.canvas.create_window(
             half_x + _COLUMN_X[1],
             y,
             window=mode_menu,
             anchor="w",
+            tags=("row",),
         )
 
         status_item = self.canvas.create_text(
             half_x + _COLUMN_X[2],
             y,
-            text="--",
+            text=row["status"],
             anchor="w",
-            fill=self._text_color,
+            fill=self._color(self._status_color(row["status"])),
+            tags=("row",),
         )
 
         primary_tag = f"action-primary-{pin}"
@@ -205,21 +247,24 @@ class PinsFrame(ctk.CTkFrame):
             lambda _event, p=pin: self._handle_secondary_action(p),
         )
 
-        self._rows[pin] = {
-            "mode_var": mode_var,
-            "mode_menu": mode_menu,
-            "status_item": status_item,
-            "primary_rect": primary_rect,
-            "primary_text": primary_text,
-            "secondary_rect": secondary_rect,
-            "secondary_text": secondary_text,
-            "listening": False,
-            "mode_pending": False,
-            "read_pending": False,
-            "listen_pending": False,
-            "toggle_pending": False,
-        }
-        self._render_actions(pin, mode)
+        row.update(
+            mode_menu=mode_menu,
+            status_item=status_item,
+            primary_rect=primary_rect,
+            primary_text=primary_text,
+            secondary_rect=secondary_rect,
+            secondary_text=secondary_text,
+        )
+        self._render_actions(pin, row["mode_var"].get())
+        self._refresh_mode_menu(pin)
+
+    @staticmethod
+    def _status_color(status):
+        if status == "HIGH":
+            return ("#2fa572", "#3ddc97")
+        if status == "LOW":
+            return ("gray10", "gray80")
+        return ("gray40", "gray60")
 
     def _set_action_button(self, row, which, text, color):
         self.canvas.itemconfigure(
@@ -234,6 +279,8 @@ class PinsFrame(ctk.CTkFrame):
         )
 
     def _render_actions(self, pin, mode):
+        if pin not in self._visible_pins:
+            return
         row = self._rows[pin]
         if mode in INPUT_MODES:
             self._set_action_button(
@@ -279,26 +326,23 @@ class PinsFrame(ctk.CTkFrame):
 
     def _refresh_mode_menu(self, pin):
         row = self._rows[pin]
-        row["mode_menu"].configure(
-            state="disabled" if row["mode_pending"] else "readonly"
-        )
+        if row["mode_menu"] is not None:
+            row["mode_menu"].configure(
+                state="disabled" if row["mode_pending"] else "readonly"
+            )
 
     def set_status(self, pin, status):
         row = self._rows.get(pin)
         if row is None:
             return
 
-        if status == "HIGH":
-            color = ("#2fa572", "#3ddc97")
-        elif status == "LOW":
-            color = ("gray10", "gray80")
-        else:
-            color = ("gray40", "gray60")
-        self.canvas.itemconfigure(
-            row["status_item"],
-            text=status,
-            fill=self._color(color),
-        )
+        row["status"] = status
+        if pin in self._visible_pins:
+            self.canvas.itemconfigure(
+                row["status_item"],
+                text=status,
+                fill=self._color(self._status_color(status)),
+            )
 
         row["read_pending"] = False
         row["toggle_pending"] = False
