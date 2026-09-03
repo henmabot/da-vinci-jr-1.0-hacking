@@ -6,6 +6,8 @@ import tkinter as tk
 
 import customtkinter as ctk
 
+from .logs import LogsFrame
+
 __all__ = ["HEIGHT", "WIDTH", "create_window"]
 
 
@@ -14,9 +16,6 @@ HEIGHT = 800
 
 
 def create_window():
-    # Set color theme
-    ctk.set_default_color_theme("green")
-
     # Create the window
     window = ctk.CTk()
     window.title("GPIO Controller")
@@ -55,7 +54,7 @@ def create_window():
 
     # Create the actual frames and make them fill the containers
     app_frame = ctk.CTkFrame(left_container, corner_radius=0)
-    logs_frame = ctk.CTkFrame(right_container, corner_radius=0)
+    logs_frame = LogsFrame(right_container, send_callback=print)
 
     app_frame.pack(fill="both", expand=True)
     logs_frame.pack(fill="both", expand=True)
