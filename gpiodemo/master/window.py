@@ -7,6 +7,8 @@ import tkinter as tk
 import customtkinter as ctk
 
 from .logs import LogsFrame
+from .manager import PinsFrame
+from .pins import pin_map
 
 __all__ = ["HEIGHT", "WIDTH", "create_window"]
 
@@ -53,7 +55,14 @@ def create_window():
     main_window.add(right_container, minsize=300)
 
     # Create the actual frames and make them fill the containers
-    app_frame = ctk.CTkFrame(left_container, corner_radius=0)
+    app_frame = PinsFrame(
+        left_container,
+        pin_map=pin_map,
+        on_mode_change=print,
+        on_read=print,
+        on_listen=print,
+        on_toggle=print,
+    )
     logs_frame = LogsFrame(right_container, send_callback=print)
 
     app_frame.pack(fill="both", expand=True)

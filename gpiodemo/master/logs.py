@@ -121,7 +121,7 @@ class LogsFrame(ctk.CTkFrame):
 
         self.command_entry = ctk.CTkEntry(
             bottom_bar,
-            placeholder_text="Type a command and press Enter...",
+            placeholder_text="Enter a command...",
             font=self._entry_font,
         )
         self.command_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
