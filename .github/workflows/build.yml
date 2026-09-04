@@ -1,4 +1,4 @@
-name: Build firmware
+name: Build
 
 on:
   workflow_dispatch:
@@ -7,6 +7,14 @@ permissions:
   contents: read
 
 jobs:
+  gui-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build desktop controller
+        run: cargo build --manifest-path gpiodemo/Cargo.toml -p da-vinci-gui
+
   build:
     runs-on: ubuntu-latest
     steps:

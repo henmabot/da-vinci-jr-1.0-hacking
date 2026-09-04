@@ -25,6 +25,14 @@ Install the Rust `thumbv7em-none-eabi` target before building firmware. `just bu
 
 `just flash` flashes `build/firmware.bin` with BOSSA. Set `DEVICE` to override the default serial device.
 
+The desktop controller also runs natively on macOS. From the repository root, run:
+
+```sh
+cargo run --manifest-path gpiodemo/Cargo.toml -p da-vinci-gui
+```
+
+Running the GUI does not require firmware cross-compilation tools. If you have `just`, `just gui` runs the same command.
+
 ## Protocol
 
 Packets are newline-terminated ASCII. The host allocates request IDs from `001` through `999`, and the firmware echoes the same ID in responses. A successful `LSN ... ON` keeps its request ID for later listener notifications.
