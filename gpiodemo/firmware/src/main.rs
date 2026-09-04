@@ -161,13 +161,13 @@ mod board {
         }
 
         fn queue(&mut self, packet: Packet<Response>) {
-            if !self.is_empty() {
-                return;
-            }
-            if let Ok(len) = encode_response(packet, &mut self.bytes) {
-                self.len = len;
-                self.offset = 0;
-            }
+            assert!(
+                self.is_empty(),
+                "response queued while USB TX is still pending"
+            );
+            self.len = encode_response(packet, &mut self.bytes)
+                .expect("protocol response always fits fixed packet buffer");
+            self.offset = 0;
         }
 
         fn flush<B: usb_device::bus::UsbBus>(&mut self, serial: &mut SerialPort<'_, B>) {

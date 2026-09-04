@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 da-vinci-protocol.workspace = true
 iced = { version = "0.14.0", default-features = false, features = ["smol", "tiny-skia", "wayland", "x11"] }
 serialport = "4.10.0"

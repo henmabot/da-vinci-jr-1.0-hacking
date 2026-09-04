@@ -1,19 +1,13 @@
 mod connection;
 
-use std::{
-    fmt,
-    io::{self, Read, Write},
-    sync::mpsc::{self, Receiver, Sender},
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::VecDeque, fmt, time::Duration};
 
-use connection::{Connection, Event as ConnectionEvent};
-use da_vinci_protocol::{
-    Direction, Level, Request, ResponseError, WIRE_PIN_COUNT, decode_response,
-};
+use chrono::Local;
+use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
+use da_vinci_protocol::{Direction, Level, Request, ResponseError, WIRE_PIN_COUNT};
 use iced::{
     Element, Length, Subscription, Task,
+    keyboard::{Event as KeyboardEvent, Key, key::Named},
     widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input},
 };
 
@@ -114,8 +108,8 @@ enum Message {
     LogScrolled(f32),
     RawChanged(String),
     RawSend,
-    HistoryPrevious,
-    HistoryNext,
+    HistoryKey(bool),
+    HistoryKeyFocus { previous: bool, focused: bool },
 }
 
 struct App {
@@ -125,11 +119,11 @@ struct App {
     selected_port: Option<String>,
     connected_port: Option<String>,
     connection: Connection,
-    io: IoHandle,
-    logs: Vec<LogEntry>,
+    logs: VecDeque<LogEntry>,
     show_timestamps: bool,
     autoscroll: bool,
     log_scroll: iced::widget::Id,
+    raw_input_id: iced::widget::Id,
     raw_input: String,
     command_history: Vec<String>,
     history_index: Option<usize>,
@@ -147,12 +141,12 @@ impl App {
                 ports: Vec::new(),
                 selected_port: None,
                 connected_port: None,
-                connection: Connection::new(),
-                io: IoHandle::spawn(),
-                logs: Vec::new(),
+                connection: Connection::spawn(),
+                logs: VecDeque::new(),
                 show_timestamps: true,
                 autoscroll: true,
                 log_scroll: iced::widget::Id::unique(),
+                raw_input_id: iced::widget::Id::unique(),
                 raw_input: String::new(),
                 command_history: Vec::new(),
                 history_index: None,
@@ -165,7 +159,20 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        iced::time::every(Duration::from_millis(40)).map(|_| Message::Tick)
+        Subscription::batch([
+            iced::time::every(Duration::from_millis(40)).map(|_| Message::Tick),
+            iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Keyboard(KeyboardEvent::KeyPressed {
+                    key: Key::Named(Named::ArrowUp),
+                    ..
+                }) => Some(Message::HistoryKey(true)),
+                iced::Event::Keyboard(KeyboardEvent::KeyPressed {
+                    key: Key::Named(Named::ArrowDown),
+                    ..
+                }) => Some(Message::HistoryKey(false)),
+                _ => None,
+            }),
+        ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -194,13 +201,12 @@ impl App {
             }
             Message::Connect => {
                 if let Some(port) = self.selected_port.clone() {
-                    self.error = None;
-                    self.io.send(IoCommand::Connect(port));
+                    self.error = self.connection.connect(port).err();
                 }
                 Task::none()
             }
             Message::Disconnect => {
-                self.io.send(IoCommand::Disconnect);
+                self.error = self.connection.disconnect().err();
                 Task::none()
             }
             Message::PreviousPage => {
@@ -261,12 +267,18 @@ impl App {
                 Task::none()
             }
             Message::RawSend => self.send_raw(),
-            Message::HistoryPrevious => {
-                self.history_previous();
-                Task::none()
+            Message::HistoryKey(previous) => {
+                iced::widget::operation::is_focused(self.raw_input_id.clone())
+                    .map(move |focused| Message::HistoryKeyFocus { previous, focused })
             }
-            Message::HistoryNext => {
-                self.history_next();
+            Message::HistoryKeyFocus { previous, focused } => {
+                if focused {
+                    if previous {
+                        self.history_previous();
+                    } else {
+                        self.history_next();
+                    }
+                }
                 Task::none()
             }
         }
@@ -444,17 +456,18 @@ impl App {
     }
 
     fn log_panel(&self) -> Element<'_, Message> {
-        let mut lines = column![];
+        let mut lines = String::new();
         for entry in &self.logs {
-            let line = if self.show_timestamps {
-                format!("[{}] {}", entry.timestamp, entry.text)
-            } else {
-                entry.text.clone()
-            };
-            lines = lines.push(text(line).size(13));
+            if self.show_timestamps {
+                lines.push('[');
+                lines.push_str(&entry.timestamp);
+                lines.push_str("] ");
+            }
+            lines.push_str(&entry.text);
+            lines.push('\n');
         }
 
-        let log = scrollable(lines.spacing(2))
+        let log = scrollable(text(lines).size(13))
             .id(self.log_scroll.clone())
             .on_scroll(|viewport| Message::LogScrolled(viewport.relative_offset().y))
             .height(Length::Fill)
@@ -471,9 +484,8 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         let command = row![
-            button("↑").on_press(Message::HistoryPrevious),
-            button("↓").on_press(Message::HistoryNext),
             text_input("Enter a command...", &self.raw_input)
+                .id(self.raw_input_id.clone())
                 .on_input(Message::RawChanged)
                 .on_submit(Message::RawSend),
             button("Send").on_press(Message::RawSend),
@@ -584,10 +596,14 @@ impl App {
         if !self.require_connection() {
             return Task::none();
         }
-        let bytes = self.connection.send(request);
-        let line = wire_text(&bytes);
-        self.io.send(IoCommand::Write(bytes));
-        self.push_log(format!("TX {line}"))
+        match self.connection.send(request) {
+            Ok(line) => self.push_log(format!("TX {line}")),
+            Err(error) => {
+                self.fail_request(request);
+                self.error = Some(error);
+                Task::none()
+            }
+        }
     }
 
     fn send_raw(&mut self) -> Task<Message> {
@@ -604,10 +620,13 @@ impl App {
             self.command_history.remove(0);
         }
         self.history_index = None;
-        let mut bytes = line.as_bytes().to_vec();
-        bytes.push(b'\n');
-        self.io.send(IoCommand::Write(bytes));
-        self.push_log(format!("TX {line}"))
+        match self.connection.send_raw(&line) {
+            Ok(()) => self.push_log(format!("TX {line}")),
+            Err(error) => {
+                self.error = Some(error);
+                Task::none()
+            }
+        }
     }
 
     fn require_connection(&mut self) -> bool {
@@ -621,45 +640,38 @@ impl App {
 
     fn drain_io(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        while let Ok(event) = self.io.events.try_recv() {
+        while let Some(event) = self.connection.next_event() {
             match event {
-                IoEvent::Connected(port) => {
+                ConnectionEvent::Connected(port) => {
                     self.connected_port = Some(port.clone());
                     self.device_status = format!("Connected: {port}");
                     self.error = None;
-                    self.connection.clear();
                     self.reset_pins();
                 }
-                IoEvent::Disconnected(reason) => {
+                ConnectionEvent::Disconnected(reason) => {
                     self.connected_port = None;
                     self.device_status = "Disconnected".into();
-                    self.connection.clear();
                     self.reset_pending();
                     self.error = reason;
                 }
-                IoEvent::Line(line) => {
+                ConnectionEvent::Received { line, event } => {
                     tasks.push(self.push_log(format!("RX {line}")));
-                    match decode_response(line.as_bytes()) {
-                        Ok(packet) => {
-                            let event = self.connection.received(packet);
-                            self.handle_connection_event(event, &mut tasks);
-                        }
-                        Err(error) => {
-                            self.error = Some(format!("Malformed response: {error:?}"));
-                        }
+                    match event {
+                        Ok(event) => self.handle_device_event(event, &mut tasks),
+                        Err(error) => self.error = Some(error),
                     }
                 }
-                IoEvent::Error(error) => self.error = Some(error),
+                ConnectionEvent::IoError(error) => self.error = Some(error),
             }
         }
         Task::batch(tasks)
     }
 
-    fn handle_connection_event(&mut self, event: ConnectionEvent, tasks: &mut Vec<Task<Message>>) {
+    fn handle_device_event(&mut self, event: DeviceEvent, tasks: &mut Vec<Task<Message>>) {
         match event {
-            ConnectionEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
-            ConnectionEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
-            ConnectionEvent::Ack(request) => match request {
+            DeviceEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
+            DeviceEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
+            DeviceEvent::Ack(request) => match request {
                 Request::Direction { pin, .. } => {
                     let target = self.pins[pin as usize].target_mode;
                     if let Some(target) = target {
@@ -691,32 +703,33 @@ impl App {
                 }
                 _ => {}
             },
-            ConnectionEvent::PinValue { pin, level } => {
+            DeviceEvent::PinValue { pin, level } => {
                 let state = &mut self.pins[pin as usize];
                 state.level = Some(level);
                 state.read_pending = false;
                 state.toggle_pending = false;
             }
-            ConnectionEvent::PinState { pin, what, value } => {
+            DeviceEvent::PinState { pin, what, value } => {
                 self.device_status = format!("{} {what:?}: {value:?}", pin_name(pin));
             }
-            ConnectionEvent::DeviceError { request, error } => {
-                if let Some(request) = request {
-                    self.fail_request(request);
-                }
-                self.error = Some(format_device_error(error));
+            DeviceEvent::DeviceError { request, error } => {
+                self.fail_request(request);
+                self.error = Some(match error {
+                    ResponseError::BadPacket => "Device rejected a malformed packet".into(),
+                    ResponseError::Pin { pin, reason } => {
+                        format!("{}: {reason:?}", pin_name(pin))
+                    }
+                });
             }
-            ConnectionEvent::Unknown { request } => {
-                if let Some(request) = request {
-                    self.fail_request(request);
-                }
+            DeviceEvent::Unknown { request } => {
+                self.fail_request(request);
                 self.error = Some("Device returned IDK".into());
             }
-            ConnectionEvent::Bye => {
+            DeviceEvent::Bye => {
                 self.reset_pins();
                 self.device_status = "Device reset acknowledged".into();
             }
-            ConnectionEvent::Untracked(_) => {}
+            DeviceEvent::Untracked => {}
         }
     }
 
@@ -750,12 +763,12 @@ impl App {
     }
 
     fn push_log(&mut self, text: String) -> Task<Message> {
-        self.logs.push(LogEntry {
-            timestamp: timestamp(),
+        self.logs.push_back(LogEntry {
+            timestamp: Local::now().format("%H:%M:%S%.3f").to_string(),
             text,
         });
         if self.logs.len() > MAX_LOG_LINES {
-            self.logs.remove(0);
+            self.logs.pop_front();
         }
         self.snap_log()
     }
@@ -825,181 +838,9 @@ fn pin_name(pin: u8) -> String {
     }
 }
 
-fn format_device_error(error: ResponseError) -> String {
-    match error {
-        ResponseError::BadPacket => "Device rejected a malformed packet".into(),
-        ResponseError::Pin { pin, reason } => format!("{}: {reason:?}", pin_name(pin)),
-    }
-}
-
-fn timestamp() -> String {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let millis = elapsed.subsec_millis();
-    let seconds = elapsed.as_secs() % 86_400;
-    format!(
-        "{:02}:{:02}:{:02}.{millis:03}",
-        seconds / 3600,
-        (seconds / 60) % 60,
-        seconds % 60,
-    )
-}
-
-fn wire_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .trim_end_matches(['\r', '\n'])
-        .to_owned()
-}
-
 fn load_ports() -> Task<Message> {
     Task::perform(
-        async {
-            serialport::available_ports()
-                .map(|ports| ports.into_iter().map(|port| port.port_name).collect())
-                .map_err(|error| error.to_string())
-        },
+        async { Connection::available_ports() },
         Message::PortsLoaded,
     )
-}
-
-enum IoCommand {
-    Connect(String),
-    Disconnect,
-    Write(Vec<u8>),
-}
-
-enum IoEvent {
-    Connected(String),
-    Disconnected(Option<String>),
-    Line(String),
-    Error(String),
-}
-
-struct IoHandle {
-    commands: Sender<IoCommand>,
-    events: Receiver<IoEvent>,
-}
-
-impl IoHandle {
-    fn spawn() -> Self {
-        let (command_tx, command_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
-        thread::spawn(move || io_worker(command_rx, event_tx));
-        Self {
-            commands: command_tx,
-            events: event_rx,
-        }
-    }
-
-    fn send(&self, command: IoCommand) {
-        let _ = self.commands.send(command);
-    }
-}
-
-fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
-    let mut port: Option<Box<dyn serialport::SerialPort>> = None;
-    let mut line = Vec::with_capacity(128);
-    let mut discarding = false;
-    let mut buffer = [0u8; 64];
-
-    loop {
-        let command = if port.is_some() {
-            match commands.try_recv() {
-                Ok(command) => Some(command),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            }
-        } else {
-            match commands.recv() {
-                Ok(command) => Some(command),
-                Err(_) => return,
-            }
-        };
-
-        if let Some(command) = command {
-            match command {
-                IoCommand::Connect(name) => {
-                    line.clear();
-                    discarding = false;
-                    match serialport::new(&name, 115_200)
-                        .timeout(Duration::from_millis(20))
-                        .open()
-                    {
-                        Ok(opened) => {
-                            port = Some(opened);
-                            let _ = events.send(IoEvent::Connected(name));
-                        }
-                        Err(error) => {
-                            port = None;
-                            let _ = events
-                                .send(IoEvent::Error(format!("Could not open {name}: {error}")));
-                        }
-                    }
-                }
-                IoCommand::Disconnect => {
-                    port = None;
-                    line.clear();
-                    discarding = false;
-                    let _ = events.send(IoEvent::Disconnected(None));
-                }
-                IoCommand::Write(bytes) => {
-                    let Some(opened) = port.as_mut() else {
-                        let _ = events.send(IoEvent::Error("Serial device is disconnected".into()));
-                        continue;
-                    };
-                    if let Err(error) = opened.write_all(&bytes) {
-                        port = None;
-                        let _ = events.send(IoEvent::Disconnected(Some(format!(
-                            "Serial write failed: {error}"
-                        ))));
-                    }
-                }
-            }
-            continue;
-        }
-
-        let Some(opened) = port.as_mut() else {
-            continue;
-        };
-
-        match opened.read(&mut buffer) {
-            Ok(count) => {
-                for &byte in &buffer[..count] {
-                    if byte == b'\r' {
-                        continue;
-                    }
-                    if byte == b'\n' {
-                        if !discarding && !line.is_empty() {
-                            let packet = String::from_utf8_lossy(&line).into_owned();
-                            let _ = events.send(IoEvent::Line(packet));
-                        }
-                        line.clear();
-                        discarding = false;
-                    } else if !discarding {
-                        if line.len() < 1024 {
-                            line.push(byte);
-                        } else {
-                            line.clear();
-                            discarding = true;
-                            let _ = events.send(IoEvent::Error(
-                                "Incoming serial line exceeded 1024 bytes; discarded".into(),
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-                ) => {}
-            Err(error) => {
-                port = None;
-                let _ = events.send(IoEvent::Disconnected(Some(format!(
-                    "Serial read failed: {error}"
-                ))));
-            }
-        }
-    }
 }
