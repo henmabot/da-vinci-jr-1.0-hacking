@@ -6,7 +6,7 @@ use chrono::Local;
 use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
 use da_vinci_protocol::{Direction, Level, Request, ResponseError, WIRE_PIN_COUNT};
 use iced::{
-    Element, Length, Subscription, Task,
+    Color, Element, Length, Size, Subscription, Task, Theme,
     keyboard::{Event as KeyboardEvent, Key, key::Named},
     widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input},
 };
@@ -16,13 +16,36 @@ const PINS_PER_COLUMN: usize = 18;
 const MAX_LOG_LINES: usize = 2_000;
 const MAX_COMMAND_HISTORY: usize = 200;
 const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
+const PIN_NAME_WIDTH: f32 = 72.0;
+const PIN_MODE_WIDTH: f32 = 94.0;
+const PIN_STATUS_WIDTH: f32 = 44.0;
+const PIN_ACTION_WIDTH: f32 = 112.0;
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("GPIO Controller")
         .subscription(App::subscription)
-        .window_size((1250.0, 800.0))
+        .theme(app_theme())
+        .window(iced::window::Settings {
+            size: Size::new(1280.0, 820.0),
+            min_size: Some(Size::new(1180.0, 800.0)),
+            ..Default::default()
+        })
         .run()
+}
+
+fn app_theme() -> Theme {
+    Theme::custom(
+        "GPIO Controller",
+        iced::theme::Palette {
+            background: Color::from_rgb8(0x16, 0x19, 0x1F),
+            text: Color::from_rgb8(0xE7, 0xEA, 0xF0),
+            primary: Color::from_rgb8(0x5B, 0x8D, 0xEF),
+            success: Color::from_rgb8(0x52, 0xB7, 0x88),
+            warning: Color::from_rgb8(0xD6, 0xA8, 0x4B),
+            danger: Color::from_rgb8(0xE0, 0x6C, 0x75),
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +130,7 @@ enum Message {
     Read(u8),
     Toggle(u8),
     Listen(u8),
+    InputAll,
     ReadAll,
     ListenAll,
     Handshake,
@@ -238,6 +262,7 @@ impl App {
             Message::Read(pin) => self.read_pin(pin),
             Message::Toggle(pin) => self.toggle_pin(pin),
             Message::Listen(pin) => self.toggle_listener(pin),
+            Message::InputAll => self.input_all(),
             Message::ReadAll => self.read_all(),
             Message::ListenAll => self.listen_all(),
             Message::Handshake => self.send_request(Request::Hello),
@@ -304,9 +329,13 @@ impl App {
         let logs = self.log_panel();
         let body = row![pins, logs].spacing(12).height(Length::Fill);
 
-        let mut content = column![top, body].spacing(10).padding(10);
+        let mut content = column![top, body].spacing(12).padding(16);
         if let Some(error) = &self.error {
-            content = content.push(text(format!("Error: {error}")));
+            content = content.push(
+                container(text(format!("Error: {error}")).size(13))
+                    .padding([8, 12])
+                    .style(container::danger),
+            );
         }
         container(content)
             .height(Length::Fill)
@@ -320,46 +349,94 @@ impl App {
             self.selected_port.as_ref(),
             Message::PortSelected,
         )
-        .placeholder("Serial port");
+        .placeholder("Serial port")
+        .width(Length::Fixed(250.0));
 
         let connection_button = if self.connected_port.is_some() {
-            button("Disconnect").on_press(Message::Disconnect)
+            button("Disconnect")
+                .style(button::danger)
+                .on_press(Message::Disconnect)
         } else {
-            button("Connect").on_press_maybe(self.selected_port.as_ref().map(|_| Message::Connect))
+            button("Connect")
+                .style(button::primary)
+                .on_press_maybe(self.selected_port.as_ref().map(|_| Message::Connect))
         };
 
-        let controls = row![
+        let connection = row![
+            text("Connection").size(18).width(Length::Fixed(110.0)),
             ports,
-            button("Refresh").on_press(Message::RefreshPorts),
+            button("Refresh Ports")
+                .style(button::secondary)
+                .on_press(Message::RefreshPorts),
             connection_button,
-            text(&self.device_status),
-            button("Read All").on_press(Message::ReadAll),
-            button("Listen All").on_press(Message::ListenAll),
-            button("Handshake").on_press(Message::Handshake),
-            button("Status").on_press(Message::Status),
+            text(&self.device_status).size(13),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
 
-        if self.confirm_reboot {
+        let bulk_actions = row![
+            text("Bulk actions").size(12).width(Length::Fixed(110.0)),
+            button("Input All")
+                .style(button::primary)
+                .on_press(Message::InputAll),
+            button("Read All")
+                .style(button::secondary)
+                .on_press(Message::ReadAll),
+            button("Listen All")
+                .style(button::secondary)
+                .on_press(Message::ListenAll),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(Length::FillPortion(3));
+
+        let device_actions = row![
+            text("Device").size(12).width(Length::Fixed(54.0)),
+            button("Handshake")
+                .style(button::secondary)
+                .on_press(Message::Handshake),
+            button("Status")
+                .style(button::secondary)
+                .on_press(Message::Status),
+            button("Reset Device")
+                .style(button::danger)
+                .on_press(Message::Reboot),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(Length::FillPortion(2));
+
+        let actions = row![bulk_actions, device_actions]
+            .spacing(16)
+            .align_y(iced::Alignment::Center);
+
+        let content: Element<'_, Message> = if self.confirm_reboot {
             column![
-                controls,
+                connection,
                 row![
+                    text("Reset device?").size(12).width(Length::Fixed(110.0)),
                     text("Send BYE and reset the device? This will drop the connection."),
-                    button("Confirm reboot").on_press(Message::RebootConfirm),
-                    button("Cancel").on_press(Message::RebootCancel),
+                    button("Reset Device")
+                        .style(button::danger)
+                        .on_press(Message::RebootConfirm),
+                    button("Cancel")
+                        .style(button::secondary)
+                        .on_press(Message::RebootCancel),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             ]
-            .spacing(6)
+            .spacing(8)
             .into()
         } else {
-            row![controls, button("Reboot").on_press(Message::Reboot)]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into()
-        }
+            column![connection, actions].spacing(8).into()
+        };
+
+        container(content)
+            .padding(12)
+            .width(Length::Fill)
+            .style(container::bordered_box)
+            .into()
     }
 
     fn pin_panel(&self) -> Element<'_, Message> {
@@ -367,20 +444,23 @@ impl App {
         let end = (start + PINS_PER_PAGE).min(WIRE_PIN_COUNT as usize);
         let middle = (start + PINS_PER_COLUMN).min(end);
 
-        let mut left = column![pin_header()].spacing(3);
+        let mut left = column![pin_header()].spacing(4);
         for pin in start..middle {
             left = left.push(self.pin_row(pin as u8));
         }
 
-        let mut right = column![pin_header()].spacing(3);
+        let mut right = column![pin_header()].spacing(4);
         for pin in middle..end {
             right = right.push(self.pin_row(pin as u8));
         }
 
         let pager = row![
-            button("Previous").on_press_maybe((self.page > 0).then_some(Message::PreviousPage)),
-            text(format!("Page {}/{}", self.page + 1, page_count())),
+            button("Previous")
+                .style(button::secondary)
+                .on_press_maybe((self.page > 0).then_some(Message::PreviousPage)),
+            text(format!("Page {} of {}", self.page + 1, page_count())).size(13),
             button("Next")
+                .style(button::secondary)
                 .on_press_maybe((self.page + 1 < page_count()).then_some(Message::NextPage)),
         ]
         .spacing(8)
@@ -388,6 +468,7 @@ impl App {
 
         container(
             column![
+                text("GPIO Pins").size(18),
                 row![
                     left.width(Length::FillPortion(1)),
                     right.width(Length::FillPortion(1)),
@@ -395,9 +476,11 @@ impl App {
                 .spacing(12),
                 pager,
             ]
-            .spacing(8),
+            .spacing(10),
         )
-        .width(Length::FillPortion(3))
+        .padding(12)
+        .style(container::bordered_box)
+        .width(Length::FillPortion(7))
         .height(Length::Fill)
         .into()
     }
@@ -405,9 +488,16 @@ impl App {
     fn pin_row(&self, pin: u8) -> Element<'_, Message> {
         if is_reserved(pin) {
             return row![
-                text(format!("{} ({pin:03})", pin_name(pin))).width(Length::Fixed(90.0)),
-                text("RESERVED").width(Length::Fixed(100.0)),
-                text("--").width(Length::Fixed(55.0)),
+                text(format!("{} ({pin:03})", pin_name(pin)))
+                    .size(12)
+                    .width(Length::Fixed(PIN_NAME_WIDTH)),
+                text("RESERVED")
+                    .size(11)
+                    .width(Length::Fixed(PIN_MODE_WIDTH)),
+                text("--").size(12).width(Length::Fixed(PIN_STATUS_WIDTH)),
+                text("System")
+                    .size(11)
+                    .width(Length::Fixed(PIN_ACTION_WIDTH)),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center)
@@ -419,7 +509,8 @@ impl App {
             Message::ModeSelected(pin, mode)
         })
         .placeholder("UNSET")
-        .width(Length::Fixed(105.0));
+        .text_size(12)
+        .width(Length::Fixed(PIN_MODE_WIDTH));
 
         let status = match state.level {
             Some(Level::High) => "HIGH",
@@ -428,41 +519,49 @@ impl App {
         };
 
         let actions: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
-            let read = button(if state.value_pending {
-                "Reading..."
-            } else {
-                "Read"
-            })
-            .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)));
+            let read = button("Read")
+                .style(button::secondary)
+                .width(Length::Fixed(50.0))
+                .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)));
             let listen_label = match state.listener {
-                ListenerState::Enabling | ListenerState::Disabling => "Sending...",
-                ListenerState::On => "Listening",
-                ListenerState::Off => "Listen",
+                ListenerState::On | ListenerState::Disabling => "Stop",
+                ListenerState::Off | ListenerState::Enabling => "Listen",
             };
             let listen = button(listen_label)
+                .style(if state.listener == ListenerState::On {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .width(Length::Fixed(58.0))
                 .on_press_maybe((!state.listener.is_pending()).then_some(Message::Listen(pin)));
-            row![read, listen].spacing(4).into()
+            row![read, listen]
+                .spacing(4)
+                .width(Length::Fixed(PIN_ACTION_WIDTH))
+                .into()
         } else if state.mode == Some(Mode::Output) {
-            button(if state.value_pending {
-                "Sending..."
-            } else {
-                "Toggle"
-            })
-            .on_press_maybe((!state.value_pending).then_some(Message::Toggle(pin)))
-            .into()
+            button("Toggle")
+                .style(button::secondary)
+                .width(Length::Fixed(PIN_ACTION_WIDTH))
+                .on_press_maybe((!state.value_pending).then_some(Message::Toggle(pin)))
+                .into()
         } else {
             text(if state.target_mode.is_some() {
-                "Setting..."
+                "Setting…"
             } else {
                 ""
             })
+            .size(11)
+            .width(Length::Fixed(PIN_ACTION_WIDTH))
             .into()
         };
 
         row![
-            text(format!("{} ({pin:03})", pin_name(pin))).width(Length::Fixed(90.0)),
+            text(format!("{} ({pin:03})", pin_name(pin)))
+                .size(12)
+                .width(Length::Fixed(PIN_NAME_WIDTH)),
             mode,
-            text(status).width(Length::Fixed(55.0)),
+            text(status).size(12).width(Length::Fixed(PIN_STATUS_WIDTH)),
             actions,
         ]
         .spacing(6)
@@ -482,33 +581,48 @@ impl App {
             lines.push('\n');
         }
 
-        let log = scrollable(text(lines).size(13))
-            .id(self.log_scroll.clone())
-            .on_scroll(|viewport| Message::LogScrolled(viewport.relative_offset().y))
-            .height(Length::Fill)
-            .width(Length::Fill);
-        let options = row![
-            button("Clear").on_press(Message::ClearLog),
-            checkbox(self.show_timestamps)
-                .label("Timestamps")
-                .on_toggle(Message::ShowTimestamps),
-            checkbox(self.autoscroll)
-                .label("Auto-scroll")
-                .on_toggle(Message::Autoscroll),
+        let log = scrollable(
+            container(text(lines).size(12).font(iced::Font::MONOSPACE))
+                .padding(8)
+                .width(Length::Fill)
+                .style(container::rounded_box),
+        )
+        .id(self.log_scroll.clone())
+        .on_scroll(|viewport| Message::LogScrolled(viewport.relative_offset().y))
+        .height(Length::Fill)
+        .width(Length::Fill);
+        let options = column![
+            text("Serial Log").size(18),
+            row![
+                button("Clear Log")
+                    .style(button::secondary)
+                    .on_press(Message::ClearLog),
+                checkbox(self.show_timestamps)
+                    .label("Timestamps")
+                    .on_toggle(Message::ShowTimestamps),
+                checkbox(self.autoscroll)
+                    .label("Auto-scroll")
+                    .on_toggle(Message::Autoscroll),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
+        .spacing(6);
         let command = row![
-            text_input("Enter a command...", &self.raw_input)
+            text_input("Enter a command…", &self.raw_input)
                 .id(self.raw_input_id.clone())
                 .on_input(Message::RawChanged)
                 .on_submit(Message::RawSend),
-            button("Send").on_press(Message::RawSend),
+            button("Send Command")
+                .style(button::primary)
+                .on_press(Message::RawSend),
         ]
         .spacing(5);
 
-        container(column![options, log, command].spacing(6))
-            .width(Length::FillPortion(2))
+        container(column![options, log, command].spacing(8))
+            .padding(12)
+            .style(container::bordered_box)
+            .width(Length::FillPortion(4))
             .height(Length::Fill)
             .into()
     }
@@ -587,6 +701,25 @@ impl App {
         };
         state.listener = pending;
         self.send_request(Request::Listen { pin, enabled })
+    }
+
+    fn input_all(&mut self) -> Task<Message> {
+        if !self.require_connection() {
+            return Task::none();
+        }
+
+        let mut tasks = Vec::new();
+        for pin in 0..WIRE_PIN_COUNT {
+            let state = self.pins[pin as usize];
+            if !is_reserved(pin)
+                && state.mode != Some(Mode::Input)
+                && state.target_mode.is_none()
+                && !state.listener.is_pending()
+            {
+                tasks.push(self.change_mode(pin, Mode::Input));
+            }
+        }
+        Task::batch(tasks)
     }
 
     fn read_all(&mut self) -> Task<Message> {
@@ -836,10 +969,14 @@ impl App {
 
 fn pin_header<'a>() -> Element<'a, Message> {
     row![
-        text("Pin").width(Length::Fixed(90.0)),
-        text("Mode").width(Length::Fixed(105.0)),
-        text("Status").width(Length::Fixed(55.0)),
-        text("Action"),
+        text("PIN").size(11).width(Length::Fixed(PIN_NAME_WIDTH)),
+        text("MODE").size(11).width(Length::Fixed(PIN_MODE_WIDTH)),
+        text("LEVEL")
+            .size(11)
+            .width(Length::Fixed(PIN_STATUS_WIDTH)),
+        text("ACTIONS")
+            .size(11)
+            .width(Length::Fixed(PIN_ACTION_WIDTH)),
     ]
     .spacing(6)
     .into()
