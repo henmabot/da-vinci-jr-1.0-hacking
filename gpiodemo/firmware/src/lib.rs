@@ -1,7 +1,7 @@
 #![no_std]
 
 use da_vinci_protocol::{
-    Direction, Level, Packet, Pin, PinError, PinTable, PinTarget, Query, QueryValue, Request,
+    Direction, Level, Packet, Pin, PinError, PinTable, PinTarget, Port, Query, QueryValue, Request,
     Response, ResponseError, WIRE_PIN_COUNT,
 };
 
@@ -9,7 +9,15 @@ pub trait Gpio {
     fn input(&mut self, pin: Pin, pullup: bool);
     fn output(&mut self, pin: Pin, level: Level);
     fn write(&mut self, pin: Pin, level: Level);
-    fn read(&self, pin: Pin) -> Level;
+    fn read_port(&self, port: Port) -> u32;
+
+    fn read(&self, pin: Pin) -> Level {
+        if self.read_port(pin.port()) & (1u32 << pin.bit()) == 0 {
+            Level::Low
+        } else {
+            Level::High
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +49,7 @@ enum BulkResponse {
 pub struct Firmware {
     pins: PinTable<PinState>,
     bulk: Option<BulkResponse>,
+    listener_cursor: u8,
 }
 
 impl Default for Firmware {
@@ -54,6 +63,7 @@ impl Firmware {
         Self {
             pins: PinTable::filled(PinState::Unset),
             bulk: None,
+            listener_cursor: 0,
         }
     }
 
@@ -194,7 +204,10 @@ impl Firmware {
     }
 
     pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
-        for pin in Pin::all() {
+        let mut snapshots = [None; 5];
+        for offset in 0..WIRE_PIN_COUNT {
+            let index = (self.listener_cursor + offset) % WIRE_PIN_COUNT;
+            let pin = Pin::from_wire_index(index).expect("listener index is in range");
             let PinState::Input {
                 listener: Some(listener),
                 previous,
@@ -203,14 +216,18 @@ impl Firmware {
             else {
                 continue;
             };
-            if supported(pin).is_err() {
-                continue;
-            }
-            let value = gpio.read(pin);
+            let snapshot =
+                *snapshots[port_slot(pin.port())].get_or_insert_with(|| gpio.read_port(pin.port()));
+            let value = if snapshot & (1u32 << pin.bit()) == 0 {
+                Level::Low
+            } else {
+                Level::High
+            };
             if value == *previous {
                 continue;
             }
             *previous = value;
+            self.listener_cursor = (index + 1) % WIRE_PIN_COUNT;
             return Some(Packet {
                 id: *listener,
                 body: Response::Value { pin, level: value },
@@ -365,6 +382,7 @@ impl Firmware {
 
     fn reset<G: Gpio>(&mut self, gpio: &mut G) {
         self.bulk = None;
+        self.listener_cursor = 0;
         for pin in Pin::all() {
             let state = &mut self.pins[pin];
             if !matches!(state, PinState::Unset) && supported(pin).is_ok() {
@@ -372,6 +390,16 @@ impl Firmware {
             }
             *state = PinState::Unset;
         }
+    }
+}
+
+const fn port_slot(port: Port) -> usize {
+    match port {
+        Port::A => 0,
+        Port::B => 1,
+        Port::C => 2,
+        Port::D => 3,
+        Port::E => 4,
     }
 }
 
@@ -395,14 +423,16 @@ fn pin_error(pin: Pin, reason: PinError) -> Response {
 mod tests {
     extern crate std;
 
+    use core::cell::Cell;
+
     use super::*;
-    use da_vinci_protocol::Port;
 
     struct FakeGpio {
         values: [Level; WIRE_PIN_COUNT as usize],
         inputs: [bool; WIRE_PIN_COUNT as usize],
         pullups: [bool; WIRE_PIN_COUNT as usize],
         outputs: [bool; WIRE_PIN_COUNT as usize],
+        port_reads: Cell<[u16; 5]>,
     }
 
     impl Default for FakeGpio {
@@ -412,6 +442,7 @@ mod tests {
                 inputs: [false; WIRE_PIN_COUNT as usize],
                 pullups: [false; WIRE_PIN_COUNT as usize],
                 outputs: [false; WIRE_PIN_COUNT as usize],
+                port_reads: Cell::new([0; 5]),
             }
         }
     }
@@ -436,8 +467,24 @@ mod tests {
             self.values[pin.index() as usize] = level;
         }
 
-        fn read(&self, pin: Pin) -> Level {
-            self.values[pin.index() as usize]
+        fn read_port(&self, port: Port) -> u32 {
+            let mut reads = self.port_reads.get();
+            reads[port_slot(port)] += 1;
+            self.port_reads.set(reads);
+
+            port.pins().fold(0, |bits, pin| {
+                if self.values[pin.index() as usize] == Level::High {
+                    bits | (1u32 << pin.bit())
+                } else {
+                    bits
+                }
+            })
+        }
+    }
+
+    impl FakeGpio {
+        fn reset_port_reads(&self) {
+            self.port_reads.set([0; 5]);
         }
     }
 
@@ -642,6 +689,91 @@ mod tests {
         );
         gpio.values[5] = Level::Low;
         assert_eq!(firmware.poll_listener(&gpio), None);
+    }
+
+    #[test]
+    fn listener_reads_each_bank_once() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        firmware.handle(
+            packet(
+                1,
+                Request::Direction {
+                    target: PinTarget::All,
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                2,
+                Request::Listen {
+                    target: PinTarget::All,
+                    enabled: true,
+                },
+            ),
+            &mut gpio,
+        );
+
+        gpio.reset_port_reads();
+        assert_eq!(firmware.poll_listener(&gpio), None);
+        assert_eq!(gpio.port_reads.get(), [1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn listener_delivery_is_round_robin() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        let first = pin(0);
+        let second = pin(1);
+        for (id, target) in [(1, first), (2, second)] {
+            firmware.handle(
+                packet(
+                    id,
+                    Request::Direction {
+                        target: PinTarget::Pin(target),
+                        direction: Direction::Input,
+                    },
+                ),
+                &mut gpio,
+            );
+            firmware.handle(
+                packet(
+                    id + 10,
+                    Request::Listen {
+                        target: PinTarget::Pin(target),
+                        enabled: true,
+                    },
+                ),
+                &mut gpio,
+            );
+        }
+
+        gpio.values[first.index() as usize] = Level::High;
+        gpio.values[second.index() as usize] = Level::High;
+        assert_eq!(
+            firmware.poll_listener(&gpio),
+            Some(Packet {
+                id: 11,
+                body: Response::Value {
+                    pin: first,
+                    level: Level::High,
+                },
+            })
+        );
+
+        gpio.values[first.index() as usize] = Level::Low;
+        assert_eq!(
+            firmware.poll_listener(&gpio),
+            Some(Packet {
+                id: 12,
+                body: Response::Value {
+                    pin: second,
+                    level: Level::High,
+                },
+            })
+        );
     }
 
     #[test]

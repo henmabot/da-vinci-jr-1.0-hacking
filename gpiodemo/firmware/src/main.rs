@@ -98,14 +98,18 @@ mod board {
             });
         }
 
-        fn read(&self, pin: Pin) -> Level {
-            with_port!(pin, |port, mask| {
-                if port.pdsr.read().bits() & mask == 0 {
-                    Level::Low
-                } else {
-                    Level::High
+        fn read_port(&self, target: Port) -> u32 {
+            // SAFETY: Firmware is the only SamGpio caller, the loop is single-threaded,
+            // and reading PDSR does not mutate or alias the PIO registers.
+            unsafe {
+                match target {
+                    Port::A => (&*pac::PIOA::ptr()).pdsr.read().bits(),
+                    Port::B => (&*pac::PIOB::ptr()).pdsr.read().bits(),
+                    Port::C => (&*pac::PIOC::ptr()).pdsr.read().bits(),
+                    Port::D => (&*pac::PIOD::ptr()).pdsr.read().bits(),
+                    Port::E => (&*pac::PIOE::ptr()).pdsr.read().bits(),
                 }
-            })
+            }
         }
     }
 
