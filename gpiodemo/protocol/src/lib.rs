@@ -131,12 +131,6 @@ impl TryFrom<&[u8]> for Port {
     }
 }
 
-impl From<Port> for u8 {
-    fn from(port: Port) -> Self {
-        port.letter() as u8
-    }
-}
-
 impl Port {
     const fn first_index(self) -> u8 {
         match self {
