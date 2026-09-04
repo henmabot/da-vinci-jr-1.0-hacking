@@ -29,11 +29,11 @@ Refer to the [Winstar WH1604A 16x04 LCD Module Datasheet](../SOURCES.md#datashee
 
 The connector mentioned here is the 22 pin connector.
 
-| Pin | Name | Description                  | Connector Pin | Verified? |
-| --- | ---- | ---------------------------- | ------------- | --------- |
-| 01  | VSS  | Ground                       | GND           | ✅        |
-| 02  | VDD  | Supply Voltage for logic     | 5V            | ✅        |
-| 03  | VO   | Operating voltage            | -             | ✅        |
+| Pin | Name | Description                  | Connector Pin | Verified? | MCU Pin | Verified? |
+| --- | ---- | ---------------------------- | ------------- | --------- | ------- | --------- |
+| 01  | VSS  | Ground                       | GND           | ✅        | GND     | ✅        |
+| 02  | VDD  | Supply Voltage for logic     | 5V            | ✅        | 5V      | ✅        |
+| 03  | VO   | Operating voltage            | -             | ✅        | -       | -         |
 | 04  | RS   | H: DATA, L: Instruction code | 05            | ✅        |
 | 05  | R/W  | H: Read L: Write             | 04            | ✅        |
 | 06  | E    | Chip enable signal           | 03            | ✅        |
@@ -72,19 +72,19 @@ Pins start from P1 (on the right of the reader) and go to the left, up to P11.
 
 The connector mentioned here is the 16 pin connector.
 
-| Pin | Name    | Description        | Connector Pin | Verified? |
-| --- | ------- | ------------------ | ------------- | --------- |
-| 01  | DAT2    | -                  | 16            | ✅        |
-| 02  | CS/DAT3 | Chip Select        | 14            | ✅        |
-| 03  | CMD     | MOSI/Data in       | 12            | ✅        |
-| 04  | VSS1    | Ground             | GND           | ✅        |
-| 05  | VDD     | Power              | 09            | ✅        |
-| 06  | CLK     | SCK                | 07            | ✅        |
-| 07  | VSS2    | Ground             | GND           | ✅        |
-| 08  | DAT0    | MISO               | 05            | ✅        |
-| 09  | DAT1    | -                  | 03            | ✅        |
-| 10  | WP      | Write Protect lock | N/C           | ✅        |
-| 11  | CD      | Card Detect        | 10            | ✅        |
+| Pin | Name    | Description        | Connector Pin | Verified? | MCU Pin | Verified? |
+| --- | ------- | ------------------ | ------------- | --------- | ------- | --------- |
+| 01  | DAT2    | -                  | 16            | ✅        | PA26    | ✅        |
+| 02  | CS/DAT3 | Chip Select        | 14            | ✅        | PA27    | ✅        |
+| 03  | CMD     | MOSI/Data in       | 12            | ✅        | PA28    | ✅        |
+| 04  | VSS1    | Ground             | GND           | ✅        | GND     | ✅        |
+| 05  | VDD     | Power              | 09            | ✅        | 3.3V    | ✅        |
+| 06  | CLK     | SCK                | 07            | ✅        | PA29    | ✅        |
+| 07  | VSS2    | Ground             | GND           | ✅        | GND     | ✅        |
+| 08  | DAT0    | MISO               | 05            | ✅        | PA30    | ✅        |
+| 09  | DAT1    | -                  | 03            | ✅        | PA31    | ✅        |
+| 10  | WP      | Write Protect lock | -             | ✅        | -       | ✅        |
+| 11  | CD      | Card Detect        | 10            | ✅        | PA25    | ✅        |
 
 ### Photos
 
@@ -104,14 +104,14 @@ I doubt a datasheet for a button would be useful even.
 
 The connector mentioned here is the 22 pin connector.
 
-| Button | Name   | Description  | Connector Pin | Verified? |
-| ------ | ------ | ------------ | ------------- | --------- |
-| SW1    | UP     | Up button    | 18            | ✅        |
-| SW2    | DOWN   | Down button  | 16            | ✅        |
-| SW3    | RIGHT  | Right button | 19            | ✅        |
-| SW4    | LEFT   | Left button  | 17            | ✅        |
-| SW5    | ENTER  | Enter button | 20            | ✅        |
-| SW6    | ESCAPE | Home button  | 15            | ✅        |
+| Button | Name   | Description  | Connector Pin | Verified? | MCU Pin | Verified? |
+| ------ | ------ | ------------ | ------------- | --------- | ------- | --------- |
+| SW1    | UP     | Up button    | 18            | ✅        | PE1     | ✅        |
+| SW2    | DOWN   | Down button  | 16            | ✅        | PA21    | ✅        |
+| SW3    | RIGHT  | Right button | 19            | ✅        | PE4     | ✅        |
+| SW4    | LEFT   | Left button  | 17            | ✅        | PB3     | ✅        |
+| SW5    | ENTER  | Enter button | 20            | ✅        | PA17    | ✅        |
+| SW6    | ESCAPE | Home button  | 15            | ✅        | PD30    | ✅        |
 
 ### Photos
 

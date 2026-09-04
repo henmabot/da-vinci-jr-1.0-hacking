@@ -6,9 +6,11 @@ There are 3 optical endstops on the printer. They share one connector labeled "H
 
 | Pin Name  | MCU | Pin Desc | Verified? |
 | --------- | --- | -------- | --------- |
-| X Endstop | 113 | PD8      | ❌        |
-| Y Endstop | 110 | PD9      | ❌        |
-| Z Endstop | 117 | PD19     | ❌        |
+| X Endstop | 113 | PD8      | ✅        |
+| Y Endstop | 117 | PC19     | ✅        |
+| Z Endstop | 110 | PD9      | ✅        |
+
+They are high when triggered, low when idle. They have hardware pull-up resistors on them. I am unsure about software pull-up being redundant.
 
 ## Photos
 
