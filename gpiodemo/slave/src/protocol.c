@@ -261,6 +261,17 @@ static bool require_initialized_pin(uint16_t packet_id, const char *text,
     return true;
 }
 
+static bool require_initialized_write(uint16_t packet_id, char **tokens,
+                                      size_t count, size_t expected,
+                                      uint8_t *pin)
+{
+    if (!valid_write_suffix(tokens, count, expected)) {
+        queue_bad_packet(packet_id);
+        return false;
+    }
+    return require_initialized_pin(packet_id, tokens[2], pin);
+}
+
 static void set_direction(uint8_t pin, pin_direction_t direction)
 {
     const gpio_pin_t gpio = wire_pin_to_gpio(pin);
@@ -301,12 +312,12 @@ static void handle_direction(uint16_t packet_id, char **tokens, size_t count)
 {
     uint8_t pin;
 
-    if (!valid_write_suffix(tokens, count, 5u) ||
-        !require_supported_pin(packet_id, tokens[2], &pin)) {
-        if (count != 5u || !text_equal(tokens[count - 1u], "OK?"))
-            queue_bad_packet(packet_id);
+    if (!valid_write_suffix(tokens, count, 5u)) {
+        queue_bad_packet(packet_id);
         return;
     }
+    if (!require_supported_pin(packet_id, tokens[2], &pin))
+        return;
 
     if (text_equal(tokens[3], "IN"))
         set_direction(pin, PIN_INPUT);
@@ -323,11 +334,7 @@ static void handle_direction(uint16_t packet_id, char **tokens, size_t count)
 static void handle_get(uint16_t packet_id, char **tokens, size_t count)
 {
     uint8_t pin;
-    if (!valid_write_suffix(tokens, count, 4u)) {
-        queue_bad_packet(packet_id);
-        return;
-    }
-    if (!require_initialized_pin(packet_id, tokens[2], &pin))
+    if (!require_initialized_write(packet_id, tokens, count, 4u, &pin))
         return;
 
     queue_pin_value(packet_id, pin, gpio_read(wire_pin_to_gpio(pin)));
@@ -336,11 +343,7 @@ static void handle_get(uint16_t packet_id, char **tokens, size_t count)
 static void handle_set(uint16_t packet_id, char **tokens, size_t count)
 {
     uint8_t pin;
-    if (!valid_write_suffix(tokens, count, 5u)) {
-        queue_bad_packet(packet_id);
-        return;
-    }
-    if (!require_initialized_pin(packet_id, tokens[2], &pin))
+    if (!require_initialized_write(packet_id, tokens, count, 5u, &pin))
         return;
 
     if (text_equal(tokens[3], "HIGH"))
@@ -358,11 +361,7 @@ static void handle_set(uint16_t packet_id, char **tokens, size_t count)
 static void handle_pullup(uint16_t packet_id, char **tokens, size_t count)
 {
     uint8_t pin;
-    if (!valid_write_suffix(tokens, count, 5u)) {
-        queue_bad_packet(packet_id);
-        return;
-    }
-    if (!require_initialized_pin(packet_id, tokens[2], &pin))
+    if (!require_initialized_write(packet_id, tokens, count, 5u, &pin))
         return;
 
     if (text_equal(tokens[3], "ON"))
@@ -380,11 +379,7 @@ static void handle_pullup(uint16_t packet_id, char **tokens, size_t count)
 static void handle_listen(uint16_t packet_id, char **tokens, size_t count)
 {
     uint8_t pin;
-    if (!valid_write_suffix(tokens, count, 5u)) {
-        queue_bad_packet(packet_id);
-        return;
-    }
-    if (!require_initialized_pin(packet_id, tokens[2], &pin))
+    if (!require_initialized_write(packet_id, tokens, count, 5u, &pin))
         return;
 
     if (text_equal(tokens[3], "ON")) {
