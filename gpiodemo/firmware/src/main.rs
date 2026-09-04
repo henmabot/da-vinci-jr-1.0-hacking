@@ -200,6 +200,12 @@ mod board {
             tx.flush(&mut serial);
 
             if tx.is_empty()
+                && let Some(packet) = firmware.poll_bulk(&gpio)
+            {
+                tx.queue(packet);
+            }
+
+            if tx.is_empty()
                 && let Ok(count) = serial.read(&mut rx)
             {
                 for &byte in &rx[..count] {

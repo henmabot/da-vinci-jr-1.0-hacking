@@ -72,6 +72,12 @@ pub enum Direction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinTarget {
+    Pin(u8),
+    All,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Query {
     Direction,
     Pullup,
@@ -95,12 +101,29 @@ pub enum QueryValue {
 pub enum Request {
     Hello,
     Status,
-    Direction { pin: u8, direction: Direction },
-    Get { pin: u8 },
-    Set { pin: u8, level: Level },
-    Pullup { pin: u8, enabled: bool },
-    Listen { pin: u8, enabled: bool },
-    Query { pin: u8, what: Query },
+    Direction {
+        target: PinTarget,
+        direction: Direction,
+    },
+    Get {
+        target: PinTarget,
+    },
+    Set {
+        target: PinTarget,
+        level: Level,
+    },
+    Pullup {
+        target: PinTarget,
+        enabled: bool,
+    },
+    Listen {
+        target: PinTarget,
+        enabled: bool,
+    },
+    Query {
+        target: PinTarget,
+        what: Query,
+    },
     Bye,
 }
 
@@ -174,51 +197,51 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
         b"HRU" if tokens.next().is_none() => Request::Status,
         b"BYE" if tokens.next().is_none() => Request::Bye,
         b"DIR" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             let direction = match tokens.next() {
                 Some(b"IN") => Direction::Input,
                 Some(b"OUT") => Direction::Output,
                 _ => return Err(malformed()),
             };
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Direction { pin, direction }
+            Request::Direction { target, direction }
         }
         b"GET" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Get { pin }
+            Request::Get { target }
         }
         b"SET" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             let level = tokens.next().and_then(parse_level).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Set { pin, level }
+            Request::Set { target, level }
         }
         b"PLL" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             let enabled = tokens
                 .next()
                 .and_then(parse_enabled)
                 .ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Pullup { pin, enabled }
+            Request::Pullup { target, enabled }
         }
         b"LSN" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             let enabled = tokens
                 .next()
                 .and_then(parse_enabled)
                 .ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Listen { pin, enabled }
+            Request::Listen { target, enabled }
         }
         b"WYD" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
             let what = tokens.next().and_then(parse_query).ok_or_else(malformed)?;
             if tokens.next().is_some() {
                 return Err(malformed());
             }
-            Request::Query { pin, what }
+            Request::Query { target, what }
         }
         b"HAI" | b"HRU" | b"BYE" => return Err(malformed()),
         _ => {
@@ -332,40 +355,40 @@ pub fn encode_request(packet: Packet<Request>, out: &mut [u8]) -> Result<usize, 
     match packet.body {
         Request::Hello => writer.bytes(b" HAI\n")?,
         Request::Status => writer.bytes(b" HRU\n")?,
-        Request::Direction { pin, direction } => {
+        Request::Direction { target, direction } => {
             writer.bytes(b" DIR ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(match direction {
                 Direction::Input => b" IN OK?\n",
                 Direction::Output => b" OUT OK?\n",
             })?;
         }
-        Request::Get { pin } => {
+        Request::Get { target } => {
             writer.bytes(b" GET ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(b" OK?\n")?;
         }
-        Request::Set { pin, level } => {
+        Request::Set { target, level } => {
             writer.bytes(b" SET ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(match level {
                 Level::Low => b" LOW OK?\n",
                 Level::High => b" HIGH OK?\n",
             })?;
         }
-        Request::Pullup { pin, enabled } => {
+        Request::Pullup { target, enabled } => {
             writer.bytes(b" PLL ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
         }
-        Request::Listen { pin, enabled } => {
+        Request::Listen { target, enabled } => {
             writer.bytes(b" LSN ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
         }
-        Request::Query { pin, what } => {
+        Request::Query { target, what } => {
             writer.bytes(b" WYD ")?;
-            writer.pin(pin)?;
+            writer.target(target)?;
             writer.bytes(match what {
                 Query::Direction => b" DIR\n",
                 Query::Pullup => b" PLL\n",
@@ -456,6 +479,14 @@ fn expect_suffix(
         .ok_or(error)
 }
 
+fn parse_target(token: &[u8]) -> Option<PinTarget> {
+    if token == b"ALL" {
+        Some(PinTarget::All)
+    } else {
+        parse_pin(token).map(PinTarget::Pin)
+    }
+}
+
 fn parse_pin(token: &[u8]) -> Option<u8> {
     u8::try_from(parse_decimal3(token)?)
         .ok()
@@ -533,6 +564,13 @@ impl<'a> Writer<'a> {
         self.decimal3(value)
     }
 
+    fn target(&mut self, target: PinTarget) -> Result<(), EncodeError> {
+        match target {
+            PinTarget::Pin(pin) => self.pin(pin),
+            PinTarget::All => self.bytes(b"ALL"),
+        }
+    }
+
     fn pin(&mut self, value: u8) -> Result<(), EncodeError> {
         self.decimal3(u16::from(value))
     }
@@ -590,60 +628,106 @@ mod tests {
             (Request::Status, "001 HRU\n"),
             (
                 Request::Direction {
-                    pin: 0,
+                    target: PinTarget::Pin(0),
                     direction: Direction::Input,
                 },
                 "001 DIR 000 IN OK?\n",
             ),
             (
                 Request::Direction {
-                    pin: 116,
+                    target: PinTarget::Pin(116),
                     direction: Direction::Output,
                 },
                 "001 DIR 116 OUT OK?\n",
             ),
-            (Request::Get { pin: 5 }, "001 GET 005 OK?\n"),
+            (
+                Request::Get {
+                    target: PinTarget::Pin(5),
+                },
+                "001 GET 005 OK?\n",
+            ),
             (
                 Request::Set {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     level: Level::High,
                 },
                 "001 SET 005 HIGH OK?\n",
             ),
             (
                 Request::Pullup {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     enabled: false,
                 },
                 "001 PLL 005 OFF OK?\n",
             ),
             (
                 Request::Listen {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     enabled: true,
                 },
                 "001 LSN 005 ON OK?\n",
             ),
             (
                 Request::Query {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     what: Query::Direction,
                 },
                 "001 WYD 005 DIR\n",
             ),
             (
                 Request::Query {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     what: Query::Pullup,
                 },
                 "001 WYD 005 PLL\n",
             ),
             (
                 Request::Query {
-                    pin: 5,
+                    target: PinTarget::Pin(5),
                     what: Query::Listen,
                 },
                 "001 WYD 005 LSN\n",
+            ),
+            (
+                Request::Direction {
+                    target: PinTarget::All,
+                    direction: Direction::Input,
+                },
+                "001 DIR ALL IN OK?\n",
+            ),
+            (
+                Request::Get {
+                    target: PinTarget::All,
+                },
+                "001 GET ALL OK?\n",
+            ),
+            (
+                Request::Set {
+                    target: PinTarget::All,
+                    level: Level::High,
+                },
+                "001 SET ALL HIGH OK?\n",
+            ),
+            (
+                Request::Pullup {
+                    target: PinTarget::All,
+                    enabled: true,
+                },
+                "001 PLL ALL ON OK?\n",
+            ),
+            (
+                Request::Listen {
+                    target: PinTarget::All,
+                    enabled: true,
+                },
+                "001 LSN ALL ON OK?\n",
+            ),
+            (
+                Request::Query {
+                    target: PinTarget::All,
+                    what: Query::Direction,
+                },
+                "001 WYD ALL DIR\n",
             ),
             (Request::Bye, "001 BYE\n"),
         ];
@@ -753,7 +837,9 @@ mod tests {
             decode_request(b"9 GET 116 OK?"),
             Ok(Packet {
                 id: 9,
-                body: Request::Get { pin: 116 },
+                body: Request::Get {
+                    target: PinTarget::Pin(116),
+                },
             })
         );
         assert!(decode_request(b"1000 HAI").is_err());

@@ -52,10 +52,13 @@ Packets are newline-terminated ASCII. The host allocates request IDs from `001` 
 | `011 WYD 000 PLL` | `011 HYG 000 PLL ON <3` | Query pull-up state |
 | `012 WYD 000 LSN` | `012 HYG 000 LSN ON <3` | Query listener state |
 | `013 BYE` | `013 CYA <3` | Clear pin/listener state |
+| `014 DIR ALL IN OK?` | `014 OKA <3` | Set every available pin to input |
+| `015 GET ALL OK?` | `015 HYG ...`, then `015 OKA <3` | Read every initialized pin |
+| `016 WYD ALL DIR` | `016 HYG ...`, then `016 OKA <3` | Query every available pin |
 
 Malformed known requests return `UMM`. Unknown commands return `IDK`.
 
-Pins start as `UNSET`. `DIR` initializes a pin and clears its pull-up state. `GET`, `SET`, `PLL`, and `LSN` reject uninitialized pins. `BYE` returns initialized pins to input/no-pull and clears listener state.
+Pins start as `UNSET`. Every command that takes a pin also accepts `ALL`. `DIR ALL` targets every available pin. `GET`, `SET`, `PLL`, and `LSN` with `ALL` operate on every initialized available pin and skip unset pins. `GET ALL` and `WYD ALL` send one `HYG` response per matching pin under the same request ID, followed by `OKA`. Numeric `GET`, `SET`, `PLL`, and `LSN` requests still reject uninitialized pins. `BYE` returns initialized pins to input/no-pull and clears listener state.
 
 ## Pin numbering
 
