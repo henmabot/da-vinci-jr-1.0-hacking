@@ -1,14 +1,18 @@
 use std::{
     collections::VecDeque,
     io::{self, Read, Write},
-    sync::mpsc::{self, Receiver, Sender, SyncSender},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, Sender, SyncSender},
+    },
     thread,
     time::Duration,
 };
 
 use da_vinci_protocol::{
-    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin, PinTable, PinTarget,
-    Query, QueryValue, Request, Response, ResponseError, decode_response, encode_request,
+    DecodeError, Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin,
+    PinTable, PinTarget, Query, QueryValue, Request, Response, ResponseError, WIRE_PIN_COUNT,
+    decode_response, encode_request,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -20,6 +24,7 @@ pub(super) enum Event {
     Received {
         line: String,
         event: Result<DeviceEvent, String>,
+        coalesced: u32,
     },
     IoError(String),
 }
@@ -49,11 +54,106 @@ pub(super) enum DeviceEvent {
     Untracked,
 }
 
+#[derive(Clone, Copy)]
+struct WireLine {
+    bytes: [u8; MAX_PACKET_LEN],
+    len: usize,
+}
+
+impl WireLine {
+    fn new(bytes: &[u8]) -> Self {
+        let mut line = Self {
+            bytes: [0; MAX_PACKET_LEN],
+            len: bytes.len(),
+        };
+        line.bytes[..bytes.len()].copy_from_slice(bytes);
+        line
+    }
+
+    fn text(self) -> String {
+        String::from_utf8_lossy(&self.bytes[..self.len]).into_owned()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ListenerUpdate {
+    line: WireLine,
+    packet: Packet<Response>,
+    coalesced: u32,
+}
+
+struct ListenerInbox {
+    updates: Mutex<PinTable<Option<ListenerUpdate>>>,
+}
+
+impl ListenerInbox {
+    fn new() -> Self {
+        Self {
+            updates: Mutex::new(PinTable::filled(None)),
+        }
+    }
+
+    fn push(&self, pin: Pin, line: WireLine, packet: Packet<Response>) {
+        let mut updates = self.updates.lock().expect("listener inbox lock");
+        let coalesced = updates[pin].map_or(0, |previous| previous.coalesced.saturating_add(1));
+        updates[pin] = Some(ListenerUpdate {
+            line,
+            packet,
+            coalesced,
+        });
+    }
+
+    fn take(&self, cursor: &mut u8) -> Option<ListenerUpdate> {
+        let mut updates = self.updates.lock().expect("listener inbox lock");
+        for offset in 0..WIRE_PIN_COUNT {
+            let index = (*cursor + offset) % WIRE_PIN_COUNT;
+            let pin = Pin::from_wire_index(index).expect("listener inbox index is in range");
+            if let Some(update) = updates[pin].take() {
+                *cursor = (index + 1) % WIRE_PIN_COUNT;
+                return Some(update);
+            }
+        }
+        None
+    }
+
+    fn clear_target(&self, target: PinTarget) {
+        let mut updates = self.updates.lock().expect("listener inbox lock");
+        for pin in target.pins() {
+            updates[pin] = None;
+        }
+    }
+
+    fn clear_id(&self, id: u16) {
+        let mut updates = self.updates.lock().expect("listener inbox lock");
+        for update in updates.iter_mut() {
+            if update.is_some_and(|update| update.packet.id == id) {
+                *update = None;
+            }
+        }
+    }
+
+    fn clear(&self) {
+        self.updates.lock().expect("listener inbox lock").fill(None);
+    }
+
+    #[cfg(test)]
+    fn pending_count(&self) -> usize {
+        self.updates
+            .lock()
+            .expect("listener inbox lock")
+            .iter()
+            .filter(|update| update.is_some())
+            .count()
+    }
+}
+
 pub(super) struct Connection {
     next_id: u16,
     pending: [Option<Request>; MAX_PACKET_ID as usize + 1],
     inputs: PinTable<bool>,
-    listeners: PinTable<Option<u16>>,
+    listeners: Arc<Mutex<PinTable<Option<u16>>>>,
+    listener_updates: Arc<ListenerInbox>,
+    listener_cursor: u8,
     commands: Sender<IoCommand>,
     events: Receiver<IoEvent>,
 }
@@ -62,12 +162,20 @@ impl Connection {
     pub(super) fn spawn() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
-        thread::spawn(move || io_worker(command_rx, event_tx));
+        let listeners = Arc::new(Mutex::new(PinTable::filled(None)));
+        let listener_updates = Arc::new(ListenerInbox::new());
+        thread::spawn({
+            let listeners = Arc::clone(&listeners);
+            let listener_updates = Arc::clone(&listener_updates);
+            move || io_worker(command_rx, event_tx, listeners, listener_updates)
+        });
         Self {
             next_id: 1,
             pending: [None; MAX_PACKET_ID as usize + 1],
             inputs: PinTable::filled(false),
-            listeners: PinTable::filled(None),
+            listeners,
+            listener_updates,
+            listener_cursor: 0,
             commands: command_tx,
             events: event_rx,
         }
@@ -115,18 +223,39 @@ impl Connection {
                 self.clear();
                 Some(Event::Disconnected(reason))
             }
-            Ok(IoEvent::Line(line)) => {
-                let event = decode_response(line.as_bytes())
+            Ok(IoEvent::Line { line, packet }) => {
+                let event = packet
                     .map(|packet| self.received(packet))
                     .map_err(|error| format!("Malformed response: {error:?}"));
-                Some(Event::Received { line, event })
+                Some(Event::Received {
+                    line: line.text(),
+                    event,
+                    coalesced: 0,
+                })
             }
             Ok(IoEvent::Error(error)) => Some(Event::IoError(error)),
-            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Empty) => self.next_listener_event(),
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.clear();
                 Some(Event::Disconnected(Some("Serial worker stopped".into())))
             }
+        }
+    }
+
+    fn next_listener_event(&mut self) -> Option<Event> {
+        loop {
+            let update = self.listener_updates.take(&mut self.listener_cursor)?;
+            let Response::Value { pin, .. } = update.packet.body else {
+                continue;
+            };
+            if !self.is_listener_response(update.packet.id, pin) {
+                continue;
+            }
+            return Some(Event::Received {
+                line: update.line.text(),
+                event: Ok(self.received(update.packet)),
+                coalesced: update.coalesced,
+            });
         }
     }
 
@@ -203,7 +332,12 @@ impl Connection {
     fn clear(&mut self) {
         self.pending.fill(None);
         self.inputs.fill(false);
-        self.listeners.fill(None);
+        self.listeners
+            .lock()
+            .expect("listener registry lock")
+            .fill(None);
+        self.listener_updates.clear();
+        self.listener_cursor = 0;
     }
 
     fn ack(&mut self, id: u16, request: Request) -> DeviceEvent {
@@ -214,13 +348,17 @@ impl Connection {
         }
 
         if let Request::Listen { target, enabled } = request {
+            self.listener_updates.clear_target(target);
             if enabled {
                 let mut listening = false;
                 let mut replaced = PinTable::filled(None);
-                for pin in target.pins() {
-                    if self.inputs[pin] {
-                        listening = true;
-                        replaced[pin] = self.listeners[pin].replace(id);
+                {
+                    let mut listeners = self.listeners.lock().expect("listener registry lock");
+                    for pin in target.pins() {
+                        if self.inputs[pin] {
+                            listening = true;
+                            replaced[pin] = listeners[pin].replace(id);
+                        }
                     }
                 }
                 for previous in replaced.iter().copied().flatten() {
@@ -234,8 +372,11 @@ impl Connection {
             }
 
             let mut removed = PinTable::filled(None);
-            for pin in target.pins() {
-                removed[pin] = self.listeners[pin].take();
+            {
+                let mut listeners = self.listeners.lock().expect("listener registry lock");
+                for pin in target.pins() {
+                    removed[pin] = listeners[pin].take();
+                }
             }
             for previous in removed.iter().copied().flatten() {
                 self.release_listener(previous);
@@ -247,21 +388,31 @@ impl Connection {
     }
 
     fn is_listener_response(&self, id: u16, pin: Pin) -> bool {
-        self.listeners[pin] == Some(id)
+        self.listeners.lock().expect("listener registry lock")[pin] == Some(id)
     }
 
     fn release_listener(&mut self, id: u16) {
-        if !self.listeners.iter().any(|listener| *listener == Some(id)) {
+        let still_used = self
+            .listeners
+            .lock()
+            .expect("listener registry lock")
+            .iter()
+            .any(|listener| *listener == Some(id));
+        if !still_used {
             self.pending[id as usize] = None;
         }
     }
 
     fn retire(&mut self, id: u16) {
-        for listener in self.listeners.iter_mut() {
-            if *listener == Some(id) {
-                *listener = None;
+        {
+            let mut listeners = self.listeners.lock().expect("listener registry lock");
+            for listener in listeners.iter_mut() {
+                if *listener == Some(id) {
+                    *listener = None;
+                }
             }
         }
+        self.listener_updates.clear_id(id);
         self.pending[id as usize] = None;
     }
 }
@@ -294,11 +445,19 @@ enum IoCommand {
 enum IoEvent {
     Connected(String),
     Disconnected(Option<String>),
-    Line(String),
+    Line {
+        line: WireLine,
+        packet: Result<Packet<Response>, DecodeError>,
+    },
     Error(String),
 }
 
-fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
+fn io_worker(
+    commands: Receiver<IoCommand>,
+    events: SyncSender<IoEvent>,
+    listeners: Arc<Mutex<PinTable<Option<u16>>>>,
+    listener_updates: Arc<ListenerInbox>,
+) {
     let mut port: Option<Box<dyn serialport::SerialPort>> = None;
     let mut reader = LineBuffer::new();
     let mut writes = VecDeque::new();
@@ -375,8 +534,7 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
                 for &byte in &buffer[..count] {
                     match reader.push(byte) {
                         Ok(Some(line)) => {
-                            let packet = String::from_utf8_lossy(line).into_owned();
-                            let _ = events.send(IoEvent::Line(packet));
+                            route_line(line, &events, &listeners, &listener_updates);
                         }
                         Ok(None) => {}
                         Err(LineError::TooLong) => {
@@ -400,6 +558,43 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
             }
         }
     }
+}
+
+fn route_line(
+    line: &[u8],
+    events: &SyncSender<IoEvent>,
+    listeners: &Mutex<PinTable<Option<u16>>>,
+    listener_updates: &ListenerInbox,
+) {
+    let wire_line = WireLine::new(line);
+    match decode_response(line) {
+        Ok(packet) => {
+            if let Some(pin) = coalescible_listener_pin(packet, listeners) {
+                listener_updates.push(pin, wire_line, packet);
+            } else {
+                let _ = events.send(IoEvent::Line {
+                    line: wire_line,
+                    packet: Ok(packet),
+                });
+            }
+        }
+        Err(error) => {
+            let _ = events.send(IoEvent::Line {
+                line: wire_line,
+                packet: Err(error),
+            });
+        }
+    }
+}
+
+fn coalescible_listener_pin(
+    packet: Packet<Response>,
+    listeners: &Mutex<PinTable<Option<u16>>>,
+) -> Option<Pin> {
+    let Response::Value { pin, .. } = packet.body else {
+        return None;
+    };
+    (listeners.lock().expect("listener registry lock")[pin] == Some(packet.id)).then_some(pin)
 }
 
 fn handle_io_command(
@@ -513,6 +708,92 @@ mod tests {
 
         assert!(writes.is_empty());
         assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn listener_inbox_coalesces_burst() {
+        let target = pin(5);
+        let listeners = Mutex::new(PinTable::filled(None));
+        listeners.lock().unwrap()[target] = Some(8);
+        let inbox = ListenerInbox::new();
+        let (events, received) = mpsc::sync_channel(1);
+
+        for index in 0..EVENT_QUEUE_CAPACITY * 2 {
+            let line = if index % 2 == 0 {
+                b"008 HYG PA05 LOW <3".as_slice()
+            } else {
+                b"008 HYG PA05 HIGH <3".as_slice()
+            };
+            route_line(line, &events, &listeners, &inbox);
+        }
+
+        assert!(received.try_recv().is_err());
+        assert_eq!(inbox.pending_count(), 1);
+        let update = inbox.take(&mut 0).unwrap();
+        assert_eq!(update.coalesced as usize, EVENT_QUEUE_CAPACITY * 2 - 1);
+        assert_eq!(
+            update.packet,
+            response(
+                8,
+                Response::Value {
+                    pin: target,
+                    level: Level::High,
+                }
+            )
+        );
+        assert_eq!(inbox.pending_count(), 0);
+
+        for target in Pin::all() {
+            inbox.push(
+                target,
+                WireLine::new(b"008 HYG PA05 HIGH <3"),
+                response(
+                    8,
+                    Response::Value {
+                        pin: target,
+                        level: Level::High,
+                    },
+                ),
+            );
+        }
+        assert_eq!(inbox.pending_count(), WIRE_PIN_COUNT as usize);
+    }
+
+    #[test]
+    fn only_active_listener_values_are_coalescible() {
+        let target = pin(5);
+        let listeners = Mutex::new(PinTable::filled(None));
+        let listener_value = response(
+            8,
+            Response::Value {
+                pin: target,
+                level: Level::High,
+            },
+        );
+
+        assert_eq!(coalescible_listener_pin(listener_value, &listeners), None);
+        listeners.lock().unwrap()[target] = Some(8);
+        assert_eq!(
+            coalescible_listener_pin(listener_value, &listeners),
+            Some(target)
+        );
+        assert_eq!(
+            coalescible_listener_pin(
+                response(
+                    9,
+                    Response::Value {
+                        pin: target,
+                        level: Level::Low,
+                    }
+                ),
+                &listeners
+            ),
+            None
+        );
+        assert_eq!(
+            coalescible_listener_pin(response(8, Response::Ack), &listeners),
+            None
+        );
     }
 
     #[test]

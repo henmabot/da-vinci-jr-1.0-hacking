@@ -1072,8 +1072,17 @@ impl App {
                     self.reset_pending();
                     self.error = reason;
                 }
-                ConnectionEvent::Received { line, event } => {
+                ConnectionEvent::Received {
+                    line,
+                    event,
+                    coalesced,
+                } => {
                     self.push_log(format!("RX {line}"));
+                    if coalesced != 0 {
+                        self.push_log(format!(
+                            "RX ({coalesced} intermediate listener updates coalesced)"
+                        ));
+                    }
                     match event {
                         Ok(event) => self.handle_device_event(event),
                         Err(error) => self.error = Some(error),
