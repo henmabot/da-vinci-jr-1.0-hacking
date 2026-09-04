@@ -24,7 +24,7 @@ gui-release:
 check:
     cargo fmt --manifest-path {{ manifest }} --all -- --check
     cargo test --manifest-path {{ manifest }} -p da-vinci-protocol
-    cargo test --manifest-path {{ manifest }} -p da-vinci-firmware --lib
+    cargo test --manifest-path {{ manifest }} -p da-vinci-firmware
     cargo test --manifest-path {{ manifest }} -p da-vinci-gui
     cargo clippy --manifest-path {{ manifest }} --workspace --all-targets -- -D warnings
     cargo clippy --manifest-path {{ manifest }} -p da-vinci-firmware --profile firmware --target {{ target }} -- -D warnings
