@@ -105,10 +105,8 @@ pub enum Port {
     E,
 }
 
-impl TryFrom<u8> for Port {
-    type Error = ParseTokenError;
-
-    fn try_from(letter: u8) -> Result<Self, Self::Error> {
+impl Port {
+    fn from_letter(letter: u8) -> Result<Self, ParseTokenError> {
         match letter {
             b'A' => Ok(Self::A),
             b'B' => Ok(Self::B),
@@ -118,20 +116,7 @@ impl TryFrom<u8> for Port {
             _ => Err(ParseTokenError),
         }
     }
-}
 
-impl TryFrom<&[u8]> for Port {
-    type Error = ParseTokenError;
-
-    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
-        let [b'P', b'I', b'O', letter] = *token else {
-            return Err(ParseTokenError);
-        };
-        Self::try_from(letter)
-    }
-}
-
-impl Port {
     const fn first_index(self) -> u8 {
         match self {
             Self::A => 0,
@@ -165,6 +150,17 @@ impl Port {
     }
 }
 
+impl TryFrom<&[u8]> for Port {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        let [b'P', b'I', b'O', letter] = *token else {
+            return Err(ParseTokenError);
+        };
+        Self::from_letter(letter)
+    }
+}
+
 impl fmt::Display for Port {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PIO{}", self.letter())
@@ -184,6 +180,14 @@ const PACKAGE_PINS: [u8; WIRE_PIN_COUNT as usize] = [
 ];
 
 impl Pin {
+    pub const fn from_wire_index(index: u8) -> Option<Self> {
+        if index < WIRE_PIN_COUNT {
+            Some(Self(index))
+        } else {
+            None
+        }
+    }
+
     pub fn all() -> impl Iterator<Item = Self> {
         (0..WIRE_PIN_COUNT).map(Self)
     }
@@ -215,16 +219,6 @@ impl Pin {
     }
 }
 
-impl TryFrom<u8> for Pin {
-    type Error = ParseTokenError;
-
-    fn try_from(index: u8) -> Result<Self, Self::Error> {
-        (index < WIRE_PIN_COUNT)
-            .then_some(Self(index))
-            .ok_or(ParseTokenError)
-    }
-}
-
 impl TryFrom<(Port, u8)> for Pin {
     type Error = ParseTokenError;
 
@@ -245,7 +239,7 @@ impl TryFrom<&[u8]> for Pin {
         if !tens.is_ascii_digit() || !ones.is_ascii_digit() {
             return Err(ParseTokenError);
         }
-        Self::try_from((Port::try_from(port)?, (tens - b'0') * 10 + (ones - b'0')))
+        Self::try_from((Port::from_letter(port)?, (tens - b'0') * 10 + (ones - b'0')))
     }
 }
 
@@ -794,7 +788,7 @@ mod tests {
         out
     }
     fn pin(index: u8) -> Pin {
-        Pin::try_from(index).unwrap()
+        Pin::from_wire_index(index).unwrap()
     }
 
     #[test]

@@ -134,7 +134,7 @@ impl Firmware {
                 mut next,
             } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = Pin::try_from(next).expect("wire pin index is in range");
+                    let pin = Pin::from_wire_index(next).expect("wire pin index is in range");
                     next += 1;
                     if !target.contains(pin) {
                         continue;
@@ -167,7 +167,7 @@ impl Firmware {
                 what,
             } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = Pin::try_from(next).expect("wire pin index is in range");
+                    let pin = Pin::from_wire_index(next).expect("wire pin index is in range");
                     next += 1;
                     if !target.contains(pin) {
                         continue;
@@ -427,7 +427,7 @@ mod tests {
     }
 
     fn pin(index: u8) -> Pin {
-        Pin::try_from(index).unwrap()
+        Pin::from_wire_index(index).unwrap()
     }
 
     fn packet(id: u16, body: Request) -> Packet<Request> {

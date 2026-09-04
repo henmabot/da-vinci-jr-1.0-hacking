@@ -459,7 +459,7 @@ mod tests {
     use da_vinci_protocol::Direction;
 
     fn pin(index: u8) -> Pin {
-        Pin::try_from(index).unwrap()
+        Pin::from_wire_index(index).unwrap()
     }
 
     fn response(id: u16, body: Response) -> Packet<Response> {
