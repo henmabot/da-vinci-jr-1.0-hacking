@@ -492,7 +492,7 @@ impl App {
             Message::PortSelected,
         )
         .placeholder("Serial port")
-        .width(Length::Fixed(240.0));
+        .width(Length::Fixed(180.0));
 
         let connection_button = if self.connected_port.is_some() {
             native_button("Disconnect").on_press(Message::Disconnect)
@@ -504,7 +504,7 @@ impl App {
         let connection = row![
             text("Connection").size(18),
             ports,
-            native_button("Refresh ports").on_press(Message::RefreshPorts),
+            native_button("Refresh").on_press(Message::RefreshPorts),
             connection_button,
             text(&self.device_status).size(13),
             iced::widget::Space::new().width(Length::Fill),
