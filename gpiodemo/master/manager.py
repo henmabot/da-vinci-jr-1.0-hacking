@@ -530,7 +530,7 @@ class PinsFrame(ctk.CTkFrame):
     def get_status(self):
         self._send("get_status")
 
-    def reset_pin_states(self):
+    def _reset_pin_states(self):
         for row in self._rows.values():
             row["mode_var"].set("UNSET")
             row["status"] = "--"
@@ -549,7 +549,7 @@ class PinsFrame(ctk.CTkFrame):
 
             def on_result(result):
                 if result["type"] == "goodbye_ack":
-                    self.after(0, self.reset_pin_states)
+                    self.after(0, self._reset_pin_states)
 
             self._send("goodbye", callback=on_result)
 

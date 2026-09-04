@@ -130,7 +130,7 @@ class MockSerial:
                 value = "OFF"
             self._reply(f"{packet_id} HYG {pin} {kind} {value} <3")
         elif command == "BYE":
-            self.reset()
+            self._reset()
             self._reply(f"{packet_id} CYA <3")
         else:
             self._reply(f"{packet_id} IDK <3")
@@ -159,7 +159,7 @@ class MockSerial:
         with self._lock:
             return pin in self._directions
 
-    def reset(self):
+    def _reset(self):
         with self._lock:
             self._directions.clear()
             self._pullups.clear()
