@@ -1,8 +1,8 @@
 device := "/dev/tty.usbmodem101"
-firmata_dir := "firmata"
-src_dir := firmata_dir + "/src"
-conf_dir := firmata_dir + "/conf"
-vendor_dir := firmata_dir + "/vendor"
+slave_dir := "gpiodemo/slave"
+src_dir := slave_dir + "/src"
+conf_dir := slave_dir + "/conf"
+vendor_dir := slave_dir + "/vendor"
 cross_compile := env("CROSS_COMPILE", "arm-none-eabi-")
 cc := cross_compile + "gcc"
 objcopy := cross_compile + "objcopy"
