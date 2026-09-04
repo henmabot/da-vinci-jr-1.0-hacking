@@ -7,8 +7,8 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin, PinTarget, Query,
-    QueryValue, Request, Response, ResponseError, WIRE_PIN_COUNT, decode_response, encode_request,
+    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin, PinTable, PinTarget,
+    Query, QueryValue, Request, Response, ResponseError, decode_response, encode_request,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -52,8 +52,8 @@ pub(super) enum DeviceEvent {
 pub(super) struct Connection {
     next_id: u16,
     pending: [Option<Request>; MAX_PACKET_ID as usize + 1],
-    inputs: [bool; WIRE_PIN_COUNT as usize],
-    listeners: [Option<u16>; WIRE_PIN_COUNT as usize],
+    inputs: PinTable<bool>,
+    listeners: PinTable<Option<u16>>,
     commands: Sender<IoCommand>,
     events: Receiver<IoEvent>,
 }
@@ -66,8 +66,8 @@ impl Connection {
         Self {
             next_id: 1,
             pending: [None; MAX_PACKET_ID as usize + 1],
-            inputs: [false; WIRE_PIN_COUNT as usize],
-            listeners: [None; WIRE_PIN_COUNT as usize],
+            inputs: PinTable::filled(false),
+            listeners: PinTable::filled(None),
             commands: command_tx,
             events: event_rx,
         }
@@ -208,24 +208,22 @@ impl Connection {
 
     fn ack(&mut self, id: u16, request: Request) -> DeviceEvent {
         if let Request::Direction { target, direction } = request {
-            for (index, pin) in Pin::all().enumerate() {
-                if target.contains(pin) && pin.is_available() {
-                    self.inputs[index] = direction == da_vinci_protocol::Direction::Input;
-                }
+            for pin in target.available_pins() {
+                self.inputs[pin] = direction == da_vinci_protocol::Direction::Input;
             }
         }
 
         if let Request::Listen { target, enabled } = request {
             if enabled {
                 let mut listening = false;
-                let mut replaced = [None; WIRE_PIN_COUNT as usize];
-                for (index, pin) in Pin::all().enumerate() {
-                    if target.contains(pin) && self.inputs[index] {
+                let mut replaced = PinTable::filled(None);
+                for pin in target.pins() {
+                    if self.inputs[pin] {
                         listening = true;
-                        replaced[index] = self.listeners[index].replace(id);
+                        replaced[pin] = self.listeners[pin].replace(id);
                     }
                 }
-                for previous in replaced.into_iter().flatten() {
+                for previous in replaced.iter().copied().flatten() {
                     if previous != id {
                         self.release_listener(previous);
                     }
@@ -235,13 +233,11 @@ impl Connection {
                 }
             }
 
-            let mut removed = [None; WIRE_PIN_COUNT as usize];
-            for (index, pin) in Pin::all().enumerate() {
-                if target.contains(pin) {
-                    removed[index] = self.listeners[index].take();
-                }
+            let mut removed = PinTable::filled(None);
+            for pin in target.pins() {
+                removed[pin] = self.listeners[pin].take();
             }
-            for previous in removed.into_iter().flatten() {
+            for previous in removed.iter().copied().flatten() {
                 self.release_listener(previous);
             }
         }
@@ -251,17 +247,17 @@ impl Connection {
     }
 
     fn is_listener_response(&self, id: u16, pin: Pin) -> bool {
-        self.listeners[pin.index() as usize] == Some(id)
+        self.listeners[pin] == Some(id)
     }
 
     fn release_listener(&mut self, id: u16) {
-        if !self.listeners.contains(&Some(id)) {
+        if !self.listeners.iter().any(|listener| *listener == Some(id)) {
             self.pending[id as usize] = None;
         }
     }
 
     fn retire(&mut self, id: u16) {
-        for listener in &mut self.listeners {
+        for listener in self.listeners.iter_mut() {
             if *listener == Some(id) {
                 *listener = None;
             }

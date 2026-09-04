@@ -1,8 +1,8 @@
 #![no_std]
 
 use da_vinci_protocol::{
-    Direction, Level, Packet, Pin, PinError, PinTarget, Query, QueryValue, Request, Response,
-    ResponseError, WIRE_PIN_COUNT,
+    Direction, Level, Packet, Pin, PinError, PinTable, PinTarget, Query, QueryValue, Request,
+    Response, ResponseError, WIRE_PIN_COUNT,
 };
 
 pub trait Gpio {
@@ -45,7 +45,7 @@ enum BulkResponse {
 }
 
 pub struct Firmware {
-    pins: [PinState; WIRE_PIN_COUNT as usize],
+    pins: PinTable<PinState>,
     bulk: Option<BulkResponse>,
 }
 
@@ -58,7 +58,7 @@ impl Default for Firmware {
 impl Firmware {
     pub const fn new() -> Self {
         Self {
-            pins: [PinState::UNSET; WIRE_PIN_COUNT as usize],
+            pins: PinTable::filled(PinState::UNSET),
             bulk: None,
         }
     }
@@ -142,7 +142,7 @@ impl Firmware {
                     if supported(pin).is_err() {
                         continue;
                     }
-                    if self.pins[pin.index() as usize].direction.is_none() {
+                    if self.pins[pin].direction.is_none() {
                         continue;
                     }
                     self.bulk = Some(BulkResponse::Values { id, target, next });
@@ -200,8 +200,8 @@ impl Firmware {
     }
 
     pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
-        for (index, pin) in Pin::all().enumerate() {
-            let state = &mut self.pins[index];
+        for pin in Pin::all() {
+            let state = &mut self.pins[pin];
             let Some(listener) = state.listener else {
                 continue;
             };
@@ -246,7 +246,7 @@ impl Firmware {
             Direction::Input => gpio.input(pin, false),
             Direction::Output => gpio.output(pin, Level::Low),
         }
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         state.direction = Some(direction);
         state.pullup = false;
         state.previous = gpio.read(pin);
@@ -261,7 +261,7 @@ impl Firmware {
                 gpio.write(pin, level);
             }
             PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
-                if self.pins[pin.index() as usize].direction == Some(Direction::Output) {
+                if self.pins[pin].direction == Some(Direction::Output) {
                     gpio.write(pin, level);
                 }
             }),
@@ -278,7 +278,7 @@ impl Firmware {
                 self.set_pullup_pin(pin, enabled, gpio);
             }
             PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
-                if self.pins[pin.index() as usize].direction.is_some() {
+                if self.pins[pin].direction.is_some() {
                     self.set_pullup_pin(pin, enabled, gpio);
                 }
             }),
@@ -287,7 +287,7 @@ impl Firmware {
     }
 
     fn set_pullup_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, gpio: &mut G) {
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         state.pullup = enabled;
         if state.direction == Some(Direction::Input) {
             gpio.input(pin, enabled);
@@ -310,7 +310,7 @@ impl Firmware {
                 self.set_listener_pin(pin, enabled, id, gpio);
             }
             PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
-                if self.pins[pin.index() as usize].direction == Some(Direction::Input) {
+                if self.pins[pin].direction == Some(Direction::Input) {
                     self.set_listener_pin(pin, enabled, id, gpio);
                 }
             }),
@@ -319,7 +319,7 @@ impl Firmware {
     }
 
     fn set_listener_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, id: u16, gpio: &G) {
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         state.listener = enabled.then_some(id);
         if enabled {
             state.previous = gpio.read(pin);
@@ -328,14 +328,14 @@ impl Firmware {
 
     fn initialized(&self, pin: Pin) -> Result<(), Response> {
         supported(pin)?;
-        if self.pins[pin.index() as usize].direction.is_none() {
+        if self.pins[pin].direction.is_none() {
             return Err(pin_error(pin, PinError::Unset));
         }
         Ok(())
     }
 
     fn query(&self, pin: Pin, what: Query) -> QueryValue {
-        let state = self.pins[pin.index() as usize];
+        let state = self.pins[pin];
         let Some(direction) = state.direction else {
             return QueryValue::Unset;
         };
@@ -348,8 +348,8 @@ impl Firmware {
 
     fn reset<G: Gpio>(&mut self, gpio: &mut G) {
         self.bulk = None;
-        for (index, pin) in Pin::all().enumerate() {
-            let state = &mut self.pins[index];
+        for pin in Pin::all() {
+            let state = &mut self.pins[pin];
             if state.direction.is_some() && supported(pin).is_ok() {
                 gpio.input(pin, false);
             }
@@ -359,10 +359,8 @@ impl Firmware {
 }
 
 fn for_each_group_pin(target: PinTarget, mut f: impl FnMut(Pin)) {
-    for pin in Pin::all() {
-        if target.contains(pin) && pin.is_available() {
-            f(pin);
-        }
+    for pin in target.available_pins() {
+        f(pin);
     }
 }
 

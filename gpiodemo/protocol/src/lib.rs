@@ -1,10 +1,50 @@
 #![no_std]
 
-use core::fmt;
+use core::{
+    fmt,
+    ops::{Index, IndexMut},
+};
 
 pub const WIRE_PIN_COUNT: u8 = 117;
 pub const MAX_PACKET_LEN: usize = 64;
 pub const MAX_PACKET_ID: u16 = 999;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinTable<T>([T; WIRE_PIN_COUNT as usize]);
+
+impl<T: Copy> PinTable<T> {
+    pub const fn filled(value: T) -> Self {
+        Self([value; WIRE_PIN_COUNT as usize])
+    }
+
+    pub fn fill(&mut self, value: T) {
+        self.0.fill(value);
+    }
+}
+
+impl<T> PinTable<T> {
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<'_, T> {
+        self.0.iter_mut()
+    }
+}
+
+impl<T> Index<Pin> for PinTable<T> {
+    type Output = T;
+
+    fn index(&self, pin: Pin) -> &Self::Output {
+        &self.0[pin.index() as usize]
+    }
+}
+
+impl<T> IndexMut<Pin> for PinTable<T> {
+    fn index_mut(&mut self, pin: Pin) -> &mut Self::Output {
+        &mut self.0[pin.index() as usize]
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseTokenError;
@@ -271,6 +311,22 @@ impl TryFrom<&[u8]> for PinTarget {
 }
 
 impl PinTarget {
+    pub fn pins(self) -> impl Iterator<Item = Pin> {
+        let (start, end) = match self {
+            Self::Pin(pin) => (pin.index(), pin.index() + 1),
+            Self::Bank(port) => {
+                let start = port.first_index();
+                (start, start + port.pin_count())
+            }
+            Self::All => (0, WIRE_PIN_COUNT),
+        };
+        (start..end).map(Pin)
+    }
+
+    pub fn available_pins(self) -> impl Iterator<Item = Pin> {
+        self.pins().filter(|pin| pin.is_available())
+    }
+
     pub fn contains(self, pin: Pin) -> bool {
         match self {
             Self::Pin(target) => target == pin,
@@ -1036,5 +1092,30 @@ mod tests {
         assert_eq!(pin(44).package_pin(), 87);
         assert_eq!(pin(72).to_string(), "PC25");
         assert_eq!(Pin::try_from((Port::E, 5)), Ok(pin(116)));
+    }
+
+    #[test]
+    fn pin_targets_iterate_contiguous_scope_and_filter_reserved_pins() {
+        let single = PinTarget::Pin(pin(44));
+        assert_eq!(single.pins().collect::<std::vec::Vec<_>>(), [pin(44)]);
+
+        let bank = PinTarget::Bank(Port::B);
+        let bank_pins = bank.pins().collect::<std::vec::Vec<_>>();
+        assert_eq!(bank_pins.first(), Some(&pin(32)));
+        assert_eq!(bank_pins.last(), Some(&pin(46)));
+        assert_eq!(bank_pins.len(), 15);
+        assert_eq!(bank.available_pins().count(), 11);
+
+        assert_eq!(PinTarget::All.pins().count(), WIRE_PIN_COUNT as usize);
+        assert_eq!(PinTarget::All.available_pins().count(), 113);
+    }
+
+    #[test]
+    fn pin_table_indexes_with_pin_values() {
+        let mut table = PinTable::filled(Level::Low);
+        let target = pin(72);
+        table[target] = Level::High;
+        assert_eq!(table[target], Level::High);
+        assert_eq!(table[pin(71)], Level::Low);
     }
 }

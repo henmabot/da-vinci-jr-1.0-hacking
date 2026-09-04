@@ -4,9 +4,7 @@ mod serial_log;
 use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
 use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
-use da_vinci_protocol::{
-    Direction, Level, Pin, PinTarget, Port, Request, ResponseError, WIRE_PIN_COUNT,
-};
+use da_vinci_protocol::{Direction, Level, Pin, PinTable, PinTarget, Port, Request, ResponseError};
 use iced::{
     Background, Border, Color, Element, Length, Size, Subscription, Task, Theme,
     alignment::{Horizontal, Vertical},
@@ -247,7 +245,7 @@ enum Message {
 }
 
 struct App {
-    pins: [PinState; WIRE_PIN_COUNT as usize],
+    pins: PinTable<PinState>,
     bank_tab: BankTab,
     bulk_scope: PinTarget,
     bulk_mode: Mode,
@@ -279,7 +277,7 @@ impl App {
         panes.resize(split, 0.76);
         (
             Self {
-                pins: [PinState::UNSET; WIRE_PIN_COUNT as usize],
+                pins: PinTable::filled(PinState::UNSET),
                 bank_tab: BankTab::A,
                 bulk_scope: PinTarget::All,
                 bulk_mode: Mode::Input,
@@ -700,7 +698,7 @@ impl App {
             .into();
         }
 
-        let state = self.pins[pin.index() as usize];
+        let state = self.pins[pin];
         let mode: Element<'_, Message> = if state.target_mode.is_some() {
             container(
                 text(
@@ -827,7 +825,7 @@ impl App {
         if !self.require_connection() || !pin.is_available() {
             return;
         }
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         if state.target_mode.is_some() || state.listener.is_pending() {
             return;
         }
@@ -840,7 +838,7 @@ impl App {
             });
         }
 
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         state.target_mode = Some(mode);
         state.level = None;
         self.send_request(Request::Direction {
@@ -853,7 +851,7 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         if state.mode.is_none() || state.value_pending {
             return;
         }
@@ -867,7 +865,7 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         if state.mode != Some(Mode::Output) || state.value_pending {
             return;
         }
@@ -887,7 +885,7 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        let state = &mut self.pins[pin.index() as usize];
+        let state = &mut self.pins[pin];
         if !state.mode.is_some_and(Mode::is_input) {
             return;
         }
@@ -930,15 +928,11 @@ impl App {
         }
 
         let mut sent = false;
-        for (index, pin) in Pin::all().enumerate() {
-            let state = self.pins[index];
-            if target.contains(pin)
-                && pin.is_available()
-                && state.mode.is_none()
-                && state.target_mode.is_none()
-            {
-                self.pins[index].target_mode = Some(mode);
-                self.pins[index].level = None;
+        for pin in target.available_pins() {
+            let state = self.pins[pin];
+            if state.mode.is_none() && state.target_mode.is_none() {
+                self.pins[pin].target_mode = Some(mode);
+                self.pins[pin].level = None;
                 self.send_request(Request::Direction {
                     target: PinTarget::Pin(pin),
                     direction: mode.direction(),
@@ -955,9 +949,9 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        for (index, pin) in Pin::all().enumerate() {
-            let state = &mut self.pins[index];
-            if target.contains(pin) && pin.is_available() && state.mode.is_some() {
+        for pin in target.available_pins() {
+            let state = &mut self.pins[pin];
+            if state.mode.is_some() {
                 state.value_pending = true;
             }
         }
@@ -976,9 +970,9 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        for (index, pin) in Pin::all().enumerate() {
-            let state = &mut self.pins[index];
-            if target.contains(pin) && state.mode == Some(Mode::Output) {
+        for pin in target.pins() {
+            let state = &mut self.pins[pin];
+            if state.mode == Some(Mode::Output) {
                 state.value_pending = true;
             }
         }
@@ -986,33 +980,29 @@ impl App {
     }
 
     fn target_has_pending(&self, target: PinTarget) -> bool {
-        Pin::all().enumerate().any(|(index, pin)| {
-            target.contains(pin)
-                && (self.pins[index].target_mode.is_some()
-                    || self.pins[index].listener.is_pending())
-        })
+        target
+            .pins()
+            .any(|pin| self.pins[pin].target_mode.is_some() || self.pins[pin].listener.is_pending())
     }
 
     fn target_has_listener(&self, target: PinTarget) -> bool {
-        Pin::all().enumerate().any(|(index, pin)| {
-            target.contains(pin) && self.pins[index].listener == ListenerState::On
-        })
+        target
+            .pins()
+            .any(|pin| self.pins[pin].listener == ListenerState::On)
     }
 
     fn mark_mode_pending(&mut self, target: PinTarget, mode: Mode) {
-        for (index, pin) in Pin::all().enumerate() {
-            if target.contains(pin) && pin.is_available() {
-                let state = &mut self.pins[index];
-                state.target_mode = Some(mode);
-                state.level = None;
-            }
+        for pin in target.available_pins() {
+            let state = &mut self.pins[pin];
+            state.target_mode = Some(mode);
+            state.level = None;
         }
     }
 
     fn mark_listener_pending(&mut self, target: PinTarget, enabled: bool) {
-        for (index, pin) in Pin::all().enumerate() {
-            let state = &mut self.pins[index];
-            if target.contains(pin) && state.mode.is_some_and(Mode::is_input) {
+        for pin in target.pins() {
+            let state = &mut self.pins[pin];
+            if state.mode.is_some_and(Mode::is_input) {
                 state.listener = if enabled {
                     ListenerState::Enabling
                 } else {
@@ -1110,11 +1100,8 @@ impl App {
                 }
                 Request::Pullup { target, .. } => {
                     let mut read = false;
-                    for (index, pin) in Pin::all().enumerate() {
-                        if !target.contains(pin) {
-                            continue;
-                        }
-                        let state = &mut self.pins[index];
+                    for pin in target.pins() {
+                        let state = &mut self.pins[pin];
                         if let Some(mode) = state.target_mode.take() {
                             state.mode = Some(mode);
                             if mode.is_input() {
@@ -1132,19 +1119,18 @@ impl App {
                     }
                 }
                 Request::Set { target, level } => {
-                    for (index, pin) in Pin::all().enumerate() {
-                        if target.contains(pin) && self.pins[index].mode == Some(Mode::Output) {
-                            let state = &mut self.pins[index];
+                    for pin in target.pins() {
+                        if self.pins[pin].mode == Some(Mode::Output) {
+                            let state = &mut self.pins[pin];
                             state.level = Some(level);
                             state.value_pending = false;
                         }
                     }
                 }
                 Request::Listen { target, enabled } => {
-                    for (index, pin) in Pin::all().enumerate() {
-                        if target.contains(pin) && self.pins[index].mode.is_some_and(Mode::is_input)
-                        {
-                            self.pins[index].listener = if enabled {
+                    for pin in target.pins() {
+                        if self.pins[pin].mode.is_some_and(Mode::is_input) {
+                            self.pins[pin].listener = if enabled {
                                 ListenerState::On
                             } else {
                                 ListenerState::Off
@@ -1155,7 +1141,7 @@ impl App {
                 _ => {}
             },
             DeviceEvent::PinValue { pin, level } => {
-                let state = &mut self.pins[pin.index() as usize];
+                let state = &mut self.pins[pin];
                 state.level = Some(level);
                 state.value_pending = false;
             }
@@ -1184,34 +1170,25 @@ impl App {
     }
 
     fn pending_mode(&self, target: PinTarget) -> Option<Mode> {
-        Pin::all().enumerate().find_map(|(index, pin)| {
-            target
-                .contains(pin)
-                .then_some(self.pins[index].target_mode)
-                .flatten()
-        })
+        target.pins().find_map(|pin| self.pins[pin].target_mode)
     }
 
     fn fail_request(&mut self, request: Request) {
         match request {
             Request::Direction { target, .. } | Request::Pullup { target, .. } => {
-                for (index, pin) in Pin::all().enumerate() {
-                    if target.contains(pin) {
-                        self.pins[index].target_mode = None;
-                    }
+                for pin in target.pins() {
+                    self.pins[pin].target_mode = None;
                 }
             }
             Request::Get { target } | Request::Set { target, .. } => {
-                for (index, pin) in Pin::all().enumerate() {
-                    if target.contains(pin) {
-                        self.pins[index].value_pending = false;
-                    }
+                for pin in target.pins() {
+                    self.pins[pin].value_pending = false;
                 }
             }
             Request::Listen { target, enabled } => {
-                for (index, pin) in Pin::all().enumerate() {
-                    if target.contains(pin) && self.pins[index].mode.is_some() {
-                        self.pins[index].listener = if enabled {
+                for pin in target.pins() {
+                    if self.pins[pin].mode.is_some() {
+                        self.pins[pin].listener = if enabled {
                             ListenerState::Off
                         } else {
                             ListenerState::On
@@ -1228,7 +1205,7 @@ impl App {
     }
 
     fn reset_pending(&mut self) {
-        for pin in &mut self.pins {
+        for pin in self.pins.iter_mut() {
             pin.value_pending = false;
             pin.target_mode = None;
             pin.listener = ListenerState::Off;
@@ -1500,7 +1477,7 @@ mod tests {
     fn output_mode_stops_listener_before_changing_direction() {
         let mut app = connected_app();
         let pin = Pin::try_from((Port::A, 0)).unwrap();
-        let state = &mut app.pins[pin.index() as usize];
+        let state = &mut app.pins[pin];
         state.mode = Some(Mode::Input);
         state.listener = ListenerState::On;
 
@@ -1540,7 +1517,7 @@ mod tests {
     fn overwrite_off_only_targets_unset_pins_individually() {
         let mut app = connected_app();
         let configured = Pin::try_from((Port::A, 0)).unwrap();
-        app.pins[configured.index() as usize].mode = Some(Mode::Input);
+        app.pins[configured].mode = Some(Mode::Input);
         app.bulk_scope = PinTarget::Bank(Port::A);
         app.bulk_mode = Mode::Output;
         app.overwrite = false;
