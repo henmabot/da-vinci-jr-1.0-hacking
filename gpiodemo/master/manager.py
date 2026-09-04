@@ -1,9 +1,27 @@
 import tkinter as tk
 from tkinter import ttk
+from typing import TypedDict
 
 import customtkinter as ctk
 
 __all__ = ["PinsFrame"]
+
+
+class _Row(TypedDict):
+    mode_var: ctk.StringVar
+    mode_menu: ttk.Combobox | None
+    status: str
+    status_item: int | None
+    primary_rect: int | None
+    primary_text: int | None
+    secondary_rect: int | None
+    secondary_text: int | None
+    listening: bool
+    mode_pending: bool
+    read_pending: bool
+    listen_pending: bool
+    toggle_pending: bool
+
 
 MODES = ["INPUT", "IN_PULLUP", "OUTPUT"]
 INPUT_MODES = {"INPUT", "IN_PULLUP"}
@@ -22,25 +40,29 @@ _COLUMN_X = (4, 96, 220, 300)
 
 
 class PinsFrame(ctk.CTkFrame):
-    """Paginated GPIO pin table with asynchronous backend callbacks."""
+    """
+    Paginated GPIO pin table.
+
+    Instead of flat on_* callbacks, this frame talks directly to the
+    parser's queue (see parser.py for the task/result contract): every
+    user action is turned into a `{"window": True, "action": ..., "pin":
+    ..., "value": ..., "callback": ...}` task, and the per-task callback
+    is invoked (from the parser's background thread) with the parsed
+    result dict. Since Tk isn't thread-safe, every callback marshals its
+    UI update back onto the main thread via `self.after(0, ...)`.
+    """
 
     def __init__(
         self,
         master,
         pin_map,
+        queue,
         default_mode="INPUT",
-        on_mode_change=None,
-        on_read=None,
-        on_listen=None,
-        on_toggle=None,
         **kwargs,
     ):
         super().__init__(master, corner_radius=0, **kwargs)
 
-        self.on_mode_change = on_mode_change
-        self.on_read = on_read
-        self.on_listen = on_listen
-        self.on_toggle = on_toggle
+        self.queue = queue
         self.pin_map = pin_map
         self._text_color = self._color(_LABEL_TEXT_COLOR)
         self._visible_pins = set()
@@ -51,22 +73,22 @@ class PinsFrame(ctk.CTkFrame):
             for index in range(0, len(self._pin_names), page_size)
         ] or [[]]
         self._page_index = 0
-        self._rows = {
-            pin: {
-                "mode_var": ctk.StringVar(value=default_mode),
-                "mode_menu": None,
-                "status": "--",
-                "status_item": None,
-                "primary_rect": None,
-                "primary_text": None,
-                "secondary_rect": None,
-                "secondary_text": None,
-                "listening": False,
-                "mode_pending": False,
-                "read_pending": False,
-                "listen_pending": False,
-                "toggle_pending": False,
-            }
+        self._rows: dict[str, _Row] = {
+            pin: _Row(
+                mode_var=ctk.StringVar(value=default_mode),
+                mode_menu=None,
+                status="--",
+                status_item=None,
+                primary_rect=None,
+                primary_text=None,
+                secondary_rect=None,
+                secondary_text=None,
+                listening=False,
+                mode_pending=False,
+                read_pending=False,
+                listen_pending=False,
+                toggle_pending=False,
+            )
             for pin in self._pin_names
         }
 
@@ -135,7 +157,9 @@ class PinsFrame(ctk.CTkFrame):
 
         for pin in self._visible_pins:
             row = self._rows[pin]
-            row["mode_menu"].destroy()
+            mode_menu = row["mode_menu"]
+            if mode_menu is not None:
+                mode_menu.destroy()
             for key in (
                 "mode_menu",
                 "status_item",
@@ -306,8 +330,10 @@ class PinsFrame(ctk.CTkFrame):
                 "Sending..." if row["toggle_pending"] else "Toggle",
                 _PENDING_COLOR if row["toggle_pending"] else _DEFAULT_BUTTON_COLOR,
             )
-            self.canvas.itemconfigure(row["secondary_rect"], state="hidden")
-            self.canvas.itemconfigure(row["secondary_text"], state="hidden")
+            if row["secondary_rect"] is not None:
+                self.canvas.itemconfigure(row["secondary_rect"], state="hidden")
+            if row["secondary_text"] is not None:
+                self.canvas.itemconfigure(row["secondary_text"], state="hidden")
 
     def _refresh_read_button(self, pin):
         row = self._rows[pin]
@@ -337,7 +363,7 @@ class PinsFrame(ctk.CTkFrame):
             return
 
         row["status"] = status
-        if pin in self._visible_pins:
+        if pin in self._visible_pins and row["status_item"] is not None:
             self.canvas.itemconfigure(
                 row["status_item"],
                 text=status,
@@ -419,78 +445,141 @@ class PinsFrame(ctk.CTkFrame):
         if row["mode_var"].get() in INPUT_MODES and not row["listen_pending"]:
             self._handle_listen_toggle(pin)
 
+    def _send(self, action, pin, value=None, callback=None):
+        """Enqueue a window task for the parser (see parser.py header docs)."""
+        task = {
+            "window": True,
+            "action": action,
+            "pin": self.pin_map[pin][1],
+            "callback": callback,
+        }
+        if value is not None:
+            task["value"] = value
+        self.queue.put(task)
+
     def _handle_mode_change(self, pin, mode):
         row = self._rows[pin]
 
         if mode not in INPUT_MODES and row["listening"]:
             row["listen_pending"] = True
-            if self.on_listen:
-                self.on_listen(pin, False)
+            self._refresh_listen_button(pin)
+            self._send_listen(pin, False)
 
         row["mode_pending"] = True
         self._refresh_mode_menu(pin)
         self.set_status(pin, "--")
 
-        if self.on_mode_change:
-            self.on_mode_change(pin, mode)
+        direction = "OUT" if mode == "OUTPUT" else "IN"
+        pullup = "ON" if mode == "IN_PULLUP" else "OFF"
+
+        def on_pullup_result(result):
+            if result["type"] == "ack":
+                self.after(0, lambda: self.set_mode(pin, mode))
+            else:
+                self.after(0, lambda: self.fail_mode(pin))
+
+        def on_direction_result(result):
+            if result["type"] == "ack":
+                self._send("set_pullup", pin, pullup, callback=on_pullup_result)
+            else:
+                self.after(0, lambda: self.fail_mode(pin))
+
+        self._send("set_direction", pin, direction, callback=on_direction_result)
 
     def _handle_read(self, pin):
         row = self._rows[pin]
         row["read_pending"] = True
         self._refresh_read_button(pin)
-        if self.on_read:
-            self.on_read(pin)
+
+        def on_result(result):
+            if result["type"] == "data":
+                value = result.get("value")
+                self.after(0, lambda: self.set_status(pin, value))
+            else:
+                self.after(0, lambda: self.fail_read(pin))
+
+        self._send("get_value", pin, callback=on_result)
+
+    def _send_listen(self, pin, desired_state):
+        value = "ON" if desired_state else "OFF"
+
+        def on_result(result):
+            if result["type"] == "ack":
+                self.after(0, lambda: self.set_listening(pin, desired_state))
+            elif result["type"] == "data":
+                # unsolicited push from an active listener
+                pushed_value = result.get("value")
+                self.after(0, lambda: self.set_status(pin, pushed_value))
+            else:
+                self.after(0, lambda: self.fail_listen(pin))
+
+        self._send("set_listen", pin, value, callback=on_result)
 
     def _handle_listen_toggle(self, pin):
         row = self._rows[pin]
         desired_state = not row["listening"]
         row["listen_pending"] = True
         self._refresh_listen_button(pin)
-        if self.on_listen:
-            self.on_listen(pin, desired_state)
+        self._send_listen(pin, desired_state)
 
     def _handle_toggle(self, pin):
         row = self._rows[pin]
         row["toggle_pending"] = True
         self._refresh_toggle_button(pin)
-        if self.on_toggle:
-            self.on_toggle(pin)
+
+        current = row["status"] if row["status"] in ("HIGH", "LOW") else "LOW"
+        new_value = "LOW" if current == "HIGH" else "HIGH"
+
+        def on_result(result):
+            if result["type"] == "ack":
+                self.after(0, lambda: self.set_status(pin, new_value))
+            else:
+                self.after(0, lambda: self.fail_toggle(pin))
+
+        self._send("set_value", pin, new_value, callback=on_result)
 
 
 if __name__ == "__main__":
+    # Stands in for the real parser thread: consumes window tasks from the
+    # queue and fakes a response after a short delay, exercising the same
+    # task/result contract described in parser.py.
+    import threading
+    import time
+    from queue import Queue
+
+    fake_latency_s = 0.6
+    pin_map = {f"PA{i}": [100 + i, i] for i in range(20)}
+    task_queue = Queue()
+
+    def fake_parser():
+        while True:
+            task = task_queue.get()
+            if not task.get("window"):
+                continue
+
+            action = task["action"]
+            callback = task.get("callback")
+            if callback is None:
+                continue
+
+            time.sleep(fake_latency_s)
+            if action in ("set_direction", "set_pullup", "set_value"):
+                callback({"type": "ack"})
+            elif action == "get_value":
+                callback({"type": "data", "value": "HIGH"})
+            elif action == "set_listen":
+                desired_on = task.get("value") == "ON"
+                callback({"type": "ack"})
+                if desired_on:
+                    time.sleep(fake_latency_s)
+                    callback({"type": "data", "value": "LOW"})
+
+    threading.Thread(target=fake_parser, daemon=True).start()
+
     root = ctk.CTk()
     root.geometry("900x600")
 
-    fake_latency_ms = 600
-    pin_map = {f"PA{i}": [100 + i, i] for i in range(20)}
-
-    def on_mode_change(pin, mode):
-        print(f"{pin}: requesting mode -> {mode}")
-        root.after(fake_latency_ms, lambda: pins_frame.set_mode(pin, mode))
-
-    def on_read(pin):
-        print(f"{pin}: requesting read")
-        root.after(fake_latency_ms, lambda: pins_frame.set_status(pin, "HIGH"))
-
-    def on_listen(pin, listening):
-        print(f"{pin}: requesting listen -> {listening}")
-        root.after(fake_latency_ms, lambda: pins_frame.set_listening(pin, listening))
-
-    def on_toggle(pin):
-        print(f"{pin}: requesting toggle")
-        row = pins_frame._rows[pin]
-        current = pins_frame.canvas.itemcget(row["status_item"], "text")
-        new_status = "LOW" if current == "HIGH" else "HIGH"
-        root.after(fake_latency_ms, lambda: pins_frame.set_status(pin, new_status))
-
-    pins_frame = PinsFrame(
-        root,
-        pin_map=pin_map,
-        on_mode_change=on_mode_change,
-        on_read=on_read,
-        on_listen=on_listen,
-        on_toggle=on_toggle,
-    )
+    pins_frame = PinsFrame(root, pin_map=pin_map, queue=task_queue)
     pins_frame.pack(fill="both", expand=True)
 
     pins_frame.set_mode("PA0", "IN_PULLUP")

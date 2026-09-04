@@ -17,7 +17,7 @@ WIDTH = 1200
 HEIGHT = 800
 
 
-def create_window():
+def create_window(queue):
     # Create the window
     window = ctk.CTk()
     window.title("GPIO Controller")
@@ -58,12 +58,12 @@ def create_window():
     app_frame = PinsFrame(
         left_container,
         pin_map=pin_map,
-        on_mode_change=print,
-        on_read=print,
-        on_listen=print,
-        on_toggle=print,
+        queue=queue,
     )
-    logs_frame = LogsFrame(right_container, send_callback=print)
+    logs_frame = LogsFrame(
+        right_container,
+        send_callback=lambda line: queue.put({"raw": True, "packet": line}),
+    )
 
     app_frame.pack(fill="both", expand=True)
     logs_frame.pack(fill="both", expand=True)
@@ -80,5 +80,7 @@ def create_window():
 
 
 if __name__ == "__main__":
-    window, app_frame, logs_frame = create_window()
+    from queue import Queue
+
+    window, app_frame, logs_frame = create_window(Queue())
     window.mainloop()
