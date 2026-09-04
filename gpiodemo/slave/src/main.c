@@ -1,8 +1,8 @@
-#include "firmata.h"
+#include "protocol.h"
 
 int main(void)
 {
-    firmata_init();
+    gpio_protocol_init();
     for (;;)
-        firmata_task();
+        gpio_protocol_task();
 }

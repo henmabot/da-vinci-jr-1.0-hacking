@@ -19,12 +19,12 @@ default:
 build:
     mkdir -p build
     {{ cc }} {{ cppflags }} {{ cflags }} -c {{ src_dir }}/main.c -o build/main.o
-    {{ cc }} {{ cppflags }} {{ cflags }} -c {{ src_dir }}/firmata.c -o build/firmata.o
+    {{ cc }} {{ cppflags }} {{ cflags }} -c {{ src_dir }}/protocol.c -o build/protocol.o
     {{ cc }} {{ cppflags }} {{ cflags }} -c {{ conf_dir }}/startup.c -o build/startup.o
     {{ cc }} {{ cppflags }} {{ cflags }} -c {{ conf_dir }}/clock.c -o build/clock.o
     {{ cc }} {{ cppflags }} {{ cflags }} -c {{ conf_dir }}/gpio.c -o build/gpio.o
     {{ cc }} {{ cppflags }} {{ cflags }} -c {{ conf_dir }}/usb_cdc.c -o build/usb_cdc.o
-    {{ cc }} {{ ldflags }} build/main.o build/firmata.o build/startup.o build/clock.o build/gpio.o build/usb_cdc.o -lgcc -o build/firmware.elf
+    {{ cc }} {{ ldflags }} build/main.o build/protocol.o build/startup.o build/clock.o build/gpio.o build/usb_cdc.o -lgcc -o build/firmware.elf
     {{ objcopy }} -O binary build/firmware.elf build/firmware.bin
     {{ size }} build/firmware.elf
 
