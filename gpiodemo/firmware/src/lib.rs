@@ -23,12 +23,12 @@ pub trait Gpio {
 #[derive(Clone, Copy)]
 enum PinState {
     Unset,
-    Input {
+    Configured {
+        direction: Direction,
         pullup: bool,
         listener: Option<u16>,
         previous: Level,
     },
-    Output,
 }
 
 #[derive(Clone, Copy)]
@@ -183,7 +183,7 @@ impl Firmware {
         for offset in 0..WIRE_PIN_COUNT {
             let index = (self.listener_cursor + offset) % WIRE_PIN_COUNT;
             let pin = Pin::from_wire_index(index).expect("listener index is in range");
-            let PinState::Input {
+            let PinState::Configured {
                 listener: Some(listener),
                 previous,
                 ..
@@ -229,24 +229,24 @@ impl Firmware {
     }
 
     fn set_direction_pin<G: Gpio>(&mut self, pin: Pin, direction: Direction, gpio: &mut G) {
+        let listener = match self.pins[pin] {
+            PinState::Configured { listener, .. } => listener,
+            PinState::Unset => None,
+        };
         match direction {
             Direction::Input => {
-                let listener = match self.pins[pin] {
-                    PinState::Input { listener, .. } => listener,
-                    PinState::Unset | PinState::Output => None,
-                };
                 gpio.input(pin, false);
-                self.pins[pin] = PinState::Input {
-                    pullup: false,
-                    listener,
-                    previous: gpio.read(pin),
-                };
             }
             Direction::Output => {
                 gpio.output(pin, Level::Low);
-                self.pins[pin] = PinState::Output;
             }
         }
+        self.pins[pin] = PinState::Configured {
+            direction,
+            pullup: false,
+            listener,
+            previous: gpio.read(pin),
+        };
     }
 
     fn set_level<G: Gpio>(&mut self, target: PinTarget, level: Level, gpio: &mut G) -> Response {
@@ -255,8 +255,17 @@ impl Firmware {
         {
             return error;
         }
+        let direct = matches!(target, PinTarget::Pin(_));
         for pin in target.available_pins() {
-            if matches!(self.pins[pin], PinState::Output) {
+            if direct
+                || matches!(
+                    self.pins[pin],
+                    PinState::Configured {
+                        direction: Direction::Output,
+                        ..
+                    }
+                )
+            {
                 gpio.write(pin, level);
             }
         }
@@ -276,15 +285,20 @@ impl Firmware {
     }
 
     fn set_pullup_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, gpio: &mut G) {
-        let PinState::Input {
-            pullup, previous, ..
+        let PinState::Configured {
+            direction,
+            pullup,
+            previous,
+            ..
         } = &mut self.pins[pin]
         else {
             return;
         };
-        gpio.input(pin, enabled);
         *pullup = enabled;
-        *previous = gpio.read(pin);
+        if *direction == Direction::Input {
+            gpio.input(pin, enabled);
+            *previous = gpio.read(pin);
+        }
     }
 
     fn set_listening<G: Gpio>(
@@ -299,14 +313,25 @@ impl Firmware {
         {
             return error;
         }
+        let direct = matches!(target, PinTarget::Pin(_));
         for pin in target.available_pins() {
-            self.set_listener_pin(pin, enabled, id, gpio);
+            if direct
+                || matches!(
+                    self.pins[pin],
+                    PinState::Configured {
+                        direction: Direction::Input,
+                        ..
+                    }
+                )
+            {
+                self.set_listener_pin(pin, enabled, id, gpio);
+            }
         }
         Response::Ack
     }
 
     fn set_listener_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, id: u16, gpio: &G) {
-        let PinState::Input {
+        let PinState::Configured {
             listener, previous, ..
         } = &mut self.pins[pin]
         else {
@@ -329,13 +354,13 @@ impl Firmware {
     fn query(&self, pin: Pin, what: Query) -> QueryValue {
         match (self.pins[pin], what) {
             (PinState::Unset, _) => QueryValue::Unset,
-            (PinState::Input { .. }, Query::Direction) => QueryValue::Direction(Direction::Input),
-            (PinState::Output, Query::Direction) => QueryValue::Direction(Direction::Output),
-            (PinState::Input { pullup, .. }, Query::Pullup) => QueryValue::Enabled(pullup),
-            (PinState::Input { listener, .. }, Query::Listen) => {
+            (PinState::Configured { direction, .. }, Query::Direction) => {
+                QueryValue::Direction(direction)
+            }
+            (PinState::Configured { pullup, .. }, Query::Pullup) => QueryValue::Enabled(pullup),
+            (PinState::Configured { listener, .. }, Query::Listen) => {
                 QueryValue::Enabled(listener.is_some())
             }
-            (PinState::Output, Query::Pullup | Query::Listen) => QueryValue::Enabled(false),
         }
     }
 
@@ -522,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn output_rejects_input_only_operations() {
+    fn configured_pin_operations_match_pinned_c_behavior() {
         let mut firmware = Firmware::new();
         let mut gpio = FakeGpio::default();
         let input = pin(0);
@@ -548,7 +573,7 @@ mod tests {
             ),
             &mut gpio,
         );
-        assert_eq!(gpio.values[input.index() as usize], Level::Low);
+        assert_eq!(gpio.values[input.index() as usize], Level::High);
 
         firmware.handle(
             packet(
@@ -570,6 +595,12 @@ mod tests {
             ),
             &mut gpio,
         );
+        assert!(!gpio.pullups[output.index() as usize]);
+        assert_eq!(
+            firmware.query(output, Query::Pullup),
+            QueryValue::Enabled(true)
+        );
+
         firmware.handle(
             packet(
                 5,
@@ -580,19 +611,111 @@ mod tests {
             ),
             &mut gpio,
         );
+        assert_eq!(
+            firmware.query(output, Query::Listen),
+            QueryValue::Enabled(true)
+        );
+        gpio.values[output.index() as usize] = Level::High;
+        assert_eq!(
+            firmware.poll_listener(&gpio),
+            Some(Packet {
+                id: 5,
+                body: Response::Value {
+                    pin: output,
+                    level: Level::High,
+                },
+            })
+        );
 
-        assert!(!gpio.pullups[output.index() as usize]);
-        assert!(matches!(firmware.pins[output], PinState::Output));
+        firmware.handle(
+            packet(
+                6,
+                Request::Direction {
+                    target: PinTarget::Pin(output),
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
+        );
         assert_eq!(
             firmware.query(output, Query::Pullup),
             QueryValue::Enabled(false)
         );
         assert_eq!(
             firmware.query(output, Query::Listen),
+            QueryValue::Enabled(true)
+        );
+        gpio.values[output.index() as usize] = Level::Low;
+        assert_eq!(
+            firmware.poll_listener(&gpio),
+            Some(Packet {
+                id: 5,
+                body: Response::Value {
+                    pin: output,
+                    level: Level::Low,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn grouped_set_and_listen_keep_direction_filters() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        let input = pin(0);
+        let output = pin(1);
+
+        firmware.handle(
+            packet(
+                1,
+                Request::Direction {
+                    target: PinTarget::Pin(input),
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                2,
+                Request::Direction {
+                    target: PinTarget::Pin(output),
+                    direction: Direction::Output,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                3,
+                Request::Set {
+                    target: PinTarget::All,
+                    level: Level::High,
+                },
+            ),
+            &mut gpio,
+        );
+        assert_eq!(gpio.values[input.index() as usize], Level::Low);
+        assert_eq!(gpio.values[output.index() as usize], Level::High);
+
+        firmware.handle(
+            packet(
+                4,
+                Request::Listen {
+                    target: PinTarget::All,
+                    enabled: true,
+                },
+            ),
+            &mut gpio,
+        );
+        assert_eq!(
+            firmware.query(input, Query::Listen),
+            QueryValue::Enabled(true)
+        );
+        assert_eq!(
+            firmware.query(output, Query::Listen),
             QueryValue::Enabled(false)
         );
-        gpio.values[output.index() as usize] = Level::High;
-        assert_eq!(firmware.poll_listener(&gpio), None);
     }
 
     #[test]
