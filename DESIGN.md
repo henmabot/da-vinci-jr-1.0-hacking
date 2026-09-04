@@ -15,7 +15,7 @@ The visual baseline is the existing Python GPIO demo: compact desktop controls, 
 2. **Do not manually calculate text centering inside buttons.**
    - Let the widget lay out and center its text.
    - Horizontal padding must be symmetric.
-   - Use fixed-width cells, not fixed-width buttons, when alignment is required.
+   - Use the same proportional cell shares for every row when alignment is required.
 
 3. **Buttons are native-looking and mostly neutral.**
    - Do not make every action a bright Iced-primary button.
@@ -101,7 +101,9 @@ The app has two main panes separated by a draggable vertical splitter:
 
 The Python split ratio is a good starting point: roughly 11:4 in favor of GPIO controls.
 
-The user must be able to drag the divider. Resizing either pane must not alter the internal pin-row column positions.
+The user must be able to drag the divider. Within a visible pin block, resizing may change cell widths proportionally, but every row and its header must keep the same column shares.
+
+If a GPIO pane becomes too narrow for two pin blocks side by side, stack the blocks vertically in an internal scroll area instead of squeezing controls until they overlap. The serial-log pane must retain a usable minimum width as well.
 
 The serial log keeps:
 
@@ -169,7 +171,7 @@ Every normal pin row has exactly five cells:
 Pin | Mode | Level | Read/Write | Listen/Stop
 ```
 
-The cell geometry is fixed for the entire table. The contents may change, but the next cell's x-position may not.
+Every row in a visible pin block uses the same proportional five-column layout. State changes may change cell contents, but they must not change the column shares or shift later cells relative to the other rows.
 
 ### Pin cell
 
@@ -202,7 +204,7 @@ During an in-flight mode change:
 
 ### Level cell
 
-The level is a fixed-size status box, not plain colored text.
+The level is a stable status box, not plain colored text. Its width follows the level-column share and its height stays constant.
 
 States:
 
@@ -239,7 +241,7 @@ The label states what pressing the button will do, not what the current value is
 
 Do not use the ambiguous `Toggle` label.
 
-The cell is fixed-width for the longest supported label, but the button itself uses natural/native width.
+The cell keeps the same proportional share in every row, while the button itself uses natural/native width.
 
 ### Listen/Stop cell
 
@@ -265,7 +267,7 @@ Important:
 
 - `Listen` and `Stop` should keep their natural widths;
 - the difference in button width is useful for quick scanning;
-- the cell around them remains fixed-width so the rest of the row never moves;
+- the cell around them keeps the same proportional share so the rest of the row stays aligned;
 - do not make listening green;
 - default behavior should stay native/neutral;
 - if Stop receives a semantic color treatment, use red/danger, never HIGH-green.
@@ -483,18 +485,25 @@ The UI, protocol encoder/decoder, firmware grouping, errors, and logs should all
 
 Prefer:
 
-- fixed column/cell widths;
+- `Length::Fill` / `Length::FillPortion` for horizontal layout;
+- one shared set of proportional column weights for headers and rows;
 - intrinsic widget sizes inside those cells;
 - symmetric widget padding;
 - one spacing scale;
-- stable row height.
+- stable row/control heights;
+- Iced `Responsive`, wrapping rows, and internal scrolling when the available width changes.
 
 Avoid:
 
 - hand-centering text by x-coordinate math;
 - measuring every current label to determine the row layout;
-- multiple unrelated magic width constants for the same conceptual control;
+- fixed pixel widths for table columns or top-level horizontal layout;
+- character-count truncation as a substitute for layout;
 - hiding one control in a way that causes later cells to shift.
+
+Absolute dimensions are acceptable for compact control heights, spacing, usable pane/window minimums, and a responsive width threshold. Do not use them to hand-place or hand-size the horizontal table geometry.
+
+Serial-device selectors display a semantic short label, such as the device name, while retaining the complete path internally for opening the port.
 
 ### Native-looking controls
 
@@ -522,6 +531,8 @@ The redesign is not done until all of these are true:
 - [ ] pending → complete does not move later columns.
 - [ ] button text has symmetric left/right padding.
 - [ ] empty output Listen/Stop cells still reserve their width.
+- [ ] minimum-window and minimum-pane layouts contain no overlapping primary controls.
+- [ ] a narrow GPIO pane stacks the two pin blocks instead of squeezing their columns.
 
 ### Visual parity
 

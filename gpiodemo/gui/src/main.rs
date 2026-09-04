@@ -1,6 +1,6 @@
 mod connection;
 
-use std::{collections::VecDeque, fmt, time::Duration};
+use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
 use chrono::Local;
 use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
@@ -12,8 +12,8 @@ use iced::{
     alignment::{Horizontal, Vertical},
     keyboard::{Event as KeyboardEvent, Key, key::Named},
     widget::{
-        button, checkbox, column, container, pane_grid, pick_list, row, scrollable, text,
-        text_editor, text_input,
+        button, checkbox, column, container, pane_grid, pick_list, responsive, row, scrollable,
+        text, text_editor, text_input,
     },
 };
 
@@ -32,14 +32,13 @@ const BANK_TABS: [BankTab; 4] = [BankTab::A, BankTab::BAndE, BankTab::C, BankTab
 const ROW_HEIGHT: f32 = 34.0;
 const CONTROL_TEXT_SIZE: f32 = 13.0;
 const PIN_CONTROL_TEXT_SIZE: f32 = 12.0;
-const PORT_PICKER_WIDTH: f32 = 240.0;
-const PORT_LABEL_MAX_CHARS: usize = 30;
-const PIN_NAME_WIDTH: f32 = 86.0;
-const PIN_MODE_WIDTH: f32 = 96.0;
-const PIN_STATUS_WIDTH: f32 = 52.0;
-const PIN_RW_WIDTH: f32 = 94.0;
-const PIN_LISTEN_WIDTH: f32 = 70.0;
-const CELL_GAP: f32 = 6.0;
+const PIN_NAME_SHARE: u16 = 5;
+const PIN_MODE_SHARE: u16 = 6;
+const PIN_STATUS_SHARE: u16 = 3;
+const PIN_RW_SHARE: u16 = 6;
+const PIN_LISTEN_SHARE: u16 = 5;
+const PIN_TABLE_TWO_COLUMN_MIN: f32 = 700.0;
+const CELL_GAP: f32 = 4.0;
 
 const WINDOW_BG: Color = Color::from_rgb8(0x24, 0x24, 0x24);
 const PANEL_BG: Color = Color::from_rgb8(0x2B, 0x2B, 0x2B);
@@ -61,7 +60,7 @@ fn main() -> iced::Result {
         .theme(app_theme())
         .window(iced::window::Settings {
             size: Size::new(1280.0, 820.0),
-            min_size: Some(Size::new(1180.0, 800.0)),
+            min_size: Some(Size::new(900.0, 640.0)),
             ..Default::default()
         })
         .run()
@@ -96,7 +95,11 @@ struct PortChoice {
 
 impl PortChoice {
     fn new(path: String) -> Self {
-        let label = compact_port_label(&path);
+        let label = Path::new(&path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&path)
+            .to_owned();
         Self { path, label }
     }
 }
@@ -486,7 +489,7 @@ impl App {
             })
         })
         .spacing(8)
-        .min_size(280)
+        .min_size(400)
         .on_resize(8, Message::PaneResized)
         .height(Length::Fill);
 
@@ -509,6 +512,18 @@ impl App {
     }
 
     fn connection_controls(&self) -> Element<'_, Message> {
+        let content = responsive(|size| self.connection_content(size.width))
+            .height(Length::Shrink)
+            .width(Length::Fill);
+
+        container(content)
+            .padding(8)
+            .width(Length::Fill)
+            .style(panel_style)
+            .into()
+    }
+
+    fn connection_content(&self, available_width: f32) -> Element<'_, Message> {
         let ports = pick_list(
             self.ports.as_slice(),
             self.selected_port.as_ref(),
@@ -517,7 +532,7 @@ impl App {
         .placeholder("Serial port")
         .text_size(CONTROL_TEXT_SIZE)
         .padding([5, 8])
-        .width(Length::Fixed(PORT_PICKER_WIDTH));
+        .width(Length::Fill);
 
         let connection_button = if self.connected_port.is_some() {
             native_button("Disconnect").on_press(Message::Disconnect)
@@ -532,13 +547,35 @@ impl App {
             native_button("Refresh").on_press(Message::RefreshPorts),
             connection_button,
             text(&self.device_status).size(13),
-            iced::widget::Space::new().width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill);
+
+        let actions = row![
             native_button("Handshake").on_press(Message::Handshake),
             native_button("Status").on_press(Message::Status),
             danger_native_button("Reset device").on_press(Message::Reboot),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
+
+        let connection: Element<'_, Message> = if available_width >= 1_050.0 {
+            row![connection, actions]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .width(Length::Fill)
+                .into()
+        } else {
+            column![
+                connection,
+                container(actions)
+                    .width(Length::Fill)
+                    .align_x(Horizontal::Right)
+            ]
+            .spacing(6)
+            .into()
+        };
 
         let content: Element<'_, Message> = if self.confirm_reboot {
             column![
@@ -554,14 +591,10 @@ impl App {
             .spacing(6)
             .into()
         } else {
-            connection.into()
+            connection
         };
 
-        container(content)
-            .padding(8)
-            .width(Length::Fill)
-            .style(panel_style)
-            .into()
+        content
     }
 
     fn pin_panel(&self) -> Element<'_, Message> {
@@ -591,13 +624,11 @@ impl App {
                 Message::BulkScopeSelected
             )
             .text_size(PIN_CONTROL_TEXT_SIZE)
-            .padding([5, 8])
-            .width(Length::Fixed(84.0)),
+            .padding([5, 8]),
             text("Mode").size(12),
             pick_list(MODES, Some(self.bulk_mode), Message::BulkModeSelected)
                 .text_size(PIN_CONTROL_TEXT_SIZE)
-                .padding([5, 8])
-                .width(Length::Fixed(104.0)),
+                .padding([5, 8]),
             checkbox(self.overwrite)
                 .label("Overwrite")
                 .size(16)
@@ -607,7 +638,9 @@ impl App {
             native_button("Apply mode").on_press(Message::ApplyBulkMode),
         ]
         .spacing(6)
-        .align_y(iced::Alignment::Center);
+        .align_y(iced::Alignment::Center)
+        .wrap()
+        .vertical_spacing(4);
 
         let bulk_actions: Element<'_, Message> = if let Some((target, level)) = self.confirm_set {
             let level_name = match level {
@@ -621,6 +654,8 @@ impl App {
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
+            .wrap()
+            .vertical_spacing(4)
             .into()
         } else {
             row![
@@ -632,6 +667,8 @@ impl App {
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center)
+            .wrap()
+            .vertical_spacing(4)
             .into()
         };
         let bulk = column![bulk_scope, bulk_actions].spacing(4);
@@ -640,11 +677,13 @@ impl App {
             BankTab::A => self.full_bank_table(Port::A),
             BankTab::C => self.full_bank_table(Port::C),
             BankTab::D => self.full_bank_table(Port::D),
-            BankTab::BAndE => row![
-                self.port_column(Port::B, 0, Port::B.pin_count(), true),
-                self.port_column(Port::E, 0, Port::E.pin_count(), true),
-            ]
-            .spacing(12)
+            BankTab::BAndE => responsive(|size| {
+                responsive_pin_columns(
+                    size.width,
+                    self.port_column(Port::B, 0, Port::B.pin_count(), true),
+                    self.port_column(Port::E, 0, Port::E.pin_count(), true),
+                )
+            })
             .height(Length::Fill)
             .into(),
         };
@@ -660,11 +699,13 @@ impl App {
     }
 
     fn full_bank_table(&self, port: Port) -> Element<'_, Message> {
-        row![
-            self.port_column(port, 0, 16, false),
-            self.port_column(port, 16, 16, false),
-        ]
-        .spacing(12)
+        responsive(move |size| {
+            responsive_pin_columns(
+                size.width,
+                self.port_column(port, 0, 16, false),
+                self.port_column(port, 16, 16, false),
+            )
+        })
         .height(Length::Fill)
         .into()
     }
@@ -692,16 +733,17 @@ impl App {
     }
 
     fn pin_row(&self, pin: Pin) -> Element<'_, Message> {
-        let name = fixed_cell(text(pin_display(pin)).size(12), PIN_NAME_WIDTH);
+        let name = pin_cell(text(pin_display(pin)).size(12), PIN_NAME_SHARE);
         if !pin.is_available() {
             return row![
                 name,
-                fixed_cell(text("RESERVED").size(11), PIN_MODE_WIDTH),
+                pin_cell(text("RESERVED").size(11), PIN_MODE_SHARE),
                 level_box(None, false),
-                fixed_cell(text("System").size(11), PIN_RW_WIDTH),
-                fixed_cell(text(""), PIN_LISTEN_WIDTH),
+                pin_cell(text("System").size(11), PIN_RW_SHARE),
+                pin_cell(text(""), PIN_LISTEN_SHARE),
             ]
             .spacing(CELL_GAP)
+            .width(Length::Fill)
             .height(Length::Fixed(ROW_HEIGHT))
             .align_y(iced::Alignment::Center)
             .into();
@@ -720,7 +762,7 @@ impl App {
                 .wrapping(text::Wrapping::None),
             )
             .padding([5, 10])
-            .width(Length::Fixed(PIN_MODE_WIDTH))
+            .width(Length::Fill)
             .style(input_style)
             .into()
         } else {
@@ -730,7 +772,7 @@ impl App {
             .placeholder("UNSET")
             .text_size(PIN_CONTROL_TEXT_SIZE)
             .padding([5, 8])
-            .width(Length::Fixed(PIN_MODE_WIDTH))
+            .width(Length::Fill)
             .into()
         };
 
@@ -766,12 +808,13 @@ impl App {
 
         row![
             name,
-            mode,
+            pin_cell(mode, PIN_MODE_SHARE),
             level_box(state.level, state.value_pending),
-            fixed_cell(rw, PIN_RW_WIDTH),
-            fixed_cell(listen, PIN_LISTEN_WIDTH),
+            pin_cell(rw, PIN_RW_SHARE),
+            pin_cell(listen, PIN_LISTEN_SHARE),
         ]
         .spacing(CELL_GAP)
+        .width(Length::Fill)
         .height(Length::Fixed(ROW_HEIGHT))
         .align_y(iced::Alignment::Center)
         .into()
@@ -806,7 +849,9 @@ impl App {
                     .on_toggle(Message::Autoscroll),
             ]
             .spacing(8)
-            .align_y(iced::Alignment::Center),
+            .align_y(iced::Alignment::Center)
+            .wrap()
+            .vertical_spacing(4),
         ]
         .spacing(6);
         let command = row![
@@ -822,7 +867,7 @@ impl App {
         container(column![options, log, command].spacing(8))
             .padding(12)
             .style(container::bordered_box)
-            .width(Length::FillPortion(4))
+            .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
@@ -1081,7 +1126,7 @@ impl App {
             match event {
                 ConnectionEvent::Connected(port) => {
                     self.connected_port = Some(port.clone());
-                    self.device_status = format!("Connected: {}", compact_port_label(&port));
+                    self.device_status = "Connected".into();
                     self.error = None;
                     self.reset_pins();
                 }
@@ -1308,19 +1353,46 @@ impl App {
 
 fn pin_header<'a>() -> Element<'a, Message> {
     row![
-        fixed_cell(text("PIN").size(11), PIN_NAME_WIDTH),
-        fixed_cell(text("MODE").size(11), PIN_MODE_WIDTH),
-        fixed_cell(text("LEVEL").size(11), PIN_STATUS_WIDTH),
-        fixed_cell(text("READ/WRITE").size(10), PIN_RW_WIDTH),
-        fixed_cell(text("LISTEN/STOP").size(10), PIN_LISTEN_WIDTH),
+        pin_cell(text("PIN").size(11), PIN_NAME_SHARE),
+        pin_cell(text("MODE").size(11), PIN_MODE_SHARE),
+        pin_cell(text("LEVEL").size(11), PIN_STATUS_SHARE),
+        pin_cell(text("READ/WRITE").size(10), PIN_RW_SHARE),
+        pin_cell(text("LISTEN/STOP").size(10), PIN_LISTEN_SHARE),
     ]
     .spacing(CELL_GAP)
+    .width(Length::Fill)
     .into()
 }
 
-fn fixed_cell<'a>(content: impl Into<Element<'a, Message>>, width: f32) -> Element<'a, Message> {
+fn responsive_pin_columns<'a>(
+    available_width: f32,
+    left: iced::widget::Column<'a, Message>,
+    right: iced::widget::Column<'a, Message>,
+) -> Element<'a, Message> {
+    let content: Element<'a, Message> = if available_width >= PIN_TABLE_TWO_COLUMN_MIN {
+        row![
+            left.width(Length::FillPortion(1)),
+            right.width(Length::FillPortion(1)),
+        ]
+        .spacing(8)
+        .width(Length::Fill)
+        .into()
+    } else {
+        column![left.width(Length::Fill), right.width(Length::Fill)]
+            .spacing(8)
+            .width(Length::Fill)
+            .into()
+    };
+
+    scrollable(content)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .into()
+}
+
+fn pin_cell<'a>(content: impl Into<Element<'a, Message>>, share: u16) -> Element<'a, Message> {
     container(content)
-        .width(Length::Fixed(width))
+        .width(Length::FillPortion(share))
         .height(Length::Fixed(ROW_HEIGHT))
         .align_x(Horizontal::Left)
         .align_y(Vertical::Center)
@@ -1347,7 +1419,7 @@ fn level_box(level: Option<Level>, pending: bool) -> Element<'static, Message> {
         }
     };
     container(text(label).size(11))
-        .width(Length::Fixed(PIN_STATUS_WIDTH))
+        .width(Length::FillPortion(PIN_STATUS_SHARE))
         .height(Length::Fixed(28.0))
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
@@ -1395,21 +1467,6 @@ fn input_style(_: &Theme) -> container::Style {
         },
         ..Default::default()
     }
-}
-
-fn compact_port_label(path: &str) -> String {
-    let char_count = path.chars().count();
-    if char_count <= PORT_LABEL_MAX_CHARS {
-        return path.to_owned();
-    }
-
-    let prefix = (PORT_LABEL_MAX_CHARS - 1) / 2;
-    let suffix = PORT_LABEL_MAX_CHARS - prefix - 1;
-    let mut label = String::with_capacity(PORT_LABEL_MAX_CHARS);
-    label.extend(path.chars().take(prefix));
-    label.push('…');
-    label.extend(path.chars().skip(char_count - suffix));
-    label
 }
 
 fn native_button<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Button<'a, Message> {
