@@ -262,6 +262,10 @@ static void usb_rx_kick(void)
             bank = rx_next_bank;
         rx_next_bank = bank ^ (UDP_CSR_RX_DATA_BK0 | UDP_CSR_RX_DATA_BK1);
         UDP->UDP_CSR[USB_EP_BULK_OUT] = CSR_BULK_OUT | rx_next_bank;
+        // RX_DATA_BKx crosses MCK/UDPCK; let the CSR write settle before
+        // accessing the endpoint FIFO again.
+        for (uint32_t i = 0u; i < 20u; ++i)
+            __NOP();
     }
 }
 
