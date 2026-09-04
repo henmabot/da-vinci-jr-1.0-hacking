@@ -32,18 +32,17 @@ enum PinState {
 }
 
 #[derive(Clone, Copy)]
-enum BulkResponse {
-    Values {
-        id: u16,
-        target: PinTarget,
-        next: u8,
-    },
-    States {
-        id: u16,
-        target: PinTarget,
-        next: u8,
-        what: Query,
-    },
+enum BulkKind {
+    Values,
+    States(Query),
+}
+
+#[derive(Clone, Copy)]
+struct BulkResponse {
+    id: u16,
+    target: PinTarget,
+    next: u8,
+    kind: BulkKind,
 }
 
 pub struct Firmware {
@@ -82,14 +81,7 @@ impl Firmware {
                 Err(error) => error,
             },
             Request::Get { target } => {
-                self.bulk = Some(BulkResponse::Values {
-                    id: packet.id,
-                    target,
-                    next: 0,
-                });
-                return self
-                    .poll_bulk(gpio)
-                    .expect("new grouped GET always yields a response");
+                return self.begin_bulk(packet.id, target, BulkKind::Values, gpio);
             }
             Request::Set { target, level } => self.set_level(target, level, gpio),
             Request::Pullup { target, enabled } => self.set_pullup(target, enabled, gpio),
@@ -108,15 +100,7 @@ impl Firmware {
                 Err(error) => error,
             },
             Request::Query { target, what } => {
-                self.bulk = Some(BulkResponse::States {
-                    id: packet.id,
-                    target,
-                    next: 0,
-                    what,
-                });
-                return self
-                    .poll_bulk(gpio)
-                    .expect("new grouped WYD always yields a response");
+                return self.begin_bulk(packet.id, target, BulkKind::States(what), gpio);
             }
             Request::Bye => {
                 self.reset(gpio);
@@ -130,77 +114,68 @@ impl Firmware {
         }
     }
 
+    fn begin_bulk<G: Gpio>(
+        &mut self,
+        id: u16,
+        target: PinTarget,
+        kind: BulkKind,
+        gpio: &G,
+    ) -> Packet<Response> {
+        self.bulk = Some(BulkResponse {
+            id,
+            target,
+            next: 0,
+            kind,
+        });
+        self.poll_bulk(gpio)
+            .expect("new bulk response always yields a packet")
+    }
+
     pub fn poll_bulk<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
-        match self.bulk? {
-            BulkResponse::Values {
-                id,
-                target,
-                mut next,
-            } => {
-                while next < WIRE_PIN_COUNT {
-                    let pin = Pin::from_wire_index(next).expect("wire pin index is in range");
-                    next += 1;
-                    if !target.contains(pin) {
-                        continue;
-                    }
-                    if supported(pin).is_err() {
-                        continue;
-                    }
+        let BulkResponse {
+            id,
+            target,
+            mut next,
+            kind,
+        } = self.bulk?;
+
+        while next < WIRE_PIN_COUNT {
+            let pin = Pin::from_wire_index(next).expect("wire pin index is in range");
+            next += 1;
+            if !target.contains(pin) || supported(pin).is_err() {
+                continue;
+            }
+
+            let body = match kind {
+                BulkKind::Values => {
                     if matches!(self.pins[pin], PinState::Unset) {
                         continue;
                     }
-                    self.bulk = Some(BulkResponse::Values { id, target, next });
-                    return Some(Packet {
-                        id,
-                        body: Response::Value {
-                            pin,
-                            level: gpio.read(pin),
-                        },
-                    });
+                    Response::Value {
+                        pin,
+                        level: gpio.read(pin),
+                    }
                 }
-                self.bulk = None;
-                Some(Packet {
-                    id,
-                    body: Response::Ack,
-                })
-            }
-            BulkResponse::States {
+                BulkKind::States(what) => Response::State {
+                    pin,
+                    what,
+                    value: self.query(pin, what),
+                },
+            };
+            self.bulk = Some(BulkResponse {
                 id,
                 target,
-                mut next,
-                what,
-            } => {
-                while next < WIRE_PIN_COUNT {
-                    let pin = Pin::from_wire_index(next).expect("wire pin index is in range");
-                    next += 1;
-                    if !target.contains(pin) {
-                        continue;
-                    }
-                    if supported(pin).is_err() {
-                        continue;
-                    }
-                    self.bulk = Some(BulkResponse::States {
-                        id,
-                        target,
-                        next,
-                        what,
-                    });
-                    return Some(Packet {
-                        id,
-                        body: Response::State {
-                            pin,
-                            what,
-                            value: self.query(pin, what),
-                        },
-                    });
-                }
-                self.bulk = None;
-                Some(Packet {
-                    id,
-                    body: Response::Ack,
-                })
-            }
+                next,
+                kind,
+            });
+            return Some(Packet { id, body });
         }
+
+        self.bulk = None;
+        Some(Packet {
+            id,
+            body: Response::Ack,
+        })
     }
 
     pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
