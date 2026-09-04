@@ -206,10 +206,9 @@ impl Connection {
 
     fn ack(&mut self, id: u16, request: Request) -> DeviceEvent {
         if let Request::Direction { target, direction } = request {
-            for index in 0..WIRE_PIN_COUNT {
-                let pin = Pin::from_index(index).expect("wire pin index is in range");
+            for (index, pin) in Pin::all().enumerate() {
                 if target.contains(pin) && pin.is_available() {
-                    self.inputs[index as usize] = direction == da_vinci_protocol::Direction::Input;
+                    self.inputs[index] = direction == da_vinci_protocol::Direction::Input;
                 }
             }
         }
@@ -218,11 +217,10 @@ impl Connection {
             if enabled {
                 let mut listening = false;
                 let mut replaced = [None; WIRE_PIN_COUNT as usize];
-                for index in 0..WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(index).expect("wire pin index is in range");
-                    if target.contains(pin) && self.inputs[index as usize] {
+                for (index, pin) in Pin::all().enumerate() {
+                    if target.contains(pin) && self.inputs[index] {
                         listening = true;
-                        replaced[index as usize] = self.listeners[index as usize].replace(id);
+                        replaced[index] = self.listeners[index].replace(id);
                     }
                 }
                 for previous in replaced.into_iter().flatten() {
@@ -236,10 +234,9 @@ impl Connection {
             }
 
             let mut removed = [None; WIRE_PIN_COUNT as usize];
-            for index in 0..WIRE_PIN_COUNT {
-                let pin = Pin::from_index(index).expect("wire pin index is in range");
+            for (index, pin) in Pin::all().enumerate() {
                 if target.contains(pin) {
-                    removed[index as usize] = self.listeners[index as usize].take();
+                    removed[index] = self.listeners[index].take();
                 }
             }
             for previous in removed.into_iter().flatten() {
@@ -462,7 +459,7 @@ mod tests {
     use da_vinci_protocol::Direction;
 
     fn pin(index: u8) -> Pin {
-        Pin::from_index(index).unwrap()
+        Pin::try_from(index).unwrap()
     }
 
     fn response(id: u16, body: Response) -> Packet<Response> {

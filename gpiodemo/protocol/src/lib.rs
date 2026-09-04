@@ -7,6 +7,17 @@ pub const MAX_PACKET_LEN: usize = 64;
 pub const MAX_PACKET_ID: u16 = 999;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseTokenError;
+
+impl fmt::Display for ParseTokenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid protocol token")
+    }
+}
+
+impl core::error::Error for ParseTokenError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineError {
     TooLong,
 }
@@ -73,6 +84,18 @@ pub enum Direction {
     Output,
 }
 
+impl TryFrom<&[u8]> for Direction {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        match token {
+            b"IN" => Ok(Self::Input),
+            b"OUT" => Ok(Self::Output),
+            _ => Err(ParseTokenError),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Port {
     A,
@@ -80,6 +103,38 @@ pub enum Port {
     C,
     D,
     E,
+}
+
+impl TryFrom<u8> for Port {
+    type Error = ParseTokenError;
+
+    fn try_from(letter: u8) -> Result<Self, Self::Error> {
+        match letter {
+            b'A' => Ok(Self::A),
+            b'B' => Ok(Self::B),
+            b'C' => Ok(Self::C),
+            b'D' => Ok(Self::D),
+            b'E' => Ok(Self::E),
+            _ => Err(ParseTokenError),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for Port {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        let [b'P', b'I', b'O', letter] = *token else {
+            return Err(ParseTokenError);
+        };
+        Self::try_from(letter)
+    }
+}
+
+impl From<Port> for u8 {
+    fn from(port: Port) -> Self {
+        port.letter() as u8
+    }
 }
 
 impl Port {
@@ -110,6 +165,10 @@ impl Port {
             Self::E => 'E',
         }
     }
+
+    pub fn pins(self) -> impl Iterator<Item = Pin> {
+        (0..self.pin_count()).map(move |bit| Pin(self.first_index() + bit))
+    }
 }
 
 impl fmt::Display for Port {
@@ -131,20 +190,8 @@ const PACKAGE_PINS: [u8; WIRE_PIN_COUNT as usize] = [
 ];
 
 impl Pin {
-    pub const fn from_index(index: u8) -> Option<Self> {
-        if index < WIRE_PIN_COUNT {
-            Some(Self(index))
-        } else {
-            None
-        }
-    }
-
-    pub const fn new(port: Port, bit: u8) -> Option<Self> {
-        if bit < port.pin_count() {
-            Some(Self(port.first_index() + bit))
-        } else {
-            None
-        }
+    pub fn all() -> impl Iterator<Item = Self> {
+        (0..WIRE_PIN_COUNT).map(Self)
     }
 
     pub const fn index(self) -> u8 {
@@ -174,6 +221,40 @@ impl Pin {
     }
 }
 
+impl TryFrom<u8> for Pin {
+    type Error = ParseTokenError;
+
+    fn try_from(index: u8) -> Result<Self, Self::Error> {
+        (index < WIRE_PIN_COUNT)
+            .then_some(Self(index))
+            .ok_or(ParseTokenError)
+    }
+}
+
+impl TryFrom<(Port, u8)> for Pin {
+    type Error = ParseTokenError;
+
+    fn try_from((port, bit): (Port, u8)) -> Result<Self, Self::Error> {
+        (bit < port.pin_count())
+            .then_some(Self(port.first_index() + bit))
+            .ok_or(ParseTokenError)
+    }
+}
+
+impl TryFrom<&[u8]> for Pin {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        let [b'P', port, tens, ones] = *token else {
+            return Err(ParseTokenError);
+        };
+        if !tens.is_ascii_digit() || !ones.is_ascii_digit() {
+            return Err(ParseTokenError);
+        }
+        Self::try_from((Port::try_from(port)?, (tens - b'0') * 10 + (ones - b'0')))
+    }
+}
+
 impl fmt::Display for Pin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "P{}{:02}", self.port().letter(), self.bit())
@@ -187,10 +268,24 @@ pub enum PinTarget {
     All,
 }
 
+impl TryFrom<&[u8]> for PinTarget {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        if token == b"ALL" {
+            Ok(Self::All)
+        } else if let Ok(port) = Port::try_from(token) {
+            Ok(Self::Bank(port))
+        } else {
+            Pin::try_from(token).map(Self::Pin)
+        }
+    }
+}
+
 impl PinTarget {
     pub fn contains(self, pin: Pin) -> bool {
         match self {
-            Self::Pin(target) => target.index() == pin.index(),
+            Self::Pin(target) => target == pin,
             Self::Bank(port) => pin.port() == port,
             Self::All => true,
         }
@@ -214,10 +309,35 @@ pub enum Query {
     Listen,
 }
 
+impl TryFrom<&[u8]> for Query {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        match token {
+            b"DIR" => Ok(Self::Direction),
+            b"PLL" => Ok(Self::Pullup),
+            b"LSN" => Ok(Self::Listen),
+            _ => Err(ParseTokenError),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     Low,
     High,
+}
+
+impl TryFrom<&[u8]> for Level {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        match token {
+            b"LOW" => Ok(Self::Low),
+            b"HIGH" => Ok(Self::High),
+            _ => Err(ParseTokenError),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,8 +427,10 @@ pub enum EncodeError {
 }
 
 pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
-    let mut tokens = split_tokens(line);
-    let id = tokens.next().and_then(parse_decimal3).ok_or(DecodeError {
+    let mut tokens = line
+        .split(u8::is_ascii_whitespace)
+        .filter(|token| !token.is_empty());
+    let id = tokens.next().and_then(parse_packet_id).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
     })?;
@@ -327,47 +449,39 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
         b"HRU" if tokens.next().is_none() => Request::Status,
         b"BYE" if tokens.next().is_none() => Request::Bye,
         b"DIR" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
-            let direction = match tokens.next() {
-                Some(b"IN") => Direction::Input,
-                Some(b"OUT") => Direction::Output,
-                _ => return Err(malformed()),
-            };
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let direction: Direction = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Direction { target, direction }
         }
         b"GET" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Get { target }
         }
         b"SET" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
-            let level = tokens.next().and_then(parse_level).ok_or_else(malformed)?;
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let level: Level = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Set { target, level }
         }
         b"PLL" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
-            let enabled = tokens
-                .next()
-                .and_then(parse_enabled)
-                .ok_or_else(malformed)?;
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let enabled =
+                parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Pullup { target, enabled }
         }
         b"LSN" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
-            let enabled = tokens
-                .next()
-                .and_then(parse_enabled)
-                .ok_or_else(malformed)?;
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let enabled =
+                parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Listen { target, enabled }
         }
         b"WYD" => {
-            let target = tokens.next().and_then(parse_target).ok_or_else(malformed)?;
-            let what = tokens.next().and_then(parse_query).ok_or_else(malformed)?;
+            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let what: Query = next_as(&mut tokens, malformed())?;
             if tokens.next().is_some() {
                 return Err(malformed());
             }
@@ -386,8 +500,10 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
 }
 
 pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
-    let mut tokens = split_tokens(line);
-    let id = tokens.next().and_then(parse_decimal3).ok_or(DecodeError {
+    let mut tokens = line
+        .split(u8::is_ascii_whitespace)
+        .filter(|token| !token.is_empty());
+    let id = tokens.next().and_then(parse_packet_id).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
     })?;
@@ -428,7 +544,7 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
             let error = match tokens.next() {
                 Some(b"BAD_PACKET") => ResponseError::BadPacket,
                 Some(pin) => {
-                    let pin = parse_pin(pin).ok_or_else(malformed)?;
+                    let pin = Pin::try_from(pin).map_err(|_| malformed())?;
                     let reason = match tokens.next() {
                         Some(b"UNSET") => PinError::Unset,
                         Some(b"UNAVAILABLE") => PinError::Unavailable,
@@ -442,21 +558,19 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
             Response::Error(error)
         }
         b"HYG" => {
-            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let pin: Pin = next_as(&mut tokens, malformed())?;
             let next = tokens.next().ok_or_else(malformed)?;
-            if let Some(level) = parse_level(next) {
+            if let Ok(level) = Level::try_from(next) {
                 expect_suffix(&mut tokens, b"<3", malformed())?;
                 Response::Value { pin, level }
             } else {
-                let what = parse_query(next).ok_or_else(malformed)?;
+                let what = Query::try_from(next).map_err(|_| malformed())?;
                 let value_token = tokens.next().ok_or_else(malformed)?;
                 let value = match what {
-                    Query::Direction => match value_token {
-                        b"UNSET" => QueryValue::Unset,
-                        b"IN" => QueryValue::Direction(Direction::Input),
-                        b"OUT" => QueryValue::Direction(Direction::Output),
-                        _ => return Err(malformed()),
-                    },
+                    Query::Direction if value_token == b"UNSET" => QueryValue::Unset,
+                    Query::Direction => QueryValue::Direction(
+                        Direction::try_from(value_token).map_err(|_| malformed())?,
+                    ),
                     Query::Pullup | Query::Listen => match value_token {
                         b"UNSET" => QueryValue::Unset,
                         b"ON" => QueryValue::Enabled(true),
@@ -577,83 +691,24 @@ pub fn encode_response(packet: Packet<Response>, out: &mut [u8]) -> Result<usize
     Ok(writer.len())
 }
 
-fn split_tokens(line: &[u8]) -> Tokens<'_> {
-    Tokens(line)
+fn next_as<'a, T>(
+    tokens: &mut impl Iterator<Item = &'a [u8]>,
+    error: DecodeError,
+) -> Result<T, DecodeError>
+where
+    T: TryFrom<&'a [u8]>,
+{
+    tokens.next().ok_or(error)?.try_into().map_err(|_| error)
 }
 
-struct Tokens<'a>(&'a [u8]);
-
-impl<'a> Iterator for Tokens<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0 = self.0.trim_ascii_start();
-        let end = self
-            .0
-            .iter()
-            .position(u8::is_ascii_whitespace)
-            .unwrap_or(self.0.len());
-        let (token, rest) = self.0.split_at(end);
-        self.0 = rest;
-        (!token.is_empty()).then_some(token)
-    }
-}
-
-fn expect_suffix(
-    tokens: &mut Tokens<'_>,
+fn expect_suffix<'a>(
+    tokens: &mut impl Iterator<Item = &'a [u8]>,
     suffix: &[u8],
     error: DecodeError,
 ) -> Result<(), DecodeError> {
     (tokens.next() == Some(suffix) && tokens.next().is_none())
         .then_some(())
         .ok_or(error)
-}
-
-fn parse_target(token: &[u8]) -> Option<PinTarget> {
-    if token == b"ALL" {
-        Some(PinTarget::All)
-    } else if let Some(port) = parse_bank(token) {
-        Some(PinTarget::Bank(port))
-    } else {
-        parse_pin(token).map(PinTarget::Pin)
-    }
-}
-
-fn parse_bank(token: &[u8]) -> Option<Port> {
-    match token {
-        b"PIOA" => Some(Port::A),
-        b"PIOB" => Some(Port::B),
-        b"PIOC" => Some(Port::C),
-        b"PIOD" => Some(Port::D),
-        b"PIOE" => Some(Port::E),
-        _ => None,
-    }
-}
-
-fn parse_pin(token: &[u8]) -> Option<Pin> {
-    let [b'P', port, tens, ones] = *token else {
-        return None;
-    };
-    let port = match port {
-        b'A' => Port::A,
-        b'B' => Port::B,
-        b'C' => Port::C,
-        b'D' => Port::D,
-        b'E' => Port::E,
-        _ => return None,
-    };
-    if !tens.is_ascii_digit() || !ones.is_ascii_digit() {
-        return None;
-    }
-    Pin::new(port, (tens - b'0') * 10 + (ones - b'0'))
-}
-
-fn parse_level(token: &[u8]) -> Option<Level> {
-    match token {
-        b"LOW" => Some(Level::Low),
-        b"HIGH" => Some(Level::High),
-        _ => None,
-    }
 }
 
 fn parse_enabled(token: &[u8]) -> Option<bool> {
@@ -664,27 +719,11 @@ fn parse_enabled(token: &[u8]) -> Option<bool> {
     }
 }
 
-fn parse_query(token: &[u8]) -> Option<Query> {
-    match token {
-        b"DIR" => Some(Query::Direction),
-        b"PLL" => Some(Query::Pullup),
-        b"LSN" => Some(Query::Listen),
-        _ => None,
-    }
-}
-
-fn parse_decimal3(token: &[u8]) -> Option<u16> {
-    if token.is_empty() || token.len() > 3 {
+fn parse_packet_id(token: &[u8]) -> Option<u16> {
+    if token.is_empty() || token.len() > 3 || !token.iter().all(u8::is_ascii_digit) {
         return None;
     }
-    let mut value = 0u16;
-    for &byte in token {
-        if !byte.is_ascii_digit() {
-            return None;
-        }
-        value = value * 10 + u16::from(byte - b'0');
-    }
-    Some(value)
+    core::str::from_utf8(token).ok()?.parse().ok()
 }
 
 struct Writer<'a> {
@@ -761,7 +800,7 @@ mod tests {
         out
     }
     fn pin(index: u8) -> Pin {
-        Pin::from_index(index).unwrap()
+        Pin::try_from(index).unwrap()
     }
 
     #[test]
@@ -1008,6 +1047,6 @@ mod tests {
         assert_eq!(pin(44).to_string(), "PB12");
         assert_eq!(pin(44).package_pin(), 87);
         assert_eq!(pin(72).to_string(), "PC25");
-        assert_eq!(Pin::new(Port::E, 5), Some(pin(116)));
+        assert_eq!(Pin::try_from((Port::E, 5)), Ok(pin(116)));
     }
 }

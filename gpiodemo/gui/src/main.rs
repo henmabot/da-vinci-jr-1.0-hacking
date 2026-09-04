@@ -681,9 +681,11 @@ impl App {
             column = column.push(text(port.to_string()).size(14));
         }
         column = column.push(pin_header());
-        let end = (start_bit + count).min(port.pin_count());
-        for bit in start_bit..end {
-            let pin = Pin::new(port, bit).expect("bank table bit is valid");
+        for pin in port
+            .pins()
+            .skip(usize::from(start_bit))
+            .take(usize::from(count))
+        {
             column = column.push(self.pin_row(pin));
         }
         column
@@ -935,16 +937,15 @@ impl App {
         }
 
         let mut tasks = Vec::new();
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = self.pins[index];
             if target.contains(pin)
                 && pin.is_available()
                 && state.mode.is_none()
                 && state.target_mode.is_none()
             {
-                self.pins[index as usize].target_mode = Some(mode);
-                self.pins[index as usize].level = None;
+                self.pins[index].target_mode = Some(mode);
+                self.pins[index].level = None;
                 tasks.push(self.send_request(Request::Direction {
                     target: PinTarget::Pin(pin),
                     direction: mode.direction(),
@@ -961,9 +962,8 @@ impl App {
         if !self.require_connection() {
             return Task::none();
         }
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = &mut self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = &mut self.pins[index];
             if target.contains(pin) && pin.is_available() && state.mode.is_some() {
                 state.value_pending = true;
             }
@@ -983,9 +983,8 @@ impl App {
         if !self.require_connection() {
             return Task::none();
         }
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = &mut self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = &mut self.pins[index];
             if target.contains(pin) && state.mode == Some(Mode::Output) {
                 state.value_pending = true;
             }
@@ -994,26 +993,23 @@ impl App {
     }
 
     fn target_has_pending(&self, target: PinTarget) -> bool {
-        (0..WIRE_PIN_COUNT).any(|index| {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
+        Pin::all().enumerate().any(|(index, pin)| {
             target.contains(pin)
-                && (self.pins[index as usize].target_mode.is_some()
-                    || self.pins[index as usize].listener.is_pending())
+                && (self.pins[index].target_mode.is_some()
+                    || self.pins[index].listener.is_pending())
         })
     }
 
     fn target_has_listener(&self, target: PinTarget) -> bool {
-        (0..WIRE_PIN_COUNT).any(|index| {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            target.contains(pin) && self.pins[index as usize].listener == ListenerState::On
+        Pin::all().enumerate().any(|(index, pin)| {
+            target.contains(pin) && self.pins[index].listener == ListenerState::On
         })
     }
 
     fn mark_mode_pending(&mut self, target: PinTarget, mode: Mode) {
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
+        for (index, pin) in Pin::all().enumerate() {
             if target.contains(pin) && pin.is_available() {
-                let state = &mut self.pins[index as usize];
+                let state = &mut self.pins[index];
                 state.target_mode = Some(mode);
                 state.level = None;
             }
@@ -1021,9 +1017,8 @@ impl App {
     }
 
     fn mark_listener_pending(&mut self, target: PinTarget, enabled: bool) {
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = &mut self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = &mut self.pins[index];
             if target.contains(pin) && state.mode.is_some_and(Mode::is_input) {
                 state.listener = if enabled {
                     ListenerState::Enabling
@@ -1125,12 +1120,11 @@ impl App {
                 }
                 Request::Pullup { target, .. } => {
                     let mut read = false;
-                    for index in 0..WIRE_PIN_COUNT {
-                        let pin = Pin::from_index(index).expect("wire pin index is in range");
+                    for (index, pin) in Pin::all().enumerate() {
                         if !target.contains(pin) {
                             continue;
                         }
-                        let state = &mut self.pins[index as usize];
+                        let state = &mut self.pins[index];
                         if let Some(mode) = state.target_mode.take() {
                             state.mode = Some(mode);
                             if mode.is_input() {
@@ -1148,24 +1142,19 @@ impl App {
                     }
                 }
                 Request::Set { target, level } => {
-                    for index in 0..WIRE_PIN_COUNT {
-                        let pin = Pin::from_index(index).expect("wire pin index is in range");
-                        if target.contains(pin)
-                            && self.pins[index as usize].mode == Some(Mode::Output)
-                        {
-                            let state = &mut self.pins[index as usize];
+                    for (index, pin) in Pin::all().enumerate() {
+                        if target.contains(pin) && self.pins[index].mode == Some(Mode::Output) {
+                            let state = &mut self.pins[index];
                             state.level = Some(level);
                             state.value_pending = false;
                         }
                     }
                 }
                 Request::Listen { target, enabled } => {
-                    for index in 0..WIRE_PIN_COUNT {
-                        let pin = Pin::from_index(index).expect("wire pin index is in range");
-                        if target.contains(pin)
-                            && self.pins[index as usize].mode.is_some_and(Mode::is_input)
+                    for (index, pin) in Pin::all().enumerate() {
+                        if target.contains(pin) && self.pins[index].mode.is_some_and(Mode::is_input)
                         {
-                            self.pins[index as usize].listener = if enabled {
+                            self.pins[index].listener = if enabled {
                                 ListenerState::On
                             } else {
                                 ListenerState::Off
@@ -1205,11 +1194,10 @@ impl App {
     }
 
     fn pending_mode(&self, target: PinTarget) -> Option<Mode> {
-        (0..WIRE_PIN_COUNT).find_map(|index| {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
+        Pin::all().enumerate().find_map(|(index, pin)| {
             target
                 .contains(pin)
-                .then_some(self.pins[index as usize].target_mode)
+                .then_some(self.pins[index].target_mode)
                 .flatten()
         })
     }
@@ -1217,26 +1205,23 @@ impl App {
     fn fail_request(&mut self, request: Request) {
         match request {
             Request::Direction { target, .. } | Request::Pullup { target, .. } => {
-                for index in 0..WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                for (index, pin) in Pin::all().enumerate() {
                     if target.contains(pin) {
-                        self.pins[index as usize].target_mode = None;
+                        self.pins[index].target_mode = None;
                     }
                 }
             }
             Request::Get { target } | Request::Set { target, .. } => {
-                for index in 0..WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                for (index, pin) in Pin::all().enumerate() {
                     if target.contains(pin) {
-                        self.pins[index as usize].value_pending = false;
+                        self.pins[index].value_pending = false;
                     }
                 }
             }
             Request::Listen { target, enabled } => {
-                for index in 0..WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(index).expect("wire pin index is in range");
-                    if target.contains(pin) && self.pins[index as usize].mode.is_some() {
-                        self.pins[index as usize].listener = if enabled {
+                for (index, pin) in Pin::all().enumerate() {
+                    if target.contains(pin) && self.pins[index].mode.is_some() {
+                        self.pins[index].listener = if enabled {
                             ListenerState::Off
                         } else {
                             ListenerState::On
@@ -1564,7 +1549,7 @@ mod tests {
     #[test]
     fn overwrite_off_only_targets_unset_pins_individually() {
         let mut app = connected_app();
-        let configured = Pin::new(Port::A, 0).unwrap();
+        let configured = Pin::try_from((Port::A, 0)).unwrap();
         app.pins[configured.index() as usize].mode = Some(Mode::Input);
         app.bulk_scope = PinTarget::Bank(Port::A);
         app.bulk_mode = Mode::Output;

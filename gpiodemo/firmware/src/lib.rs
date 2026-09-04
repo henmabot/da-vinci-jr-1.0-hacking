@@ -134,7 +134,7 @@ impl Firmware {
                 mut next,
             } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(next).expect("wire pin index is in range");
+                    let pin = Pin::try_from(next).expect("wire pin index is in range");
                     next += 1;
                     if !target.contains(pin) {
                         continue;
@@ -167,7 +167,7 @@ impl Firmware {
                 what,
             } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = Pin::from_index(next).expect("wire pin index is in range");
+                    let pin = Pin::try_from(next).expect("wire pin index is in range");
                     next += 1;
                     if !target.contains(pin) {
                         continue;
@@ -200,9 +200,8 @@ impl Firmware {
     }
 
     pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = &mut self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = &mut self.pins[index];
             let Some(listener) = state.listener else {
                 continue;
             };
@@ -349,9 +348,8 @@ impl Firmware {
 
     fn reset<G: Gpio>(&mut self, gpio: &mut G) {
         self.bulk = None;
-        for index in 0..WIRE_PIN_COUNT {
-            let pin = Pin::from_index(index).expect("wire pin index is in range");
-            let state = &mut self.pins[index as usize];
+        for (index, pin) in Pin::all().enumerate() {
+            let state = &mut self.pins[index];
             if state.direction.is_some() && supported(pin).is_ok() {
                 gpio.input(pin, false);
             }
@@ -361,8 +359,7 @@ impl Firmware {
 }
 
 fn for_each_group_pin(target: PinTarget, mut f: impl FnMut(Pin)) {
-    for index in 0..WIRE_PIN_COUNT {
-        let pin = Pin::from_index(index).expect("wire pin index is in range");
+    for pin in Pin::all() {
         if target.contains(pin) && pin.is_available() {
             f(pin);
         }
@@ -430,7 +427,7 @@ mod tests {
     }
 
     fn pin(index: u8) -> Pin {
-        Pin::from_index(index).unwrap()
+        Pin::try_from(index).unwrap()
     }
 
     fn packet(id: u16, body: Request) -> Packet<Request> {
