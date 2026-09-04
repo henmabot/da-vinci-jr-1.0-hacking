@@ -334,55 +334,40 @@ impl App {
     fn handle_message(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => self.drain_io(),
-            Message::PortsLoaded(result) => {
-                match result {
-                    Ok(ports) => {
-                        self.ports = ports.into_iter().map(PortChoice::new).collect();
-                        if self
-                            .selected_port
-                            .as_ref()
-                            .is_none_or(|selected| !self.ports.contains(selected))
-                        {
-                            self.selected_port = self.ports.first().cloned();
-                        }
+            Message::PortsLoaded(result) => match result {
+                Ok(ports) => {
+                    self.ports = ports.into_iter().map(PortChoice::new).collect();
+                    if self
+                        .selected_port
+                        .as_ref()
+                        .is_none_or(|selected| !self.ports.contains(selected))
+                    {
+                        self.selected_port = self.ports.first().cloned();
                     }
-                    Err(error) => self.error = Some(error),
                 }
-                Task::none()
-            }
-            Message::RefreshPorts => load_ports(),
-            Message::PortSelected(port) => {
-                self.selected_port = Some(port);
-                Task::none()
-            }
+                Err(error) => self.error = Some(error),
+            },
+            Message::RefreshPorts => return load_ports(),
+            Message::PortSelected(port) => self.selected_port = Some(port),
             Message::Connect => {
                 if let Some(port) = &self.selected_port {
                     self.error = self.connection.connect(port.path.clone()).err();
                 }
-                Task::none()
             }
-            Message::Disconnect => {
-                self.error = self.connection.disconnect().err();
-                Task::none()
-            }
+            Message::Disconnect => self.error = self.connection.disconnect().err(),
             Message::PreviousTab => {
                 let index = self.bank_tab.index();
                 if index > 0 {
                     self.bank_tab = BANK_TABS[index - 1];
                 }
-                Task::none()
             }
             Message::NextTab => {
                 let index = self.bank_tab.index();
                 if index + 1 < BANK_TABS.len() {
                     self.bank_tab = BANK_TABS[index + 1];
                 }
-                Task::none()
             }
-            Message::TabSelected(tab) => {
-                self.bank_tab = tab;
-                Task::none()
-            }
+            Message::TabSelected(tab) => self.bank_tab = tab,
             Message::ModeSelected(pin, mode) => self.change_mode(pin, mode),
             Message::Read(pin) => self.read_pin(pin),
             Message::Write(pin) => self.write_pin(pin),
@@ -390,82 +375,49 @@ impl App {
             Message::BulkScopeSelected(scope) => {
                 self.bulk_scope = scope;
                 self.confirm_set = None;
-                Task::none()
             }
-            Message::BulkModeSelected(mode) => {
-                self.bulk_mode = mode;
-                Task::none()
-            }
-            Message::OverwriteChanged(overwrite) => {
-                self.overwrite = overwrite;
-                Task::none()
-            }
+            Message::BulkModeSelected(mode) => self.bulk_mode = mode,
+            Message::OverwriteChanged(overwrite) => self.overwrite = overwrite,
             Message::ApplyBulkMode => self.apply_bulk_mode(),
             Message::BulkRead => self.read_scope(self.bulk_scope),
             Message::BulkListen(enabled) => self.set_listener_scope(self.bulk_scope, enabled),
-            Message::BulkSet(level) => {
-                self.confirm_set = Some((self.bulk_scope, level));
-                Task::none()
-            }
+            Message::BulkSet(level) => self.confirm_set = Some((self.bulk_scope, level)),
             Message::BulkSetConfirm => {
-                let Some((target, level)) = self.confirm_set.take() else {
-                    return Task::none();
-                };
-                self.set_scope_level(target, level)
+                if let Some((target, level)) = self.confirm_set.take() {
+                    self.set_scope_level(target, level);
+                }
             }
-            Message::BulkSetCancel => {
-                self.confirm_set = None;
-                Task::none()
-            }
+            Message::BulkSetCancel => self.confirm_set = None,
             Message::Handshake => self.send_request(Request::Hello),
             Message::Status => self.send_request(Request::Status),
-            Message::Reboot => {
-                self.confirm_reboot = true;
-                Task::none()
-            }
+            Message::Reboot => self.confirm_reboot = true,
             Message::RebootConfirm => {
                 self.confirm_reboot = false;
-                self.send_request(Request::Bye)
+                self.send_request(Request::Bye);
             }
-            Message::RebootCancel => {
-                self.confirm_reboot = false;
-                Task::none()
-            }
-            Message::PaneResized(event) => {
-                self.panes.resize(event.split, event.ratio);
-                Task::none()
-            }
-            Message::ClearLog => {
-                self.log.clear();
-                Task::none()
-            }
-            Message::ShowTimestamps(enabled) => {
-                self.log.set_show_timestamps(enabled);
-                Task::none()
-            }
+            Message::RebootCancel => self.confirm_reboot = false,
+            Message::PaneResized(event) => self.panes.resize(event.split, event.ratio),
+            Message::ClearLog => self.log.clear(),
+            Message::ShowTimestamps(enabled) => self.log.set_show_timestamps(enabled),
             Message::Autoscroll(enabled) => {
                 self.autoscroll = enabled;
                 if enabled {
-                    self.snap_log()
-                } else {
-                    Task::none()
+                    return self.snap_log();
                 }
             }
             Message::LogAction(action) => {
                 if !action.is_edit() {
                     self.log.perform(action);
                 }
-                Task::none()
             }
             Message::RawChanged(value) => {
                 self.raw_input = value;
                 self.history_index = None;
-                Task::none()
             }
             Message::RawSend => self.send_raw(),
             Message::HistoryKey(direction) => {
-                iced::widget::operation::is_focused(self.raw_input_id.clone())
-                    .map(move |focused| Message::HistoryKeyFocus { direction, focused })
+                return iced::widget::operation::is_focused(self.raw_input_id.clone())
+                    .map(move |focused| Message::HistoryKeyFocus { direction, focused });
             }
             Message::HistoryKeyFocus { direction, focused } => {
                 if focused {
@@ -474,9 +426,9 @@ impl App {
                         HistoryDirection::Next => self.history_next(),
                     }
                 }
-                Task::none()
             }
         }
+        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -871,55 +823,53 @@ impl App {
             .into()
     }
 
-    fn change_mode(&mut self, pin: Pin, mode: Mode) -> Task<Message> {
+    fn change_mode(&mut self, pin: Pin, mode: Mode) {
         if !self.require_connection() || !pin.is_available() {
-            return Task::none();
+            return;
         }
         let state = &mut self.pins[pin.index() as usize];
         if state.target_mode.is_some() || state.listener.is_pending() {
-            return Task::none();
+            return;
         }
 
-        let mut tasks = Vec::new();
         if mode == Mode::Output && state.listener == ListenerState::On {
             state.listener = ListenerState::Disabling;
-            tasks.push(self.send_request(Request::Listen {
+            self.send_request(Request::Listen {
                 target: PinTarget::Pin(pin),
                 enabled: false,
-            }));
+            });
         }
 
         let state = &mut self.pins[pin.index() as usize];
         state.target_mode = Some(mode);
         state.level = None;
-        tasks.push(self.send_request(Request::Direction {
+        self.send_request(Request::Direction {
             target: PinTarget::Pin(pin),
             direction: mode.direction(),
-        }));
-        Task::batch(tasks)
+        });
     }
 
-    fn read_pin(&mut self, pin: Pin) -> Task<Message> {
+    fn read_pin(&mut self, pin: Pin) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         let state = &mut self.pins[pin.index() as usize];
         if state.mode.is_none() || state.value_pending {
-            return Task::none();
+            return;
         }
         state.value_pending = true;
         self.send_request(Request::Get {
             target: PinTarget::Pin(pin),
-        })
+        });
     }
 
-    fn write_pin(&mut self, pin: Pin) -> Task<Message> {
+    fn write_pin(&mut self, pin: Pin) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         let state = &mut self.pins[pin.index() as usize];
         if state.mode != Some(Mode::Output) || state.value_pending {
-            return Task::none();
+            return;
         }
         state.value_pending = true;
         let level = if state.level == Some(Level::High) {
@@ -930,57 +880,56 @@ impl App {
         self.send_request(Request::Set {
             target: PinTarget::Pin(pin),
             level,
-        })
+        });
     }
 
-    fn toggle_listener(&mut self, pin: Pin) -> Task<Message> {
+    fn toggle_listener(&mut self, pin: Pin) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         let state = &mut self.pins[pin.index() as usize];
         if !state.mode.is_some_and(Mode::is_input) {
-            return Task::none();
+            return;
         }
         let (enabled, pending) = match state.listener {
             ListenerState::Off => (true, ListenerState::Enabling),
             ListenerState::On => (false, ListenerState::Disabling),
-            ListenerState::Enabling | ListenerState::Disabling => return Task::none(),
+            ListenerState::Enabling | ListenerState::Disabling => return,
         };
         state.listener = pending;
         self.send_request(Request::Listen {
             target: PinTarget::Pin(pin),
             enabled,
-        })
+        });
     }
 
-    fn apply_bulk_mode(&mut self) -> Task<Message> {
+    fn apply_bulk_mode(&mut self) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         let target = self.bulk_scope;
         let mode = self.bulk_mode;
 
         if self.overwrite {
             if self.target_has_pending(target) {
-                return Task::none();
+                return;
             }
-            let mut tasks = Vec::new();
             if mode == Mode::Output && self.target_has_listener(target) {
                 self.mark_listener_pending(target, false);
-                tasks.push(self.send_request(Request::Listen {
+                self.send_request(Request::Listen {
                     target,
                     enabled: false,
-                }));
+                });
             }
             self.mark_mode_pending(target, mode);
-            tasks.push(self.send_request(Request::Direction {
+            self.send_request(Request::Direction {
                 target,
                 direction: mode.direction(),
-            }));
-            return Task::batch(tasks);
+            });
+            return;
         }
 
-        let mut tasks = Vec::new();
+        let mut sent = false;
         for (index, pin) in Pin::all().enumerate() {
             let state = self.pins[index];
             if target.contains(pin)
@@ -990,21 +939,21 @@ impl App {
             {
                 self.pins[index].target_mode = Some(mode);
                 self.pins[index].level = None;
-                tasks.push(self.send_request(Request::Direction {
+                self.send_request(Request::Direction {
                     target: PinTarget::Pin(pin),
                     direction: mode.direction(),
-                }));
+                });
+                sent = true;
             }
         }
-        if tasks.is_empty() {
+        if !sent {
             self.device_status = "No UNSET pins in selected scope".into();
         }
-        Task::batch(tasks)
     }
 
-    fn read_scope(&mut self, target: PinTarget) -> Task<Message> {
+    fn read_scope(&mut self, target: PinTarget) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         for (index, pin) in Pin::all().enumerate() {
             let state = &mut self.pins[index];
@@ -1012,20 +961,20 @@ impl App {
                 state.value_pending = true;
             }
         }
-        self.send_request(Request::Get { target })
+        self.send_request(Request::Get { target });
     }
 
-    fn set_listener_scope(&mut self, target: PinTarget, enabled: bool) -> Task<Message> {
+    fn set_listener_scope(&mut self, target: PinTarget, enabled: bool) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         self.mark_listener_pending(target, enabled);
-        self.send_request(Request::Listen { target, enabled })
+        self.send_request(Request::Listen { target, enabled });
     }
 
-    fn set_scope_level(&mut self, target: PinTarget, level: Level) -> Task<Message> {
+    fn set_scope_level(&mut self, target: PinTarget, level: Level) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         for (index, pin) in Pin::all().enumerate() {
             let state = &mut self.pins[index];
@@ -1033,7 +982,7 @@ impl App {
                 state.value_pending = true;
             }
         }
-        self.send_request(Request::Set { target, level })
+        self.send_request(Request::Set { target, level });
     }
 
     fn target_has_pending(&self, target: PinTarget) -> bool {
@@ -1073,29 +1022,25 @@ impl App {
         }
     }
 
-    fn send_request(&mut self, request: Request) -> Task<Message> {
+    fn send_request(&mut self, request: Request) {
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
         match self.connection.send(request) {
-            Ok(line) => {
-                self.push_log(format!("TX {line}"));
-                Task::none()
-            }
+            Ok(line) => self.push_log(format!("TX {line}")),
             Err(error) => {
                 self.fail_request(request);
                 self.error = Some(error);
-                Task::none()
             }
         }
     }
 
-    fn send_raw(&mut self) -> Task<Message> {
+    fn send_raw(&mut self) {
         if self.raw_input.is_empty() {
-            return Task::none();
+            return;
         }
         if !self.require_connection() {
-            return Task::none();
+            return;
         }
 
         let line = std::mem::take(&mut self.raw_input);
@@ -1105,14 +1050,8 @@ impl App {
         }
         self.history_index = None;
         match self.connection.send_raw(&line) {
-            Ok(()) => {
-                self.push_log(format!("TX {line}"));
-                Task::none()
-            }
-            Err(error) => {
-                self.error = Some(error);
-                Task::none()
-            }
+            Ok(()) => self.push_log(format!("TX {line}")),
+            Err(error) => self.error = Some(error),
         }
     }
 
@@ -1125,8 +1064,7 @@ impl App {
         }
     }
 
-    fn drain_io(&mut self) -> Task<Message> {
-        let mut tasks = Vec::new();
+    fn drain_io(&mut self) {
         for _ in 0..MAX_IO_EVENTS_PER_TICK {
             let Some(event) = self.connection.next_event() else {
                 break;
@@ -1147,17 +1085,16 @@ impl App {
                 ConnectionEvent::Received { line, event } => {
                     self.push_log(format!("RX {line}"));
                     match event {
-                        Ok(event) => self.handle_device_event(event, &mut tasks),
+                        Ok(event) => self.handle_device_event(event),
                         Err(error) => self.error = Some(error),
                     }
                 }
                 ConnectionEvent::IoError(error) => self.error = Some(error),
             }
         }
-        Task::batch(tasks)
     }
 
-    fn handle_device_event(&mut self, event: DeviceEvent, tasks: &mut Vec<Task<Message>>) {
+    fn handle_device_event(&mut self, event: DeviceEvent) {
         match event {
             DeviceEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
             DeviceEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
@@ -1166,10 +1103,10 @@ impl App {
                     let Some(mode) = self.pending_mode(target) else {
                         return;
                     };
-                    tasks.push(self.send_request(Request::Pullup {
+                    self.send_request(Request::Pullup {
                         target,
                         enabled: mode == Mode::InputPullup,
-                    }));
+                    });
                 }
                 Request::Pullup { target, .. } => {
                     let mut read = false;
@@ -1188,10 +1125,10 @@ impl App {
                         }
                     }
                     if read {
-                        tasks.push(match target {
+                        match target {
                             PinTarget::Pin(pin) => self.read_pin(pin),
                             PinTarget::Bank(_) | PinTarget::All => self.read_scope(target),
-                        });
+                        }
                     }
                 }
                 Request::Set { target, level } => {
@@ -1533,37 +1470,47 @@ mod tests {
     #[test]
     fn bulk_controls_send_selected_symbolic_scope() {
         let mut app = connected_app();
-        let mut tasks = Vec::new();
         app.bulk_scope = PinTarget::Bank(Port::C);
         app.bulk_mode = Mode::InputPullup;
         app.overwrite = true;
 
-        let _ = app.apply_bulk_mode();
+        app.apply_bulk_mode();
         assert_eq!(last_log(&app), "TX 001 DIR PIOC IN OK?");
 
-        app.handle_device_event(
-            DeviceEvent::Ack(Request::Direction {
-                target: PinTarget::Bank(Port::C),
-                direction: Direction::Input,
-            }),
-            &mut tasks,
-        );
+        app.handle_device_event(DeviceEvent::Ack(Request::Direction {
+            target: PinTarget::Bank(Port::C),
+            direction: Direction::Input,
+        }));
         assert_eq!(last_log(&app), "TX 002 PLL PIOC ON OK?");
 
-        app.handle_device_event(
-            DeviceEvent::Ack(Request::Pullup {
-                target: PinTarget::Bank(Port::C),
-                enabled: true,
-            }),
-            &mut tasks,
-        );
+        app.handle_device_event(DeviceEvent::Ack(Request::Pullup {
+            target: PinTarget::Bank(Port::C),
+            enabled: true,
+        }));
         assert_eq!(last_log(&app), "TX 003 GET PIOC OK?");
 
-        let _ = app.set_listener_scope(PinTarget::Bank(Port::C), true);
+        app.set_listener_scope(PinTarget::Bank(Port::C), true);
         assert_eq!(last_log(&app), "TX 004 LSN PIOC ON OK?");
 
-        let _ = app.read_scope(PinTarget::Bank(Port::C));
+        app.read_scope(PinTarget::Bank(Port::C));
         assert_eq!(last_log(&app), "TX 005 GET PIOC OK?");
+    }
+
+    #[test]
+    fn output_mode_stops_listener_before_changing_direction() {
+        let mut app = connected_app();
+        let pin = Pin::try_from((Port::A, 0)).unwrap();
+        let state = &mut app.pins[pin.index() as usize];
+        state.mode = Some(Mode::Input);
+        state.listener = ListenerState::On;
+
+        app.change_mode(pin, Mode::Output);
+
+        let commands: Vec<_> = app.log.iter().collect();
+        assert_eq!(
+            commands,
+            ["TX 001 LSN PA00 OFF OK?", "TX 002 DIR PA00 OUT OK?"]
+        );
     }
 
     #[test]
@@ -1598,7 +1545,7 @@ mod tests {
         app.bulk_mode = Mode::Output;
         app.overwrite = false;
 
-        let _ = app.apply_bulk_mode();
+        app.apply_bulk_mode();
 
         assert!(!app.log.iter().any(|entry| entry.contains("DIR PA00")));
         assert!(app.log.iter().all(|entry| !entry.contains("DIR PIOA")));
