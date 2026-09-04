@@ -17,9 +17,6 @@ pub(super) struct SerialLog {
     content: text_editor::Content,
     show_timestamps: bool,
     pending_text: String,
-    pending_entries: usize,
-    presented_entries: usize,
-    pending_trim: usize,
 }
 
 impl SerialLog {
@@ -29,9 +26,6 @@ impl SerialLog {
             content: text_editor::Content::new(),
             show_timestamps: true,
             pending_text: String::new(),
-            pending_entries: 0,
-            presented_entries: 0,
-            pending_trim: 0,
         }
     }
 
@@ -42,20 +36,12 @@ impl SerialLog {
         };
         format_entry(&entry, self.show_timestamps, &mut self.pending_text);
         self.entries.push_back(entry);
-        self.pending_entries += 1;
-
-        if self.entries.len() > MAX_LINES {
-            self.trim_oldest();
-        }
     }
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
         self.content = text_editor::Content::new();
         self.pending_text.clear();
-        self.pending_entries = 0;
-        self.presented_entries = 0;
-        self.pending_trim = 0;
     }
 
     pub(super) fn set_show_timestamps(&mut self, enabled: bool) {
@@ -78,13 +64,22 @@ impl SerialLog {
     }
 
     pub(super) fn flush(&mut self) -> bool {
-        if self.pending_trim == 0 && self.pending_text.is_empty() {
+        if self.pending_text.is_empty() && self.entries.len() <= MAX_LINES {
             return false;
         }
 
         let mut cursor = self.content.cursor();
-        if self.pending_trim != 0 {
-            let removed = std::mem::take(&mut self.pending_trim);
+        if !self.pending_text.is_empty() {
+            self.content.perform(Action::Move(Motion::DocumentEnd));
+            self.content
+                .perform(Action::Edit(Edit::Paste(Arc::new(std::mem::take(
+                    &mut self.pending_text,
+                )))));
+        }
+
+        if self.entries.len() > MAX_LINES {
+            let removed = self.entries.len() - RETAIN_LINES_AFTER_TRIM;
+            self.entries.drain(..removed);
             cursor = cursor_after_trim(cursor, removed);
             self.content.move_to(Cursor {
                 position: Position {
@@ -96,43 +91,8 @@ impl SerialLog {
             self.content.perform(Action::Edit(Edit::Delete));
         }
 
-        if !self.pending_text.is_empty() {
-            self.content.perform(Action::Move(Motion::DocumentEnd));
-            self.content
-                .perform(Action::Edit(Edit::Paste(Arc::new(std::mem::take(
-                    &mut self.pending_text,
-                )))));
-            self.presented_entries += self.pending_entries;
-            self.pending_entries = 0;
-        }
-
         self.content.move_to(cursor);
         true
-    }
-
-    fn trim_oldest(&mut self) {
-        let removed = self.entries.len() - RETAIN_LINES_AFTER_TRIM;
-        for _ in 0..removed {
-            self.entries.pop_front();
-        }
-
-        let presented = removed.min(self.presented_entries);
-        self.presented_entries -= presented;
-        self.pending_trim += presented;
-
-        let pending = removed - presented;
-        if pending != 0 {
-            self.pending_entries -= pending;
-            self.refresh_pending_text();
-        }
-    }
-
-    fn refresh_pending_text(&mut self) {
-        self.pending_text.clear();
-        let first_pending = self.entries.len() - self.pending_entries;
-        for entry in self.entries.iter().skip(first_pending) {
-            format_entry(entry, self.show_timestamps, &mut self.pending_text);
-        }
     }
 
     fn refresh_content(&mut self) {
@@ -141,10 +101,7 @@ impl SerialLog {
             format_entry(entry, self.show_timestamps, &mut text);
         }
         self.content = text_editor::Content::with_text(&text);
-        self.presented_entries = self.entries.len();
         self.pending_text.clear();
-        self.pending_entries = 0;
-        self.pending_trim = 0;
     }
 
     #[cfg(test)]
@@ -230,9 +187,9 @@ mod tests {
         });
 
         log.push(format!("RX {MAX_LINES}"));
-        assert_eq!(log.entries.len(), RETAIN_LINES_AFTER_TRIM);
-        assert_eq!(log.pending_trim, MAX_LINES + 1 - RETAIN_LINES_AFTER_TRIM);
+        assert_eq!(log.entries.len(), MAX_LINES + 1);
         assert!(log.flush());
+        assert_eq!(log.entries.len(), RETAIN_LINES_AFTER_TRIM);
 
         let content = log.content().text();
         assert_eq!(log.content().line_count(), RETAIN_LINES_AFTER_TRIM + 1);
@@ -266,8 +223,6 @@ mod tests {
 
         assert!(log.entries.len() <= MAX_LINES);
         assert!(log.content().line_count() <= MAX_LINES + 1);
-        assert_eq!(log.pending_entries, 0);
-        assert_eq!(log.pending_trim, 0);
         let content = log.content().text();
         assert!(content.contains("RX 9999"));
         assert!(!content.contains("RX 0\n"));
