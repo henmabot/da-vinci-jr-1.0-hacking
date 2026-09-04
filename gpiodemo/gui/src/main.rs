@@ -1055,6 +1055,7 @@ impl App {
     }
 
     fn drain_io(&mut self) {
+        self.connection.poll_listener_updates();
         for _ in 0..MAX_IO_EVENTS_PER_TICK {
             let Some(event) = self.connection.next_event() else {
                 break;
@@ -1072,20 +1073,26 @@ impl App {
                     self.reset_pending();
                     self.error = reason;
                 }
-                ConnectionEvent::Received {
-                    line,
-                    event,
-                    coalesced,
-                } => {
+                ConnectionEvent::Received { line, event } => {
                     self.push_log(format!("RX {line}"));
-                    if coalesced != 0 {
-                        self.push_log(format!(
-                            "RX ({coalesced} intermediate listener updates coalesced)"
-                        ));
-                    }
                     match event {
                         Ok(event) => self.handle_device_event(event),
                         Err(error) => self.error = Some(error),
+                    }
+                }
+                ConnectionEvent::ListenerValues(values) => {
+                    for value in values {
+                        self.push_log(format!("RX {}", value.line()));
+                        if value.coalesced != 0 {
+                            self.push_log(format!(
+                                "RX ({} intermediate listener updates coalesced)",
+                                value.coalesced
+                            ));
+                        }
+                        self.handle_device_event(DeviceEvent::PinValue {
+                            pin: value.pin,
+                            level: value.level,
+                        });
                     }
                 }
                 ConnectionEvent::IoError(error) => self.error = Some(error),
