@@ -10,7 +10,8 @@ rust-version = "1.88"
 [workspace.dependencies]
 da-vinci-protocol = { path = "protocol" }
 
-[profile.release]
+[profile.firmware]
+inherits = "release"
 codegen-units = 1
 lto = true
 opt-level = "s"

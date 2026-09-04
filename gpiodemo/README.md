@@ -16,9 +16,10 @@ The desktop app and firmware both use `da-vinci-protocol`. Neither side has sepa
 From the repository root:
 
 ```sh
-just build   # build SAM4E8E firmware and emit build/firmware.bin
-just gui     # run the desktop controller
-just check   # formatting, tests, clippy, and firmware-target clippy
+just build       # build SAM4E8E firmware and emit build/firmware.bin
+just gui         # run the desktop controller
+just gui-release # run an optimized desktop build for performance testing
+just check       # formatting, tests, clippy, and firmware-target clippy
 ```
 
 Install the Rust `thumbv7em-none-eabi` target before building firmware. `just build` also needs `arm-none-eabi-objcopy`. `just flash` needs BOSSA.
@@ -31,7 +32,7 @@ The desktop controller also runs natively on macOS. From the repository root, ru
 cargo run --manifest-path gpiodemo/Cargo.toml -p da-vinci-gui
 ```
 
-Running the GUI does not require firmware cross-compilation tools. If you have `just`, `just gui` runs the same command.
+Running the GUI does not require firmware cross-compilation tools. If you have `just`, `just gui` runs the same command. Use `just gui-release` when measuring desktop performance. The firmware uses its own size-optimized release profile.
 
 ## Protocol
 
