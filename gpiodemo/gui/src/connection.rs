@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, Read, Write},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, SyncSender},
     thread,
     time::Duration,
 };
@@ -10,6 +10,8 @@ use da_vinci_protocol::{
     Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin, PinTarget, Query,
     QueryValue, Request, Response, ResponseError, WIRE_PIN_COUNT, decode_response, encode_request,
 };
+
+const EVENT_QUEUE_CAPACITY: usize = 1_024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Event {
@@ -59,7 +61,7 @@ pub(super) struct Connection {
 impl Connection {
     pub(super) fn spawn() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         thread::spawn(move || io_worker(command_rx, event_tx));
         Self {
             next_id: 1,
@@ -300,7 +302,7 @@ enum IoEvent {
     Error(String),
 }
 
-fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
+fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
     let mut port: Option<Box<dyn serialport::SerialPort>> = None;
     let mut reader = LineBuffer::new();
     let mut writes = VecDeque::new();
@@ -410,7 +412,7 @@ fn handle_io_command(
     reader: &mut LineBuffer,
     writes: &mut VecDeque<Vec<u8>>,
     write_offset: &mut usize,
-    events: &Sender<IoEvent>,
+    events: &SyncSender<IoEvent>,
 ) {
     match command {
         IoCommand::Connect(name) => {
@@ -498,7 +500,7 @@ mod tests {
 
     #[test]
     fn stale_write_after_disconnect_is_dropped_without_error() {
-        let (events, received) = mpsc::channel();
+        let (events, received) = mpsc::sync_channel(1);
         let mut port = None;
         let mut reader = LineBuffer::new();
         let mut writes = VecDeque::new();

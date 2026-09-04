@@ -18,6 +18,7 @@ use iced::{
 };
 use serial_log::SerialLog;
 
+const MAX_IO_EVENTS_PER_TICK: usize = 256;
 const MAX_COMMAND_HISTORY: usize = 200;
 const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
 const BULK_SCOPES: [PinTarget; 6] = [
@@ -1126,7 +1127,10 @@ impl App {
 
     fn drain_io(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        while let Some(event) = self.connection.next_event() {
+        for _ in 0..MAX_IO_EVENTS_PER_TICK {
+            let Some(event) = self.connection.next_event() else {
+                break;
+            };
             match event {
                 ConnectionEvent::Connected(port) => {
                     self.connected_port = Some(port.clone());
