@@ -30,6 +30,10 @@ const BULK_SCOPES: [PinTarget; 6] = [
 ];
 const BANK_TABS: [BankTab; 4] = [BankTab::A, BankTab::BAndE, BankTab::C, BankTab::D];
 const ROW_HEIGHT: f32 = 34.0;
+const CONTROL_TEXT_SIZE: f32 = 13.0;
+const PIN_CONTROL_TEXT_SIZE: f32 = 12.0;
+const PORT_PICKER_WIDTH: f32 = 240.0;
+const PORT_LABEL_MAX_CHARS: usize = 30;
 const PIN_NAME_WIDTH: f32 = 86.0;
 const PIN_MODE_WIDTH: f32 = 96.0;
 const PIN_STATUS_WIDTH: f32 = 52.0;
@@ -82,6 +86,25 @@ enum Mode {
     Input,
     InputPullup,
     Output,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PortChoice {
+    path: String,
+    label: String,
+}
+
+impl PortChoice {
+    fn new(path: String) -> Self {
+        let label = compact_port_label(&path);
+        Self { path, label }
+    }
+}
+
+impl fmt::Display for PortChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
+    }
 }
 
 impl Mode {
@@ -186,7 +209,7 @@ enum Message {
     Tick,
     PortsLoaded(Result<Vec<String>, String>),
     RefreshPorts,
-    PortSelected(String),
+    PortSelected(PortChoice),
     Connect,
     Disconnect,
     PreviousTab,
@@ -232,8 +255,8 @@ struct App {
     overwrite: bool,
     confirm_set: Option<(PinTarget, Level)>,
     panes: pane_grid::State<PaneKind>,
-    ports: Vec<String>,
-    selected_port: Option<String>,
+    ports: Vec<PortChoice>,
+    selected_port: Option<PortChoice>,
     connected_port: Option<String>,
     connection: Connection,
     logs: VecDeque<LogEntry>,
@@ -310,7 +333,7 @@ impl App {
             Message::PortsLoaded(result) => {
                 match result {
                     Ok(ports) => {
-                        self.ports = ports;
+                        self.ports = ports.into_iter().map(PortChoice::new).collect();
                         if self
                             .selected_port
                             .as_ref()
@@ -329,8 +352,8 @@ impl App {
                 Task::none()
             }
             Message::Connect => {
-                if let Some(port) = self.selected_port.clone() {
-                    self.error = self.connection.connect(port).err();
+                if let Some(port) = &self.selected_port {
+                    self.error = self.connection.connect(port.path.clone()).err();
                 }
                 Task::none()
             }
@@ -492,7 +515,9 @@ impl App {
             Message::PortSelected,
         )
         .placeholder("Serial port")
-        .width(Length::Fixed(180.0));
+        .text_size(CONTROL_TEXT_SIZE)
+        .padding([5, 8])
+        .width(Length::Fixed(PORT_PICKER_WIDTH));
 
         let connection_button = if self.connected_port.is_some() {
             native_button("Disconnect").on_press(Message::Disconnect)
@@ -510,9 +535,7 @@ impl App {
             iced::widget::Space::new().width(Length::Fill),
             native_button("Handshake").on_press(Message::Handshake),
             native_button("Status").on_press(Message::Status),
-            button("Reset device")
-                .style(danger_button)
-                .on_press(Message::Reboot),
+            danger_native_button("Reset device").on_press(Message::Reboot),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
@@ -522,9 +545,7 @@ impl App {
                 connection,
                 row![
                     text("Reset device and drop the connection?").size(12),
-                    button("Reset device")
-                        .style(danger_button)
-                        .on_press(Message::RebootConfirm),
+                    danger_native_button("Reset device").on_press(Message::RebootConfirm),
                     native_button("Cancel").on_press(Message::RebootCancel),
                 ]
                 .spacing(8)
@@ -551,7 +572,7 @@ impl App {
                 .align_y(iced::Alignment::Center);
         for tab in BANK_TABS {
             let tab_button = if tab == self.bank_tab {
-                button(tab.label()).style(selected_tab_button)
+                native_button(tab.label()).style(selected_tab_button)
             } else {
                 native_button(tab.label())
             };
@@ -569,12 +590,19 @@ impl App {
                 Some(self.bulk_scope),
                 Message::BulkScopeSelected
             )
+            .text_size(PIN_CONTROL_TEXT_SIZE)
+            .padding([5, 8])
             .width(Length::Fixed(84.0)),
             text("Mode").size(12),
             pick_list(MODES, Some(self.bulk_mode), Message::BulkModeSelected)
+                .text_size(PIN_CONTROL_TEXT_SIZE)
+                .padding([5, 8])
                 .width(Length::Fixed(104.0)),
             checkbox(self.overwrite)
                 .label("Overwrite")
+                .size(16)
+                .spacing(5)
+                .text_size(CONTROL_TEXT_SIZE)
                 .on_toggle(Message::OverwriteChanged),
             native_button("Apply mode").on_press(Message::ApplyBulkMode),
         ]
@@ -588,9 +616,7 @@ impl App {
             };
             row![
                 text(format!("Set every output in {target} {level_name}?")),
-                button(text(format!("Set {level_name}")))
-                    .style(danger_button)
-                    .on_press(Message::BulkSetConfirm),
+                danger_native_button(format!("Set {level_name}")).on_press(Message::BulkSetConfirm),
                 native_button("Cancel").on_press(Message::BulkSetCancel),
             ]
             .spacing(8)
@@ -615,10 +641,8 @@ impl App {
             BankTab::C => self.full_bank_table(Port::C),
             BankTab::D => self.full_bank_table(Port::D),
             BankTab::BAndE => row![
-                self.port_column(Port::B, 0, Port::B.pin_count(), true)
-                    .width(Length::FillPortion(1)),
-                self.port_column(Port::E, 0, Port::E.pin_count(), true)
-                    .width(Length::FillPortion(1)),
+                self.port_column(Port::B, 0, Port::B.pin_count(), true),
+                self.port_column(Port::E, 0, Port::E.pin_count(), true),
             ]
             .spacing(12)
             .height(Length::Fill)
@@ -637,10 +661,8 @@ impl App {
 
     fn full_bank_table(&self, port: Port) -> Element<'_, Message> {
         row![
-            self.port_column(port, 0, 16, false)
-                .width(Length::FillPortion(1)),
-            self.port_column(port, 16, 16, false)
-                .width(Length::FillPortion(1)),
+            self.port_column(port, 0, 16, false),
+            self.port_column(port, 16, 16, false),
         ]
         .spacing(12)
         .height(Length::Fill)
@@ -685,12 +707,16 @@ impl App {
 
         let state = self.pins[pin.index() as usize];
         let mode: Element<'_, Message> = if state.target_mode.is_some() {
-            container(text(
-                state
-                    .mode
-                    .map(|mode| mode.to_string())
-                    .unwrap_or_else(|| "UNSET".into()),
-            ))
+            container(
+                text(
+                    state
+                        .mode
+                        .map(|mode| mode.to_string())
+                        .unwrap_or_else(|| "UNSET".into()),
+                )
+                .size(PIN_CONTROL_TEXT_SIZE)
+                .wrapping(text::Wrapping::None),
+            )
             .padding([5, 10])
             .width(Length::Fixed(PIN_MODE_WIDTH))
             .style(input_style)
@@ -700,7 +726,8 @@ impl App {
                 Message::ModeSelected(pin, mode)
             })
             .placeholder("UNSET")
-            .text_size(12)
+            .text_size(PIN_CONTROL_TEXT_SIZE)
+            .padding([5, 8])
             .width(Length::Fixed(PIN_MODE_WIDTH))
             .into()
         };
@@ -765,9 +792,15 @@ impl App {
                 native_button("Clear log").on_press(Message::ClearLog),
                 checkbox(self.show_timestamps)
                     .label("Timestamps")
+                    .size(16)
+                    .spacing(5)
+                    .text_size(CONTROL_TEXT_SIZE)
                     .on_toggle(Message::ShowTimestamps),
                 checkbox(self.autoscroll)
                     .label("Auto-scroll")
+                    .size(16)
+                    .spacing(5)
+                    .text_size(CONTROL_TEXT_SIZE)
                     .on_toggle(Message::Autoscroll),
             ]
             .spacing(8)
@@ -1053,7 +1086,7 @@ impl App {
             match event {
                 ConnectionEvent::Connected(port) => {
                     self.connected_port = Some(port.clone());
-                    self.device_status = format!("Connected: {port}");
+                    self.device_status = format!("Connected: {}", compact_port_label(&port));
                     self.error = None;
                     self.reset_pins();
                 }
@@ -1293,8 +1326,8 @@ fn pin_header<'a>() -> Element<'a, Message> {
         fixed_cell(text("PIN").size(11), PIN_NAME_WIDTH),
         fixed_cell(text("MODE").size(11), PIN_MODE_WIDTH),
         fixed_cell(text("LEVEL").size(11), PIN_STATUS_WIDTH),
-        fixed_cell(text("READ / WRITE").size(11), PIN_RW_WIDTH),
-        fixed_cell(text("LISTEN / STOP").size(11), PIN_LISTEN_WIDTH),
+        fixed_cell(text("READ/WRITE").size(10), PIN_RW_WIDTH),
+        fixed_cell(text("LISTEN/STOP").size(10), PIN_LISTEN_WIDTH),
     ]
     .spacing(CELL_GAP)
     .into()
@@ -1379,8 +1412,35 @@ fn input_style(_: &Theme) -> container::Style {
     }
 }
 
-fn native_button<'a>(label: &'a str) -> iced::widget::Button<'a, Message> {
-    button(label).style(neutral_button)
+fn compact_port_label(path: &str) -> String {
+    let char_count = path.chars().count();
+    if char_count <= PORT_LABEL_MAX_CHARS {
+        return path.to_owned();
+    }
+
+    let prefix = (PORT_LABEL_MAX_CHARS - 1) / 2;
+    let suffix = PORT_LABEL_MAX_CHARS - prefix - 1;
+    let mut label = String::with_capacity(PORT_LABEL_MAX_CHARS);
+    label.extend(path.chars().take(prefix));
+    label.push('…');
+    label.extend(path.chars().skip(char_count - suffix));
+    label
+}
+
+fn native_button<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Button<'a, Message> {
+    button(
+        text(label)
+            .size(CONTROL_TEXT_SIZE)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding([5, 10])
+    .style(neutral_button)
+}
+
+fn danger_native_button<'a>(
+    label: impl text::IntoFragment<'a>,
+) -> iced::widget::Button<'a, Message> {
+    native_button(label).style(danger_button)
 }
 
 fn neutral_button(_: &Theme, status: button::Status) -> button::Style {
