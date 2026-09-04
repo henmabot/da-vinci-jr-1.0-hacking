@@ -57,7 +57,7 @@ class PinsFrame(ctk.CTkFrame):
         master,
         pin_map,
         queue,
-        default_mode="INPUT",
+        default_mode="UNSET",
         **kwargs,
     ):
         super().__init__(master, corner_radius=0, **kwargs)
@@ -346,7 +346,13 @@ class PinsFrame(ctk.CTkFrame):
         if pin not in self._visible_pins:
             return
         row = self._rows[pin]
-        if mode in INPUT_MODES:
+        if mode == "UNSET":
+            for which in ("primary", "secondary"):
+                if row[f"{which}_rect"] is not None:
+                    self.canvas.itemconfigure(row[f"{which}_rect"], state="hidden")
+                if row[f"{which}_text"] is not None:
+                    self.canvas.itemconfigure(row[f"{which}_text"], state="hidden")
+        elif mode in INPUT_MODES:
             self._set_action_button(
                 row,
                 "primary",
@@ -497,7 +503,7 @@ class PinsFrame(ctk.CTkFrame):
         if row["mode_var"].get() in INPUT_MODES:
             if not row["read_pending"]:
                 self._handle_read(pin)
-        elif not row["toggle_pending"]:
+        elif row["mode_var"].get() == "OUTPUT" and not row["toggle_pending"]:
             self._handle_toggle(pin)
 
     def _handle_secondary_action(self, pin):
@@ -524,12 +530,27 @@ class PinsFrame(ctk.CTkFrame):
     def get_status(self):
         self._send("get_status")
 
+    def reset_pin_states(self):
+        for row in self._rows.values():
+            row["mode_var"].set("UNSET")
+            row["status"] = "--"
+            row["listening"] = False
+            row["mode_pending"] = False
+            row["read_pending"] = False
+            row["listen_pending"] = False
+            row["toggle_pending"] = False
+        self._show_page(self._page_index)
+
     def reboot(self):
         if messagebox.askyesno(
             "Reboot device",
             "Send BYE and reset the device? This will drop the connection.",
         ):
-            self._send("goodbye")
+            def on_result(result):
+                if result["type"] == "goodbye_ack":
+                    self.after(0, self.reset_pin_states)
+
+            self._send("goodbye", callback=on_result)
 
     def _handle_mode_change(self, pin, mode):
         row = self._rows[pin]

@@ -233,7 +233,10 @@ class PacketParser:
             return  # unrecognized slave command, drop silently
 
         self._dispatch(result, record)
-        self._cleanup(packet_id, record)
+        if command == "CYA":
+            self.packet_ids.clear()
+        else:
+            self._cleanup(packet_id, record)
 
     def _parse_hyg(self, packet_id: int, pckt: list[str], record: dict | None) -> dict:
         pin = pckt[2]
