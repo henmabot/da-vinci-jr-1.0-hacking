@@ -233,6 +233,8 @@ class PacketParser:
             return  # unrecognized slave command, drop silently
 
         self._dispatch(result, record)
+        if command == "OKA":
+            self._forget_previous_listener(packet_id, record)
         if command == "CYA":
             self.packet_ids.clear()
         else:
@@ -261,6 +263,18 @@ class PacketParser:
             record["callback"](result)
         # else: nothing registered for this id (e.g. a late/unsolicited
         # packet after cleanup) -- silently dropped
+
+    def _forget_previous_listener(self, packet_id: int, record: dict | None):
+        if record is None or record["command"] != _LISTEN_CODE:
+            return
+        for old_id, old_record in tuple(self.packet_ids.items()):
+            if (
+                old_id != packet_id
+                and old_record["command"] == _LISTEN_CODE
+                and old_record.get("persistent")
+                and old_record.get("pin") == record.get("pin")
+            ):
+                self.packet_ids.pop(old_id, None)
 
     def _cleanup(self, packet_id: int, record: dict | None):
         if record is None:
