@@ -33,10 +33,11 @@ const ROW_HEIGHT: f32 = 34.0;
 const CONTROL_TEXT_SIZE: f32 = 13.0;
 const PIN_CONTROL_TEXT_SIZE: f32 = 12.0;
 const PIN_NAME_SHARE: u16 = 5;
-const PIN_MODE_SHARE: u16 = 6;
+const PIN_MODE_SHARE: u16 = 7;
 const PIN_STATUS_SHARE: u16 = 3;
-const PIN_RW_SHARE: u16 = 6;
+const PIN_RW_SHARE: u16 = 7;
 const PIN_LISTEN_SHARE: u16 = 5;
+const CONNECTION_ACTIONS_INLINE_MIN: f32 = 1_050.0;
 const PIN_TABLE_TWO_COLUMN_MIN: f32 = 700.0;
 const CELL_GAP: f32 = 4.0;
 
@@ -560,7 +561,7 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
 
-        let connection: Element<'_, Message> = if available_width >= 1_050.0 {
+        let connection: Element<'_, Message> = if available_width >= CONNECTION_ACTIONS_INLINE_MIN {
             row![connection, actions]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)
