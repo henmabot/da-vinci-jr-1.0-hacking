@@ -25,6 +25,7 @@ class _Row(TypedDict):
 
 MODES = ["INPUT", "IN_PULLUP", "OUTPUT"]
 INPUT_MODES = {"INPUT", "IN_PULLUP"}
+_UNAVAILABLE_PINS = {"PB8", "PB9", "PB10", "PB11"}
 
 _DEFAULT_BUTTON_COLOR = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
 _BUTTON_TEXT_COLOR = ctk.ThemeManager.theme["CTkButton"]["text_color"]
@@ -160,6 +161,9 @@ class PinsFrame(ctk.CTkFrame):
             style="Reboot.TButton",
             command=self.reboot,
         ).pack(side="left", padx=(0, 20))
+        ttk.Button(actions, text="Input All", command=self.input_all).pack(
+            side="left", padx=(0, 4)
+        )
         ttk.Button(actions, text="Read All", command=self.read_all_inputs).pack(
             side="left", padx=(0, 4)
         )
@@ -477,6 +481,17 @@ class PinsFrame(ctk.CTkFrame):
     def is_listening(self, pin):
         row = self._rows.get(pin)
         return bool(row and row["listening"])
+
+    def input_all(self):
+        """Set every configurable pin to plain input mode."""
+        for pin in self._pin_names:
+            row = self._rows[pin]
+            if (
+                pin not in _UNAVAILABLE_PINS
+                and row["mode_var"].get() != "INPUT"
+                and not row["mode_pending"]
+            ):
+                self._handle_mode_change(pin, "INPUT")
 
     def read_all_inputs(self):
         """Fire a one-shot read for every pin currently in an input mode."""
