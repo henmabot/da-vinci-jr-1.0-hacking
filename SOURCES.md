@@ -37,7 +37,6 @@ I want to thank everyone who has contributed to this project knowingly or unknow
 
 - **[Klipper](https://github.com/klipper3d/klipper)**: primary source/reference for the SAM4E8E clock, Cortex-M startup/linker, GPIO register sequencing, and USB CDC/UDP implementation used by the SAM4E8E firmware foundation. Klipper-derived files retain their GPLv3 notices.
 - **[Atmel Software Framework](https://github.com/avrxml/asf)**: cross-reference for SAM4E8E device definitions, memory layout, and clock/USB behavior. Imported Atmel device files retain their original license headers.
-- **[ConfigurableFirmata](https://github.com/firmata/ConfigurableFirmata)** and **[Firmata protocol](https://github.com/firmata/protocol)**: sources for the digital GPIO and byte-stream facilities required by the later Firmata port.
 
 ## Firmware Archives
 

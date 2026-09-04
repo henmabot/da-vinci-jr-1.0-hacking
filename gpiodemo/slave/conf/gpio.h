@@ -3,12 +3,9 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "pio/sam4e8e.h"
 
-typedef uint8_t gpio_pin_t;
-
-#define GPIO_PIN(port, number) ((gpio_pin_t)((((port) - 'A') * 32) + (number)))
-#define GPIO_PD8 GPIO_PIN('D', 8)
-#define GPIO_PD23 GPIO_PIN('D', 23)
+typedef uint16_t gpio_pin_t;
 
 typedef enum {
     GPIO_PULL_NONE = 0,

@@ -21,3 +21,10 @@ ghidra/
 # KiCAD stuff
 schematic/*.lck
 schematic/.history/
+
+# Python cache
+__pycache__/
+
+# MacOS stuff
+.DS_Store
+gpiodemo/master/webui/

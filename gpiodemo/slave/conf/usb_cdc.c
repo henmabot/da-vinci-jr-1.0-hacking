@@ -134,7 +134,7 @@ static uint32_t usb_read_packet(uint32_t endpoint, uint32_t csr, uint8_t *data, 
     const uint32_t length = packet_length < max_length ? packet_length : max_length;
 
     for (uint32_t i = 0; i < length; ++i)
-        data[i] = UDP->UDP_FDR[endpoint];
+        data[i] = (uint8_t)UDP->UDP_FDR[endpoint];
     return length;
 }
 
@@ -254,7 +254,7 @@ static void usb_rx_kick(void)
             return;
 
         for (uint32_t i = 0; i < length; ++i) {
-            rx_buffer[rx_head] = UDP->UDP_FDR[USB_EP_BULK_OUT];
+            rx_buffer[rx_head] = (uint8_t)UDP->UDP_FDR[USB_EP_BULK_OUT];
             rx_head = (rx_head + 1u) & USB_BUFFER_MASK;
         }
 
@@ -262,6 +262,10 @@ static void usb_rx_kick(void)
             bank = rx_next_bank;
         rx_next_bank = bank ^ (UDP_CSR_RX_DATA_BK0 | UDP_CSR_RX_DATA_BK1);
         UDP->UDP_CSR[USB_EP_BULK_OUT] = CSR_BULK_OUT | rx_next_bank;
+        // RX_DATA_BKx crosses MCK/UDPCK; let the CSR write settle before
+        // accessing the endpoint FIFO again.
+        for (uint32_t i = 0u; i < 20u; ++i)
+            __NOP();
     }
 }
 
@@ -515,10 +519,9 @@ size_t usb_cdc_write(const void *data, size_t length)
     const uint32_t irq_state = irq_save();
 
     usb_tx_kick();
-    if (length > ((tx_tail - tx_head - 1u) & USB_BUFFER_MASK)) {
-        irq_restore(irq_state);
-        return 0u;
-    }
+    const size_t available = (tx_tail - tx_head - 1u) & USB_BUFFER_MASK;
+    if (length > available)
+        length = available;
     for (size_t i = 0; i < length; ++i) {
         tx_buffer[tx_head] = bytes[i];
         tx_head = (tx_head + 1u) & USB_BUFFER_MASK;

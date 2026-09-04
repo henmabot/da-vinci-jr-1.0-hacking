@@ -10,10 +10,6 @@
 
 static Pio *const gpio_ports[] = {PIOA, PIOB, PIOC, PIOD, PIOE};
 static const uint8_t gpio_clock_ids[] = {ID_PIOA, ID_PIOB, ID_PIOC, ID_PIOD, ID_PIOE};
-
-_Static_assert(GPIO_PD8 == PIO_PD8_IDX, "PD8 pin index must match SAM4E8E definitions");
-_Static_assert(GPIO_PD23 == PIO_PD23_IDX, "PD23 pin index must match SAM4E8E definitions");
-
 static Pio *gpio_port(gpio_pin_t pin)
 {
     return gpio_ports[pin / 32u];
