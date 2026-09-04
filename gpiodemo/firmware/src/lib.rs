@@ -242,16 +242,13 @@ impl Firmware {
         direction: Direction,
         gpio: &mut G,
     ) -> Response {
-        match target {
-            PinTarget::Pin(pin) => {
-                if let Err(error) = supported(pin) {
-                    return error;
-                }
-                self.set_direction_pin(pin, direction, gpio);
-            }
-            PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
-                self.set_direction_pin(pin, direction, gpio);
-            }),
+        if let PinTarget::Pin(pin) = target
+            && let Err(error) = supported(pin)
+        {
+            return error;
+        }
+        for pin in target.available_pins() {
+            self.set_direction_pin(pin, direction, gpio);
         }
         Response::Ack
     }
@@ -278,37 +275,27 @@ impl Firmware {
     }
 
     fn set_level<G: Gpio>(&mut self, target: PinTarget, level: Level, gpio: &mut G) -> Response {
-        match target {
-            PinTarget::Pin(pin) => {
-                if let Err(error) = self.initialized(pin) {
-                    return error;
-                }
-                self.set_level_pin(pin, level, gpio);
-            }
-            PinTarget::Bank(_) | PinTarget::All => {
-                for_each_group_pin(target, |pin| self.set_level_pin(pin, level, gpio))
+        if let PinTarget::Pin(pin) = target
+            && let Err(error) = self.initialized(pin)
+        {
+            return error;
+        }
+        for pin in target.available_pins() {
+            if matches!(self.pins[pin], PinState::Output) {
+                gpio.write(pin, level);
             }
         }
         Response::Ack
     }
 
-    fn set_level_pin<G: Gpio>(&self, pin: Pin, level: Level, gpio: &mut G) {
-        if matches!(self.pins[pin], PinState::Output) {
-            gpio.write(pin, level);
-        }
-    }
-
     fn set_pullup<G: Gpio>(&mut self, target: PinTarget, enabled: bool, gpio: &mut G) -> Response {
-        match target {
-            PinTarget::Pin(pin) => {
-                if let Err(error) = self.initialized(pin) {
-                    return error;
-                }
-                self.set_pullup_pin(pin, enabled, gpio);
-            }
-            PinTarget::Bank(_) | PinTarget::All => {
-                for_each_group_pin(target, |pin| self.set_pullup_pin(pin, enabled, gpio))
-            }
+        if let PinTarget::Pin(pin) = target
+            && let Err(error) = self.initialized(pin)
+        {
+            return error;
+        }
+        for pin in target.available_pins() {
+            self.set_pullup_pin(pin, enabled, gpio);
         }
         Response::Ack
     }
@@ -332,16 +319,13 @@ impl Firmware {
         id: u16,
         gpio: &G,
     ) -> Response {
-        match target {
-            PinTarget::Pin(pin) => {
-                if let Err(error) = self.initialized(pin) {
-                    return error;
-                }
-                self.set_listener_pin(pin, enabled, id, gpio);
-            }
-            PinTarget::Bank(_) | PinTarget::All => {
-                for_each_group_pin(target, |pin| self.set_listener_pin(pin, enabled, id, gpio))
-            }
+        if let PinTarget::Pin(pin) = target
+            && let Err(error) = self.initialized(pin)
+        {
+            return error;
+        }
+        for pin in target.available_pins() {
+            self.set_listener_pin(pin, enabled, id, gpio);
         }
         Response::Ack
     }
@@ -400,12 +384,6 @@ const fn port_slot(port: Port) -> usize {
         Port::C => 2,
         Port::D => 3,
         Port::E => 4,
-    }
-}
-
-fn for_each_group_pin(target: PinTarget, mut f: impl FnMut(Pin)) {
-    for pin in target.available_pins() {
-        f(pin);
     }
 }
 
