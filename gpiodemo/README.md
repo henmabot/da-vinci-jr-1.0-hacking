@@ -1,3 +1,5 @@
-# GPIO Controller
+# GPIO controller
 
-I have tried firmata, but it couldnt fulfill my expectations or needs, so here is a firmata inspired interrupt-based GPIO controller firmware.
+`master/` contains the Python GPIO controller UI and serial client. `slave/` contains the SAM4E8E USB CDC firmware that serves the same request-ID protocol on the printer board.
+
+See [`slave/README.md`](slave/README.md) for the wire protocol, pin numbering, and firmware build instructions.

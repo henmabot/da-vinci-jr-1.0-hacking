@@ -1,6 +1,6 @@
-# Firmata for SAM4E8E
+# GPIO protocol firmware for SAM4E8E
 
-This directory contains the SAM4E8E Firmata firmware for the Da Vinci Jr. main board. The port maps ConfigurableFirmata's digital I/O behavior to the repository's bare-metal GPIO and USB CDC interfaces. It does not bring in Arduino or a second hardware abstraction layer.
+This directory contains the SAM4E8E firmware used by the GPIO controller in `gpiodemo/master`. It keeps the existing bare-metal GPIO and USB CDC platform and implements the controller's small line-based request/response protocol directly.
 
 ## Build
 
@@ -10,54 +10,54 @@ Install `just` and an ARM embedded GCC toolchain that provides `arm-none-eabi-gc
 just build
 ```
 
-The build produces `build/firmware.elf`, `build/firmware.bin`, and `build/firmware.map`. `just flash` builds and flashes `build/firmware.bin` with `bossac`.
+The build produces `build/firmware.elf`, `build/firmware.bin`, and `build/firmware.map`. `just flash` flashes `build/firmware.bin` with `bossac`.
 
-## Supported Firmata features
+## Protocol
 
-The firmware reports Firmata protocol 2.8 and ConfigurableFirmata firmware version 3.4. It supports:
+Packets are newline-terminated ASCII. The host allocates a three-digit packet ID and the firmware uses the same ID for every response. A listener keeps the ID from its successful `LSN ... ON` request for later change notifications.
 
-- digital input, output, and input pull-up pin modes.
-- digital port writes and single-pin writes.
-- digital input reporting, including an immediate report when the host enables reporting.
-- protocol and firmware version queries.
-- capability, pin-state, and analog-mapping queries.
-- system reset.
+| Host request | Device response | Meaning |
+| --- | --- | --- |
+| `001 HAI` | `001 HII <3` | Connection check |
+| `002 HRU` | `002 IAM SAM4E8E GPIO <3` | Device status |
+| `003 DIR 000 IN OK?` | `003 OKA <3` | Set input direction |
+| `004 DIR 000 OUT OK?` | `004 OKA <3` | Set output direction |
+| `005 PLL 000 ON OK?` | `005 OKA <3` | Enable input pull-up |
+| `006 SET 000 HIGH OK?` | `006 OKA <3` | Drive a pin high |
+| `007 GET 000 OK?` | `007 HYG 000 HIGH <3` | Read a pin |
+| `008 LSN 000 ON OK?` | `008 OKA <3` | Start change reporting |
+| `009 LSN 000 OFF OK?` | `009 OKA <3` | Stop change reporting |
+| `010 WYD 000 DIR` | `010 HYG 000 DIR IN <3` | Query direction |
+| `011 WYD 000 PLL` | `011 HYG 000 PLL ON <3` | Query pull-up state |
+| `012 WYD 000 LSN` | `012 HYG 000 LSN ON <3` | Query listener state |
+| `013 BYE` | `013 CYA <3` | Clear pin/listener state |
 
-The analog-mapping response marks every pin as non-analog. Analog I/O, pulse-width modulation, servos, I2C, serial peripheral interface, OneWire, hardware UART/USART, and the other optional ConfigurableFirmata modules are not included yet. USB CDC is the only Firmata transport.
+A listener notification uses the ID from the request that enabled it, for example `008 HYG 000 LOW <3`. Invalid requests return `UMM`. Unknown commands return `IDK`.
+
+Pins start in `UNSET`. `DIR` initializes a pin and resets its pull-up state. `GET`, `SET`, `PLL`, and `LSN` reject uninitialized pins. `BYE` releases every pin initialized through this protocol back to input/no-pull, marks it `UNSET`, and clears every listener.
 
 ## Pin numbering
 
-The GPIO layer uses the SAM4E device header as the pin source of truth. It uses definitions such as `PIO_PA0_IDX` and `PIO_PB0_IDX` instead of redefining pin numbers. `gpio_pin_t` is wide enough for all SAM4E8E PIO indices, including PE0-PE5.
+Wire IDs pack the physical PIO pins rather than using the SAM4E register indices directly:
 
-Firmata itself uses a flat 7-bit pin number on the wire. For the pins Firmata can represent, those numbers map directly to the SAM4E PIO indices:
+- PA0-PA31: `000`-`031`
+- PB0-PB14: `032`-`046`
+- PC0-PC31: `047`-`078`
+- PD0-PD31: `079`-`110`
+- PE0-PE5: `111`-`116`
 
-- PA0-PA31: 0-31
-- PB0-PB14: 32-46
-- PC0-PC31: 64-95
-- PD0-PD31: 96-127
-
-The SAM4E8E package has no PB15-PB31 pins, so Firmata marks those indices as unsupported. The 12 MHz crystal uses PB8/PB9. USB uses PB10/PB11, so Firmata also marks those pins as unsupported. The GPIO layer can address PE0-PE5, but standard Firmata pin numbers stop at 127, so this Firmata transport cannot expose them.
-
-A system reset puts every exposed Firmata pin into high-impedance digital input mode. This is safer for the printer board than driving all digital pins during reset. The host can then select output or pull-up modes explicitly.
+The 12 MHz crystal uses PB8/PB9 (`040`/`041`). USB CDC uses PB10/PB11 (`042`/`043`). The firmware returns `UNAVAILABLE` rather than reconfiguring those pins.
 
 ## Layout
 
-- `src/`: Firmata protocol engine and the minimal firmware entry point.
+- `src/`: GPIO protocol engine and the minimal firmware entry point.
 - `conf/`: SAM4E8E clock, startup, linker, GPIO, and USB CDC implementation.
 - `vendor/`: the trimmed SAM4E8E and CMSIS headers needed by the build.
 
-`Justfile` remains the single build entry point and lists the firmware sources explicitly.
+`Justfile` is the build entry point and lists the firmware sources explicitly.
 
 ## Sources
 
-The protocol behavior follows ConfigurableFirmata commit `3734757348263e890d276f7e4fbc1f7e2bf5f2b9`, especially its digital input/output modules and parser behavior, and Firmata protocol commit `7908873e8faae33111143aa6cc236148b12118f2`.
-
-The earlier firmware foundation provides the SAM4E8E platform layer. Klipper commit `f0892d82b0f1c1228454f09eb508eddde2250f4b` remains the primary source for the clock, Cortex-M startup/linker path, GPIO register sequencing, and USB CDC/UDP implementation. ASF commit `68cddb46ae5ebc24ef8287a8d4c61a6efa5e2848` is the cross-reference for SAM4E8E device definitions and memory layout.
+Klipper commit `f0892d82b0f1c1228454f09eb508eddde2250f4b` supplies the clock, Cortex-M startup/linker, GPIO register sequencing, and USB CDC/UDP foundation. ASF commit `68cddb46ae5ebc24ef8287a8d4c61a6efa5e2848` is the cross-reference for SAM4E8E device definitions and memory layout.
 
 Klipper-derived files retain their GPLv3 notices. Imported Atmel and Arm CMSIS files retain their original license headers.
-
-## Verification
-
-`just build` cross-compiles and links the Firmata engine into the SAM4E8E firmware.
-
-The project maintainer previously tested the merged GPIO and USB CDC foundation on the physical board. The new protocol layer still needs an end-to-end client test on the board.
