@@ -1,3 +1,3 @@
-from .window import HEIGHT, WIDTH, create_window
+from .app import main
 
-__all__ = ["HEIGHT", "WIDTH", "create_window"]
+__all__ = ["main"]

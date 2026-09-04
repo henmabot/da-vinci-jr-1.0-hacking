@@ -5,7 +5,8 @@
 import threading
 from queue import Queue
 
-from .connection import connect, get_packet, prompt_port
+from .connection import get_packet, prompt_port
+from .parser import PacketParser
 from .window import create_window
 
 
@@ -27,12 +28,11 @@ def serial_main(conn, queue):
 
 
 def parser_main(window, app_frame, logs_frame, conn, queue):
-    pass
+    parser = PacketParser(conn, queue)
 
 
 def main():
-    port = prompt_port()
-    conn = connect(port)
+    conn = prompt_port()
 
     queue = Queue()
 
@@ -62,3 +62,7 @@ def main():
     serial_thread.start()
 
     ui_main(window, queue)
+
+
+if __name__ == "__main__":
+    main()

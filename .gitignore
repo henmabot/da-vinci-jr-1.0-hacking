@@ -27,3 +27,4 @@ __pycache__/
 
 # MacOS stuff
 .DS_Store
+gpiodemo/master/webui/

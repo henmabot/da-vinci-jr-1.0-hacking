@@ -1,4 +1,4 @@
-from .window import create_window
+from .app import main
 
-window, app_frame, logs_frame = create_window()
-window.mainloop()
+if __name__ == "__main__":
+    main()
