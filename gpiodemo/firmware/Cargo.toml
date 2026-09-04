@@ -1,0 +1,15 @@
+[package]
+name = "da-vinci-firmware"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+da-vinci-protocol.workspace = true
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+atsam4-hal = { version = "0.3.1", default-features = false, features = ["atsam4e8e", "usb"] }
+cortex-m-rt = "0.7.6"
+panic-halt = "1.0.0"
+usbd-serial = "0.1.1"
