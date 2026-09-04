@@ -1,8 +1,8 @@
 mod connection;
+mod serial_log;
 
 use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
-use chrono::Local;
 use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
 use da_vinci_protocol::{
     Direction, Level, Pin, PinTarget, Port, Request, ResponseError, WIRE_PIN_COUNT,
@@ -16,8 +16,8 @@ use iced::{
         text, text_editor, text_input,
     },
 };
+use serial_log::SerialLog;
 
-const MAX_LOG_LINES: usize = 2_000;
 const MAX_COMMAND_HISTORY: usize = 200;
 const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
 const BULK_SCOPES: [PinTarget; 6] = [
@@ -202,12 +202,6 @@ impl PinState {
     };
 }
 
-#[derive(Clone)]
-struct LogEntry {
-    timestamp: String,
-    text: String,
-}
-
 #[derive(Clone, Debug)]
 enum Message {
     Tick,
@@ -263,9 +257,7 @@ struct App {
     selected_port: Option<PortChoice>,
     connected_port: Option<String>,
     connection: Connection,
-    logs: VecDeque<LogEntry>,
-    log_content: text_editor::Content,
-    show_timestamps: bool,
+    log: SerialLog,
     autoscroll: bool,
     log_scroll: iced::widget::Id,
     raw_input_id: iced::widget::Id,
@@ -297,9 +289,7 @@ impl App {
                 selected_port: None,
                 connected_port: None,
                 connection: Connection::spawn(),
-                logs: VecDeque::new(),
-                log_content: text_editor::Content::new(),
-                show_timestamps: true,
+                log: SerialLog::new(),
                 autoscroll: true,
                 log_scroll: iced::widget::Id::unique(),
                 raw_input_id: iced::widget::Id::unique(),
@@ -332,6 +322,15 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle_message(message);
+        if self.log.flush() {
+            Task::batch([task, self.snap_log()])
+        } else {
+            task
+        }
+    }
+
+    fn handle_message(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => self.drain_io(),
             Message::PortsLoaded(result) => {
@@ -436,13 +435,11 @@ impl App {
                 Task::none()
             }
             Message::ClearLog => {
-                self.logs.clear();
-                self.refresh_log_content();
+                self.log.clear();
                 Task::none()
             }
             Message::ShowTimestamps(enabled) => {
-                self.show_timestamps = enabled;
-                self.refresh_log_content();
+                self.log.set_show_timestamps(enabled);
                 Task::none()
             }
             Message::Autoscroll(enabled) => {
@@ -455,7 +452,7 @@ impl App {
             }
             Message::LogAction(action) => {
                 if !action.is_edit() {
-                    self.log_content.perform(action);
+                    self.log.perform(action);
                 }
                 Task::none()
             }
@@ -823,7 +820,7 @@ impl App {
 
     fn log_panel(&self) -> Element<'_, Message> {
         let log = scrollable(
-            text_editor(&self.log_content)
+            text_editor(self.log.content())
                 .font(iced::Font::MONOSPACE)
                 .size(12)
                 .padding(8)
@@ -836,7 +833,7 @@ impl App {
             text("Serial Log").size(18),
             row![
                 native_button("Clear log").on_press(Message::ClearLog),
-                checkbox(self.show_timestamps)
+                checkbox(self.log.show_timestamps())
                     .label("Timestamps")
                     .size(16)
                     .spacing(5)
@@ -1080,7 +1077,10 @@ impl App {
             return Task::none();
         }
         match self.connection.send(request) {
-            Ok(line) => self.push_log(format!("TX {line}")),
+            Ok(line) => {
+                self.push_log(format!("TX {line}"));
+                Task::none()
+            }
             Err(error) => {
                 self.fail_request(request);
                 self.error = Some(error);
@@ -1104,7 +1104,10 @@ impl App {
         }
         self.history_index = None;
         match self.connection.send_raw(&line) {
-            Ok(()) => self.push_log(format!("TX {line}")),
+            Ok(()) => {
+                self.push_log(format!("TX {line}"));
+                Task::none()
+            }
             Err(error) => {
                 self.error = Some(error);
                 Task::none()
@@ -1138,7 +1141,7 @@ impl App {
                     self.error = reason;
                 }
                 ConnectionEvent::Received { line, event } => {
-                    tasks.push(self.push_log(format!("RX {line}")));
+                    self.push_log(format!("RX {line}"));
                     match event {
                         Ok(event) => self.handle_device_event(event, &mut tasks),
                         Err(error) => self.error = Some(error),
@@ -1291,30 +1294,8 @@ impl App {
         }
     }
 
-    fn push_log(&mut self, text: String) -> Task<Message> {
-        self.logs.push_back(LogEntry {
-            timestamp: Local::now().format("%H:%M:%S%.3f").to_string(),
-            text,
-        });
-        if self.logs.len() > MAX_LOG_LINES {
-            self.logs.pop_front();
-        }
-        self.refresh_log_content();
-        self.snap_log()
-    }
-
-    fn refresh_log_content(&mut self) {
-        let mut content = String::new();
-        for entry in &self.logs {
-            if self.show_timestamps {
-                content.push('[');
-                content.push_str(&entry.timestamp);
-                content.push_str("] ");
-            }
-            content.push_str(&entry.text);
-            content.push('\n');
-        }
-        self.log_content = text_editor::Content::with_text(&content);
+    fn push_log(&mut self, text: String) {
+        self.log.push(text);
     }
 
     fn snap_log(&self) -> Task<Message> {
@@ -1542,7 +1523,7 @@ mod tests {
     }
 
     fn last_log(app: &App) -> &str {
-        &app.logs.back().unwrap().text
+        app.log.last_text().unwrap()
     }
 
     #[test]
@@ -1586,7 +1567,7 @@ mod tests {
         let mut app = connected_app();
 
         let _ = app.update(Message::BulkSet(Level::High));
-        assert!(app.logs.is_empty());
+        assert!(app.log.is_empty());
         assert_eq!(app.confirm_set, Some((PinTarget::All, Level::High)));
 
         let _ = app.update(Message::BulkSetConfirm);
@@ -1615,16 +1596,8 @@ mod tests {
 
         let _ = app.apply_bulk_mode();
 
-        assert!(!app.logs.iter().any(|entry| entry.text.contains("DIR PA00")));
-        assert!(
-            app.logs
-                .iter()
-                .all(|entry| !entry.text.contains("DIR PIOA"))
-        );
-        assert!(
-            app.logs
-                .iter()
-                .any(|entry| entry.text.contains("DIR PA01 OUT"))
-        );
+        assert!(!app.log.iter().any(|entry| entry.contains("DIR PA00")));
+        assert!(app.log.iter().all(|entry| !entry.contains("DIR PIOA")));
+        assert!(app.log.iter().any(|entry| entry.contains("DIR PA01 OUT")));
     }
 }
