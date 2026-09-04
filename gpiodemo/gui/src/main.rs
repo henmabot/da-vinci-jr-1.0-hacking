@@ -38,7 +38,7 @@ const PIN_STATUS_SHARE: u16 = 3;
 const PIN_RW_SHARE: u16 = 7;
 const PIN_LISTEN_SHARE: u16 = 5;
 const CONNECTION_ACTIONS_INLINE_MIN: f32 = 1_050.0;
-const PIN_TABLE_TWO_COLUMN_MIN: f32 = 700.0;
+const PIN_TABLE_TWO_COLUMN_MIN: f32 = 800.0;
 const CELL_GAP: f32 = 4.0;
 
 const WINDOW_BG: Color = Color::from_rgb8(0x24, 0x24, 0x24);
