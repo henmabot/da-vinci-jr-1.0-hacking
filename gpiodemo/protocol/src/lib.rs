@@ -1,5 +1,7 @@
 #![no_std]
 
+use core::fmt;
+
 pub const WIRE_PIN_COUNT: u8 = 117;
 pub const MAX_PACKET_LEN: usize = 64;
 pub const MAX_PACKET_ID: u16 = 999;
@@ -72,9 +74,137 @@ pub enum Direction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Port {
+    A,
+    B,
+    C,
+    D,
+    E,
+}
+
+impl Port {
+    const fn first_index(self) -> u8 {
+        match self {
+            Self::A => 0,
+            Self::B => 32,
+            Self::C => 47,
+            Self::D => 79,
+            Self::E => 111,
+        }
+    }
+
+    pub const fn pin_count(self) -> u8 {
+        match self {
+            Self::A | Self::C | Self::D => 32,
+            Self::B => 15,
+            Self::E => 6,
+        }
+    }
+
+    pub const fn letter(self) -> char {
+        match self {
+            Self::A => 'A',
+            Self::B => 'B',
+            Self::C => 'C',
+            Self::D => 'D',
+            Self::E => 'E',
+        }
+    }
+}
+
+impl fmt::Display for Port {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PIO{}", self.letter())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pin(u8);
+
+const PACKAGE_PINS: [u8; WIRE_PIN_COUNT as usize] = [
+    102, 99, 93, 91, 77, 73, 114, 35, 36, 75, 66, 64, 68, 42, 51, 49, 45, 25, 24, 23, 22, 32, 37,
+    46, 56, 59, 62, 70, 112, 129, 116, 118, 21, 20, 26, 31, 105, 109, 79, 89, 141, 142, 136, 137,
+    87, 144, 140, 11, 38, 39, 40, 41, 58, 54, 48, 82, 86, 90, 94, 17, 19, 97, 18, 100, 103, 111,
+    117, 120, 122, 124, 127, 130, 133, 13, 12, 76, 16, 15, 14, 1, 132, 131, 128, 126, 125, 121,
+    119, 113, 110, 101, 98, 92, 88, 84, 106, 78, 74, 69, 67, 65, 63, 60, 57, 55, 52, 53, 47, 71,
+    108, 34, 2, 4, 6, 7, 10, 27, 28,
+];
+
+impl Pin {
+    pub const fn from_index(index: u8) -> Option<Self> {
+        if index < WIRE_PIN_COUNT {
+            Some(Self(index))
+        } else {
+            None
+        }
+    }
+
+    pub const fn new(port: Port, bit: u8) -> Option<Self> {
+        if bit < port.pin_count() {
+            Some(Self(port.first_index() + bit))
+        } else {
+            None
+        }
+    }
+
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+
+    pub const fn port(self) -> Port {
+        match self.0 {
+            0..=31 => Port::A,
+            32..=46 => Port::B,
+            47..=78 => Port::C,
+            79..=110 => Port::D,
+            _ => Port::E,
+        }
+    }
+
+    pub const fn bit(self) -> u8 {
+        self.0 - self.port().first_index()
+    }
+
+    pub const fn package_pin(self) -> u8 {
+        PACKAGE_PINS[self.0 as usize]
+    }
+
+    pub const fn is_available(self) -> bool {
+        !matches!(self.0, 40..=43)
+    }
+}
+
+impl fmt::Display for Pin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "P{}{:02}", self.port().letter(), self.bit())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinTarget {
-    Pin(u8),
+    Pin(Pin),
+    Bank(Port),
     All,
+}
+
+impl PinTarget {
+    pub fn contains(self, pin: Pin) -> bool {
+        match self {
+            Self::Pin(target) => target.index() == pin.index(),
+            Self::Bank(port) => pin.port() == port,
+            Self::All => true,
+        }
+    }
+}
+
+impl fmt::Display for PinTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pin(pin) => pin.fmt(f),
+            Self::Bank(port) => port.fmt(f),
+            Self::All => f.write_str("ALL"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,7 +266,7 @@ pub enum PinError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResponseError {
     BadPacket,
-    Pin { pin: u8, reason: PinError },
+    Pin { pin: Pin, reason: PinError },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,11 +275,11 @@ pub enum Response {
     Status,
     Ack,
     Value {
-        pin: u8,
+        pin: Pin,
         level: Level,
     },
     State {
-        pin: u8,
+        pin: Pin,
         what: Query,
         value: QueryValue,
     },
@@ -482,15 +612,40 @@ fn expect_suffix(
 fn parse_target(token: &[u8]) -> Option<PinTarget> {
     if token == b"ALL" {
         Some(PinTarget::All)
+    } else if let Some(port) = parse_bank(token) {
+        Some(PinTarget::Bank(port))
     } else {
         parse_pin(token).map(PinTarget::Pin)
     }
 }
 
-fn parse_pin(token: &[u8]) -> Option<u8> {
-    u8::try_from(parse_decimal3(token)?)
-        .ok()
-        .filter(|pin| *pin < WIRE_PIN_COUNT)
+fn parse_bank(token: &[u8]) -> Option<Port> {
+    match token {
+        b"PIOA" => Some(Port::A),
+        b"PIOB" => Some(Port::B),
+        b"PIOC" => Some(Port::C),
+        b"PIOD" => Some(Port::D),
+        b"PIOE" => Some(Port::E),
+        _ => None,
+    }
+}
+
+fn parse_pin(token: &[u8]) -> Option<Pin> {
+    let [b'P', port, tens, ones] = *token else {
+        return None;
+    };
+    let port = match port {
+        b'A' => Port::A,
+        b'B' => Port::B,
+        b'C' => Port::C,
+        b'D' => Port::D,
+        b'E' => Port::E,
+        _ => return None,
+    };
+    if !tens.is_ascii_digit() || !ones.is_ascii_digit() {
+        return None;
+    }
+    Pin::new(port, (tens - b'0') * 10 + (ones - b'0'))
 }
 
 fn parse_level(token: &[u8]) -> Option<Level> {
@@ -567,12 +722,21 @@ impl<'a> Writer<'a> {
     fn target(&mut self, target: PinTarget) -> Result<(), EncodeError> {
         match target {
             PinTarget::Pin(pin) => self.pin(pin),
+            PinTarget::Bank(port) => {
+                self.bytes(b"PIO")?;
+                self.bytes(&[port.letter() as u8])
+            }
             PinTarget::All => self.bytes(b"ALL"),
         }
     }
 
-    fn pin(&mut self, value: u8) -> Result<(), EncodeError> {
-        self.decimal3(u16::from(value))
+    fn pin(&mut self, pin: Pin) -> Result<(), EncodeError> {
+        self.bytes(&[b'P', pin.port().letter() as u8])?;
+        self.decimal2(pin.bit())
+    }
+
+    fn decimal2(&mut self, value: u8) -> Result<(), EncodeError> {
+        self.bytes(&[b'0' + value / 10, b'0' + value % 10])
     }
 
     fn decimal3(&mut self, value: u16) -> Result<(), EncodeError> {
@@ -586,13 +750,18 @@ impl<'a> Writer<'a> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use std::string::ToString;
 
     fn encoded_request(id: u16, body: Request) -> [u8; MAX_PACKET_LEN] {
         let mut out = [0u8; MAX_PACKET_LEN];
         let len = encode_request(Packet { id, body }, &mut out).unwrap();
         assert_eq!(decode_request(&out[..len]), Ok(Packet { id, body }));
         out
+    }
+    fn pin(index: u8) -> Pin {
+        Pin::from_index(index).unwrap()
     }
 
     #[test]
@@ -622,71 +791,57 @@ mod tests {
     }
 
     #[test]
-    fn request_wire_examples_match_current_controller() {
+    fn request_wire_examples_use_symbolic_targets() {
         let cases = [
             (Request::Hello, "001 HAI\n"),
             (Request::Status, "001 HRU\n"),
             (
                 Request::Direction {
-                    target: PinTarget::Pin(0),
+                    target: PinTarget::Pin(pin(0)),
                     direction: Direction::Input,
                 },
-                "001 DIR 000 IN OK?\n",
+                "001 DIR PA00 IN OK?\n",
             ),
             (
                 Request::Direction {
-                    target: PinTarget::Pin(116),
+                    target: PinTarget::Pin(pin(116)),
                     direction: Direction::Output,
                 },
-                "001 DIR 116 OUT OK?\n",
+                "001 DIR PE05 OUT OK?\n",
             ),
             (
                 Request::Get {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Pin(pin(5)),
                 },
-                "001 GET 005 OK?\n",
+                "001 GET PA05 OK?\n",
             ),
             (
                 Request::Set {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Bank(Port::C),
                     level: Level::High,
                 },
-                "001 SET 005 HIGH OK?\n",
+                "001 SET PIOC HIGH OK?\n",
             ),
             (
                 Request::Pullup {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Bank(Port::B),
                     enabled: false,
                 },
-                "001 PLL 005 OFF OK?\n",
+                "001 PLL PIOB OFF OK?\n",
             ),
             (
                 Request::Listen {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Bank(Port::E),
                     enabled: true,
                 },
-                "001 LSN 005 ON OK?\n",
+                "001 LSN PIOE ON OK?\n",
             ),
             (
                 Request::Query {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Pin(pin(72)),
                     what: Query::Direction,
                 },
-                "001 WYD 005 DIR\n",
-            ),
-            (
-                Request::Query {
-                    target: PinTarget::Pin(5),
-                    what: Query::Pullup,
-                },
-                "001 WYD 005 PLL\n",
-            ),
-            (
-                Request::Query {
-                    target: PinTarget::Pin(5),
-                    what: Query::Listen,
-                },
-                "001 WYD 005 LSN\n",
+                "001 WYD PC25 DIR\n",
             ),
             (
                 Request::Direction {
@@ -725,9 +880,9 @@ mod tests {
             (
                 Request::Query {
                     target: PinTarget::All,
-                    what: Query::Direction,
+                    what: Query::Listen,
                 },
-                "001 WYD ALL DIR\n",
+                "001 WYD ALL LSN\n",
             ),
             (Request::Bye, "001 BYE\n"),
         ];
@@ -739,41 +894,41 @@ mod tests {
     }
 
     #[test]
-    fn response_wire_examples_match_current_firmware() {
+    fn response_wire_examples_use_symbolic_pins() {
         let cases = [
             (Response::Hello, "008 HII <3\n"),
             (Response::Status, "008 IAM SAM4E8E GPIO <3\n"),
             (Response::Ack, "008 OKA <3\n"),
             (
                 Response::Value {
-                    pin: 0,
+                    pin: pin(0),
                     level: Level::High,
                 },
-                "008 HYG 000 HIGH <3\n",
+                "008 HYG PA00 HIGH <3\n",
             ),
             (
                 Response::State {
-                    pin: 0,
+                    pin: pin(0),
                     what: Query::Direction,
                     value: QueryValue::Direction(Direction::Input),
                 },
-                "008 HYG 000 DIR IN <3\n",
+                "008 HYG PA00 DIR IN <3\n",
             ),
             (
                 Response::State {
-                    pin: 0,
+                    pin: pin(0),
                     what: Query::Pullup,
                     value: QueryValue::Enabled(true),
                 },
-                "008 HYG 000 PLL ON <3\n",
+                "008 HYG PA00 PLL ON <3\n",
             ),
             (
                 Response::State {
-                    pin: 0,
+                    pin: pin(0),
                     what: Query::Listen,
                     value: QueryValue::Unset,
                 },
-                "008 HYG 000 LSN UNSET <3\n",
+                "008 HYG PA00 LSN UNSET <3\n",
             ),
             (
                 Response::Error(ResponseError::BadPacket),
@@ -781,17 +936,17 @@ mod tests {
             ),
             (
                 Response::Error(ResponseError::Pin {
-                    pin: 40,
+                    pin: pin(40),
                     reason: PinError::Unavailable,
                 }),
-                "008 UMM 040 UNAVAILABLE <3\n",
+                "008 UMM PB08 UNAVAILABLE <3\n",
             ),
             (
                 Response::Error(ResponseError::Pin {
-                    pin: 3,
+                    pin: pin(3),
                     reason: PinError::Unset,
                 }),
-                "008 UMM 003 UNSET <3\n",
+                "008 UMM PA03 UNSET <3\n",
             ),
             (Response::Unknown, "008 IDK <3\n"),
             (Response::Bye, "008 CYA <3\n"),
@@ -809,14 +964,14 @@ mod tests {
     #[test]
     fn malformed_known_and_unknown_requests_are_distinct() {
         assert_eq!(
-            decode_request(b"007 DIR 000 SIDEWAYS OK?\n"),
+            decode_request(b"007 DIR PA00 SIDEWAYS OK?\n"),
             Err(DecodeError {
                 id: Some(7),
                 kind: DecodeErrorKind::Malformed,
             })
         );
         assert_eq!(
-            decode_request(b"007 WAT 000\n"),
+            decode_request(b"007 WAT PA00\n"),
             Err(DecodeError {
                 id: Some(7),
                 kind: DecodeErrorKind::UnknownCommand,
@@ -832,17 +987,27 @@ mod tests {
     }
 
     #[test]
-    fn packet_ids_and_pins_accept_the_same_decimal_range_as_current_firmware() {
+    fn packet_ids_remain_decimal_but_numeric_gpio_targets_are_rejected() {
         assert_eq!(
-            decode_request(b"9 GET 116 OK?"),
+            decode_request(b"9 GET PE05 OK?"),
             Ok(Packet {
                 id: 9,
                 body: Request::Get {
-                    target: PinTarget::Pin(116),
+                    target: PinTarget::Pin(pin(116)),
                 },
             })
         );
         assert!(decode_request(b"1000 HAI").is_err());
-        assert!(decode_request(b"001 GET 117 OK?").is_err());
+        assert!(decode_request(b"001 GET 116 OK?").is_err());
+        assert!(decode_request(b"001 GET PE06 OK?").is_err());
+    }
+
+    #[test]
+    fn pin_mapping_has_physical_package_numbers() {
+        assert_eq!(pin(0).to_string(), "PA00");
+        assert_eq!(pin(44).to_string(), "PB12");
+        assert_eq!(pin(44).package_pin(), 87);
+        assert_eq!(pin(72).to_string(), "PC25");
+        assert_eq!(Pin::new(Port::E, 5), Some(pin(116)));
     }
 }

@@ -7,7 +7,7 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, PinTarget, Query,
+    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin, PinTarget, Query,
     QueryValue, Request, Response, ResponseError, WIRE_PIN_COUNT, decode_response, encode_request,
 };
 
@@ -28,11 +28,11 @@ pub(super) enum DeviceEvent {
     Status,
     Ack(Request),
     PinValue {
-        pin: u8,
+        pin: Pin,
         level: Level,
     },
     PinState {
-        pin: u8,
+        pin: Pin,
         what: Query,
         value: QueryValue,
     },
@@ -50,8 +50,8 @@ pub(super) enum DeviceEvent {
 pub(super) struct Connection {
     next_id: u16,
     pending: [Option<Request>; MAX_PACKET_ID as usize + 1],
+    inputs: [bool; WIRE_PIN_COUNT as usize],
     listeners: [Option<u16>; WIRE_PIN_COUNT as usize],
-    all_listener: Option<u16>,
     commands: Sender<IoCommand>,
     events: Receiver<IoEvent>,
 }
@@ -64,8 +64,8 @@ impl Connection {
         Self {
             next_id: 1,
             pending: [None; MAX_PACKET_ID as usize + 1],
+            inputs: [false; WIRE_PIN_COUNT as usize],
             listeners: [None; WIRE_PIN_COUNT as usize],
-            all_listener: None,
             commands: command_tx,
             events: event_rx,
         }
@@ -175,36 +175,23 @@ impl Connection {
             }
             Response::Ack => self.ack(packet.id, request),
             Response::Value { pin, level } => {
-                if !self.is_listener_response(packet.id, request)
-                    && !matches!(
-                        request,
-                        Request::Get {
-                            target: PinTarget::All
-                        }
-                    )
-                {
+                if !self.is_listener_response(packet.id, pin) && !is_grouped_get(request) {
                     self.pending[packet.id as usize] = None;
                 }
                 DeviceEvent::PinValue { pin, level }
             }
             Response::State { pin, what, value } => {
-                if !matches!(
-                    request,
-                    Request::Query {
-                        target: PinTarget::All,
-                        ..
-                    }
-                ) {
+                if !is_grouped_query(request) {
                     self.pending[packet.id as usize] = None;
                 }
                 DeviceEvent::PinState { pin, what, value }
             }
             Response::Error(error) => {
-                self.retire(packet.id, request);
+                self.retire(packet.id);
                 DeviceEvent::DeviceError { request, error }
             }
             Response::Unknown => {
-                self.retire(packet.id, request);
+                self.retire(packet.id);
                 DeviceEvent::Unknown { request }
             }
             Response::Bye => unreachable!(),
@@ -213,97 +200,94 @@ impl Connection {
 
     fn clear(&mut self) {
         self.pending.fill(None);
+        self.inputs.fill(false);
         self.listeners.fill(None);
-        self.all_listener = None;
     }
 
     fn ack(&mut self, id: u16, request: Request) -> DeviceEvent {
-        match request {
-            Request::Listen {
-                target: PinTarget::Pin(pin),
-                enabled,
-            } => {
-                let previous = if enabled {
-                    self.listeners[pin as usize].replace(id)
-                } else {
-                    self.listeners[pin as usize].take()
-                };
-                if let Some(previous) = previous
-                    && previous != id
-                {
-                    self.release_listener(previous);
-                }
-                if enabled {
-                    return DeviceEvent::Ack(request);
+        if let Request::Direction { target, direction } = request {
+            for index in 0..WIRE_PIN_COUNT {
+                let pin = Pin::from_index(index).expect("wire pin index is in range");
+                if target.contains(pin) && pin.is_available() {
+                    self.inputs[index as usize] = direction == da_vinci_protocol::Direction::Input;
                 }
             }
-            Request::Listen {
-                target: PinTarget::All,
-                enabled,
-            } => {
-                self.clear_individual_listeners();
-                if enabled {
-                    if let Some(previous) = self.all_listener.replace(id)
-                        && previous != id
-                    {
-                        self.pending[previous as usize] = None;
-                    }
-                    return DeviceEvent::Ack(request);
-                }
-                if let Some(previous) = self.all_listener.take() {
-                    self.pending[previous as usize] = None;
-                }
-            }
-            _ => {}
         }
+
+        if let Request::Listen { target, enabled } = request {
+            if enabled {
+                let mut listening = false;
+                let mut replaced = [None; WIRE_PIN_COUNT as usize];
+                for index in 0..WIRE_PIN_COUNT {
+                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                    if target.contains(pin) && self.inputs[index as usize] {
+                        listening = true;
+                        replaced[index as usize] = self.listeners[index as usize].replace(id);
+                    }
+                }
+                for previous in replaced.into_iter().flatten() {
+                    if previous != id {
+                        self.release_listener(previous);
+                    }
+                }
+                if listening {
+                    return DeviceEvent::Ack(request);
+                }
+            }
+
+            let mut removed = [None; WIRE_PIN_COUNT as usize];
+            for index in 0..WIRE_PIN_COUNT {
+                let pin = Pin::from_index(index).expect("wire pin index is in range");
+                if target.contains(pin) {
+                    removed[index as usize] = self.listeners[index as usize].take();
+                }
+            }
+            for previous in removed.into_iter().flatten() {
+                self.release_listener(previous);
+            }
+        }
+
         self.pending[id as usize] = None;
         DeviceEvent::Ack(request)
     }
 
-    fn is_listener_response(&self, id: u16, request: Request) -> bool {
-        match request {
-            Request::Listen {
-                target: PinTarget::Pin(pin),
-                enabled: true,
-            } => self.listeners[pin as usize] == Some(id),
-            Request::Listen {
-                target: PinTarget::All,
-                enabled: true,
-            } => self.all_listener == Some(id),
-            _ => false,
-        }
-    }
-
-    fn clear_individual_listeners(&mut self) {
-        for listener in &mut self.listeners {
-            if let Some(id) = listener.take() {
-                self.pending[id as usize] = None;
-            }
-        }
+    fn is_listener_response(&self, id: u16, pin: Pin) -> bool {
+        self.listeners[pin.index() as usize] == Some(id)
     }
 
     fn release_listener(&mut self, id: u16) {
-        if self.all_listener != Some(id) && !self.listeners.contains(&Some(id)) {
+        if !self.listeners.contains(&Some(id)) {
             self.pending[id as usize] = None;
         }
     }
 
-    fn retire(&mut self, id: u16, request: Request) {
-        match request {
-            Request::Listen {
-                target: PinTarget::Pin(pin),
-                ..
-            } if self.listeners[pin as usize] == Some(id) => {
-                self.listeners[pin as usize] = None;
+    fn retire(&mut self, id: u16) {
+        for listener in &mut self.listeners {
+            if *listener == Some(id) {
+                *listener = None;
             }
-            Request::Listen {
-                target: PinTarget::All,
-                ..
-            } if self.all_listener == Some(id) => self.all_listener = None,
-            _ => {}
         }
         self.pending[id as usize] = None;
     }
+}
+
+fn is_grouped_get(request: Request) -> bool {
+    matches!(
+        request,
+        Request::Get {
+            target: PinTarget::Bank(_) | PinTarget::All
+        }
+    )
+}
+
+fn is_grouped_query(request: Request) -> bool {
+    matches!(
+        request,
+        Request::Query {
+            target: PinTarget::Bank(_) | PinTarget::All,
+            ..
+        }
+    )
 }
 
 enum IoCommand {
@@ -475,6 +459,11 @@ fn transient_io_error(error: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use da_vinci_protocol::Direction;
+
+    fn pin(index: u8) -> Pin {
+        Pin::from_index(index).unwrap()
+    }
 
     fn response(id: u16, body: Response) -> Packet<Response> {
         Packet { id, body }
@@ -482,6 +471,18 @@ mod tests {
 
     fn prepared(connection: &mut Connection, request: Request) -> (u16, Vec<u8>) {
         connection.prepare(request).unwrap()
+    }
+
+    fn initialize(connection: &mut Connection, index: u8) {
+        let request = Request::Direction {
+            target: PinTarget::Pin(pin(index)),
+            direction: Direction::Input,
+        };
+        let (id, _) = prepared(connection, request);
+        assert_eq!(
+            connection.received(response(id, Response::Ack)),
+            DeviceEvent::Ack(request)
+        );
     }
 
     #[test]
@@ -534,10 +535,11 @@ mod tests {
     #[test]
     fn wrap_skips_a_persistent_listener_id() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 5);
         let (listener, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
@@ -549,17 +551,17 @@ mod tests {
         }
 
         let (id, _) = prepared(&mut connection, Request::Hello);
-        assert_eq!(id, 2);
+        assert_eq!(id, 3);
         assert_eq!(
             connection.received(response(
                 listener,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 },
             )),
             DeviceEvent::PinValue {
-                pin: 5,
+                pin: pin(5),
                 level: Level::High,
             }
         );
@@ -571,19 +573,19 @@ mod tests {
         let (id, _) = prepared(
             &mut connection,
             Request::Get {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
             },
         );
         assert_eq!(
             connection.received(response(
                 id,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 },
             )),
             DeviceEvent::PinValue {
-                pin: 5,
+                pin: pin(5),
                 level: Level::High,
             }
         );
@@ -596,24 +598,25 @@ mod tests {
     #[test]
     fn successful_listener_id_persists_for_notifications() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 5);
         let (listener, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
         assert_eq!(
             connection.received(response(listener, Response::Ack)),
             DeviceEvent::Ack(Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             })
         );
         for level in [Level::Low, Level::High] {
             assert_eq!(
-                connection.received(response(listener, Response::Value { pin: 5, level },)),
-                DeviceEvent::PinValue { pin: 5, level }
+                connection.received(response(listener, Response::Value { pin: pin(5), level },)),
+                DeviceEvent::PinValue { pin: pin(5), level }
             );
         }
     }
@@ -621,10 +624,11 @@ mod tests {
     #[test]
     fn reenable_replaces_old_listener_only_after_ack() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 5);
         let (first, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
@@ -633,7 +637,7 @@ mod tests {
         let (second, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
@@ -641,7 +645,7 @@ mod tests {
             connection.received(response(
                 first,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 }
             )),
@@ -652,7 +656,7 @@ mod tests {
             connection.received(response(
                 first,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::Low,
                 }
             )),
@@ -663,10 +667,11 @@ mod tests {
     #[test]
     fn listener_off_retires_persistent_id() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 5);
         let (on, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
@@ -674,7 +679,7 @@ mod tests {
         let (off, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: false,
             },
         );
@@ -683,7 +688,7 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 }
             )),
@@ -694,10 +699,11 @@ mod tests {
     #[test]
     fn cya_clears_all_bookkeeping() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 5);
         let (listener, _) = prepared(
             &mut connection,
             Request::Listen {
-                target: PinTarget::Pin(5),
+                target: PinTarget::Pin(pin(5)),
                 enabled: true,
             },
         );
@@ -711,7 +717,7 @@ mod tests {
             connection.received(response(
                 listener,
                 Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 }
             )),
@@ -732,7 +738,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: 0,
+                    pin: pin(0),
                     level: Level::High,
                 }
             )),
@@ -742,7 +748,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: 1,
+                    pin: pin(1),
                     level: Level::Low,
                 }
             )),
@@ -758,7 +764,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: 2,
+                    pin: pin(2),
                     level: Level::Low,
                 }
             )),
@@ -776,7 +782,7 @@ mod tests {
             connection.received(response(
                 query,
                 Response::State {
-                    pin: 0,
+                    pin: pin(0),
                     what: Query::Direction,
                     value: QueryValue::Unset,
                 }
@@ -793,8 +799,30 @@ mod tests {
     }
 
     #[test]
+    fn empty_bulk_listener_does_not_leak_request_id() {
+        let mut connection = Connection::spawn();
+        let (id, _) = prepared(
+            &mut connection,
+            Request::Listen {
+                target: PinTarget::All,
+                enabled: true,
+            },
+        );
+
+        assert_eq!(
+            connection.received(response(id, Response::Ack)),
+            DeviceEvent::Ack(Request::Listen {
+                target: PinTarget::All,
+                enabled: true,
+            })
+        );
+        assert!(connection.pending[id as usize].is_none());
+    }
+
+    #[test]
     fn bulk_listener_id_persists_until_bulk_disable() {
         let mut connection = Connection::spawn();
+        initialize(&mut connection, 7);
         let (on, _) = prepared(
             &mut connection,
             Request::Listen {
@@ -807,11 +835,11 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: 7,
+                    pin: pin(7),
                     level: Level::High,
                 }
             )),
-            DeviceEvent::PinValue { pin: 7, .. }
+            DeviceEvent::PinValue { .. }
         ));
 
         let (off, _) = prepared(
@@ -826,7 +854,7 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: 7,
+                    pin: pin(7),
                     level: Level::Low,
                 }
             )),

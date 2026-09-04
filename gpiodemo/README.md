@@ -35,39 +35,33 @@ Running the GUI does not require firmware cross-compilation tools. If you have `
 
 ## Protocol
 
-Packets are newline-terminated ASCII. The host allocates request IDs from `001` through `999`, and the firmware echoes the same ID in responses. A successful `LSN ... ON` keeps its request ID for later listener notifications.
+Packets are newline-terminated ASCII. The host allocates request IDs from `001` through `999`, and the firmware echoes the same ID in responses. Request IDs are only correlation IDs. GPIO targets use symbolic PIO names. A successful `LSN ... ON` keeps its request ID for later listener notifications.
 
 | Host request | Device response | Meaning |
 | --- | --- | --- |
 | `001 HAI` | `001 HII <3` | Connection check |
 | `002 HRU` | `002 IAM SAM4E8E GPIO <3` | Device status |
-| `003 DIR 000 IN OK?` | `003 OKA <3` | Set input direction |
-| `004 DIR 000 OUT OK?` | `004 OKA <3` | Set output direction |
-| `005 PLL 000 ON OK?` | `005 OKA <3` | Enable input pull-up |
-| `006 SET 000 HIGH OK?` | `006 OKA <3` | Drive a pin high |
-| `007 GET 000 OK?` | `007 HYG 000 HIGH <3` | Read a pin |
-| `008 LSN 000 ON OK?` | `008 OKA <3` | Start change reporting |
-| `009 LSN 000 OFF OK?` | `009 OKA <3` | Stop change reporting |
-| `010 WYD 000 DIR` | `010 HYG 000 DIR IN <3` | Query direction |
-| `011 WYD 000 PLL` | `011 HYG 000 PLL ON <3` | Query pull-up state |
-| `012 WYD 000 LSN` | `012 HYG 000 LSN ON <3` | Query listener state |
+| `003 DIR PA00 IN OK?` | `003 OKA <3` | Set input direction |
+| `004 DIR PA00 OUT OK?` | `004 OKA <3` | Set output direction |
+| `005 PLL PA00 ON OK?` | `005 OKA <3` | Enable input pull-up |
+| `006 SET PA00 HIGH OK?` | `006 OKA <3` | Drive a pin high |
+| `007 GET PA00 OK?` | `007 HYG PA00 HIGH <3` | Read a pin |
+| `008 LSN PA00 ON OK?` | `008 OKA <3` | Start change reporting |
+| `009 LSN PA00 OFF OK?` | `009 OKA <3` | Stop change reporting |
+| `010 WYD PA00 DIR` | `010 HYG PA00 DIR IN <3` | Query direction |
+| `011 WYD PA00 PLL` | `011 HYG PA00 PLL ON <3` | Query pull-up state |
+| `012 WYD PA00 LSN` | `012 HYG PA00 LSN ON <3` | Query listener state |
 | `013 BYE` | `013 CYA <3` | Clear pin/listener state |
 | `014 DIR ALL IN OK?` | `014 OKA <3` | Set every available pin to input |
-| `015 GET ALL OK?` | `015 HYG ...`, then `015 OKA <3` | Read every initialized pin |
+| `015 GET PIOC OK?` | `015 HYG ...`, then `015 OKA <3` | Read initialized pins in PIOC |
 | `016 WYD ALL DIR` | `016 HYG ...`, then `016 OKA <3` | Query every available pin |
 
 Malformed known requests return `UMM`. Unknown commands return `IDK`.
 
-Pins start as `UNSET`. Every command that takes a pin also accepts `ALL`. `DIR ALL` targets every available pin. `GET`, `SET`, `PLL`, and `LSN` with `ALL` operate on every initialized available pin and skip unset pins. `GET ALL` and `WYD ALL` send one `HYG` response per matching pin under the same request ID, followed by `OKA`. Numeric `GET`, `SET`, `PLL`, and `LSN` requests still reject uninitialized pins. `BYE` returns initialized pins to input/no-pull and clears listener state.
+Pins start as `UNSET`. Every target-taking command accepts an individual pin (`PA00`), a PIO bank (`PIOA`), or `ALL`. Grouped operations skip unavailable pins. `GET`, `PLL`, and `LSN` operate on initialized pins in the selected scope. Grouped `SET` drives initialized outputs in that scope. `GET` and `WYD` with a bank or `ALL` send one `HYG` response per matching pin under the same request ID, followed by `OKA`. Individual operations still report the normal `UNSET` or `UNAVAILABLE` error. Legacy numeric GPIO targets are rejected. `BYE` returns initialized pins to input/no-pull and clears listener state.
 
-## Pin numbering
+## Pin naming
 
-Wire IDs map directly to physical PIO pins:
+Individual wire targets use a PIO letter and a zero-padded two-digit bit number: `PA00` through `PA31`, `PB00` through `PB14`, `PC00` through `PC31`, `PD00` through `PD31`, and `PE00` through `PE05`. The desktop UI omits the zero padding and adds the physical package pin, for example `PB12 (87)`.
 
-- PA0-PA31: `000`-`031`
-- PB0-PB14: `032`-`046`
-- PC0-PC31: `047`-`078`
-- PD0-PD31: `079`-`110`
-- PE0-PE5: `111`-`116`
-
-The 12 MHz crystal uses PB8/PB9 (`040`/`041`). USB CDC uses PB10/PB11 (`042`/`043`). The firmware returns `UNAVAILABLE` instead of reconfiguring them.
+The 12 MHz crystal uses PB8/PB9, and USB CDC uses PB10/PB11. The firmware returns `UNAVAILABLE` instead of reconfiguring those pins. Grouped `PIOB` and `ALL` operations skip them automatically.

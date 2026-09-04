@@ -14,10 +14,10 @@ mod board {
         watchdog::{Watchdog, WatchdogDisable},
     };
     use cortex_m_rt::entry;
-    use da_vinci_firmware::{Firmware, Gpio, PinId, Port};
+    use da_vinci_firmware::{Firmware, Gpio};
     use da_vinci_protocol::{
-        DecodeErrorKind, Level, LineBuffer, MAX_PACKET_LEN, Packet, Response, ResponseError,
-        decode_request, encode_response,
+        DecodeErrorKind, Level, LineBuffer, MAX_PACKET_LEN, Packet, Pin, Port, Response,
+        ResponseError, decode_request, encode_response,
     };
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
@@ -28,8 +28,8 @@ mod board {
     macro_rules! with_port {
         ($pin:expr, |$port:ident, $mask:ident| $body:block) => {{
             let $mask = 1u32 << $pin.bit();
-            // SAFETY: Firmware is the only SamGpio caller and only passes PinIds created by
-            // the validated wire-pin mapping. Reserved clock/USB pins never reach this adapter,
+            // SAFETY: Firmware is the only SamGpio caller and only passes validated protocol pins.
+            // Reserved clock/USB pins never reach this adapter,
             // and the firmware loop is single-threaded, so these MMIO registers are not aliased.
             unsafe {
                 match $pin.port() {
@@ -59,7 +59,7 @@ mod board {
     }
 
     impl Gpio for SamGpio {
-        fn input(&mut self, pin: PinId, pullup: bool) {
+        fn input(&mut self, pin: Pin, pullup: bool) {
             with_port!(pin, |port, mask| {
                 if pullup {
                     port.ppddr.write_with_zero(|w| w.bits(mask));
@@ -73,7 +73,7 @@ mod board {
             });
         }
 
-        fn output(&mut self, pin: PinId, level: Level) {
+        fn output(&mut self, pin: Pin, level: Level) {
             with_port!(pin, |port, mask| {
                 port.pudr.write_with_zero(|w| w.bits(mask));
                 port.ppddr.write_with_zero(|w| w.bits(mask));
@@ -88,7 +88,7 @@ mod board {
             });
         }
 
-        fn write(&mut self, pin: PinId, level: Level) {
+        fn write(&mut self, pin: Pin, level: Level) {
             with_port!(pin, |port, mask| {
                 if level == Level::High {
                     port.sodr.write_with_zero(|w| w.bits(mask));
@@ -98,7 +98,7 @@ mod board {
             });
         }
 
-        fn read(&self, pin: PinId) -> Level {
+        fn read(&self, pin: Pin) -> Level {
             with_port!(pin, |port, mask| {
                 if port.pdsr.read().bits() & mask == 0 {
                     Level::Low

@@ -1,66 +1,15 @@
 #![no_std]
 
 use da_vinci_protocol::{
-    Direction, Level, Packet, PinError, PinTarget, Query, QueryValue, Request, Response,
+    Direction, Level, Packet, Pin, PinError, PinTarget, Query, QueryValue, Request, Response,
     ResponseError, WIRE_PIN_COUNT,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Port {
-    A,
-    B,
-    C,
-    D,
-    E,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PinId {
-    port: Port,
-    bit: u8,
-}
-
-impl PinId {
-    pub const fn port(self) -> Port {
-        self.port
-    }
-
-    pub const fn bit(self) -> u8 {
-        self.bit
-    }
-}
-
-const fn wire_pin(id: u8) -> Option<PinId> {
-    match id {
-        0..=31 => Some(PinId {
-            port: Port::A,
-            bit: id,
-        }),
-        32..=46 => Some(PinId {
-            port: Port::B,
-            bit: id - 32,
-        }),
-        47..=78 => Some(PinId {
-            port: Port::C,
-            bit: id - 47,
-        }),
-        79..=110 => Some(PinId {
-            port: Port::D,
-            bit: id - 79,
-        }),
-        111..=116 => Some(PinId {
-            port: Port::E,
-            bit: id - 111,
-        }),
-        _ => None,
-    }
-}
-
 pub trait Gpio {
-    fn input(&mut self, pin: PinId, pullup: bool);
-    fn output(&mut self, pin: PinId, level: Level);
-    fn write(&mut self, pin: PinId, level: Level);
-    fn read(&self, pin: PinId) -> Level;
+    fn input(&mut self, pin: Pin, pullup: bool);
+    fn output(&mut self, pin: Pin, level: Level);
+    fn write(&mut self, pin: Pin, level: Level);
+    fn read(&self, pin: Pin) -> Level;
 }
 
 #[derive(Clone, Copy)]
@@ -82,8 +31,17 @@ impl PinState {
 
 #[derive(Clone, Copy)]
 enum BulkResponse {
-    Values { id: u16, next: u8 },
-    States { id: u16, next: u8, what: Query },
+    Values {
+        id: u16,
+        target: PinTarget,
+        next: u8,
+    },
+    States {
+        id: u16,
+        target: PinTarget,
+        next: u8,
+        what: Query,
+    },
 }
 
 pub struct Firmware {
@@ -113,22 +71,21 @@ impl Firmware {
             Request::Get {
                 target: PinTarget::Pin(pin),
             } => match self.initialized(pin) {
-                Ok(physical) => Response::Value {
+                Ok(()) => Response::Value {
                     pin,
-                    level: gpio.read(physical),
+                    level: gpio.read(pin),
                 },
                 Err(error) => error,
             },
-            Request::Get {
-                target: PinTarget::All,
-            } => {
+            Request::Get { target } => {
                 self.bulk = Some(BulkResponse::Values {
                     id: packet.id,
+                    target,
                     next: 0,
                 });
                 return self
                     .poll_bulk(gpio)
-                    .expect("new bulk GET always yields a response");
+                    .expect("new grouped GET always yields a response");
             }
             Request::Set { target, level } => self.set_level(target, level, gpio),
             Request::Pullup { target, enabled } => self.set_pullup(target, enabled, gpio),
@@ -139,25 +96,23 @@ impl Firmware {
                 target: PinTarget::Pin(pin),
                 what,
             } => match supported(pin) {
-                Ok(_) => Response::State {
+                Ok(()) => Response::State {
                     pin,
                     what,
                     value: self.query(pin, what),
                 },
                 Err(error) => error,
             },
-            Request::Query {
-                target: PinTarget::All,
-                what,
-            } => {
+            Request::Query { target, what } => {
                 self.bulk = Some(BulkResponse::States {
                     id: packet.id,
+                    target,
                     next: 0,
                     what,
                 });
                 return self
                     .poll_bulk(gpio)
-                    .expect("new bulk WYD always yields a response");
+                    .expect("new grouped WYD always yields a response");
             }
             Request::Bye => {
                 self.reset(gpio);
@@ -173,22 +128,29 @@ impl Firmware {
 
     pub fn poll_bulk<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
         match self.bulk? {
-            BulkResponse::Values { id, mut next } => {
+            BulkResponse::Values {
+                id,
+                target,
+                mut next,
+            } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = next;
+                    let pin = Pin::from_index(next).expect("wire pin index is in range");
                     next += 1;
-                    let Ok(physical) = supported(pin) else {
-                        continue;
-                    };
-                    if self.pins[pin as usize].direction.is_none() {
+                    if !target.contains(pin) {
                         continue;
                     }
-                    self.bulk = Some(BulkResponse::Values { id, next });
+                    if supported(pin).is_err() {
+                        continue;
+                    }
+                    if self.pins[pin.index() as usize].direction.is_none() {
+                        continue;
+                    }
+                    self.bulk = Some(BulkResponse::Values { id, target, next });
                     return Some(Packet {
                         id,
                         body: Response::Value {
                             pin,
-                            level: gpio.read(physical),
+                            level: gpio.read(pin),
                         },
                     });
                 }
@@ -198,14 +160,27 @@ impl Firmware {
                     body: Response::Ack,
                 })
             }
-            BulkResponse::States { id, mut next, what } => {
+            BulkResponse::States {
+                id,
+                target,
+                mut next,
+                what,
+            } => {
                 while next < WIRE_PIN_COUNT {
-                    let pin = next;
+                    let pin = Pin::from_index(next).expect("wire pin index is in range");
                     next += 1;
+                    if !target.contains(pin) {
+                        continue;
+                    }
                     if supported(pin).is_err() {
                         continue;
                     }
-                    self.bulk = Some(BulkResponse::States { id, next, what });
+                    self.bulk = Some(BulkResponse::States {
+                        id,
+                        target,
+                        next,
+                        what,
+                    });
                     return Some(Packet {
                         id,
                         body: Response::State {
@@ -225,15 +200,16 @@ impl Firmware {
     }
 
     pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
-        for pin in 0..WIRE_PIN_COUNT {
-            let state = &mut self.pins[pin as usize];
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = &mut self.pins[index as usize];
             let Some(listener) = state.listener else {
                 continue;
             };
-            let Ok(physical) = supported(pin) else {
+            if supported(pin).is_err() {
                 continue;
-            };
-            let value = gpio.read(physical);
+            }
+            let value = gpio.read(pin);
             if value == state.previous {
                 continue;
             }
@@ -254,55 +230,42 @@ impl Firmware {
     ) -> Response {
         match target {
             PinTarget::Pin(pin) => {
-                let physical = match supported(pin) {
-                    Ok(physical) => physical,
-                    Err(error) => return error,
-                };
-                self.set_direction_pin(pin, physical, direction, gpio);
-            }
-            PinTarget::All => {
-                for pin in 0..WIRE_PIN_COUNT {
-                    if let Ok(physical) = supported(pin) {
-                        self.set_direction_pin(pin, physical, direction, gpio);
-                    }
+                if let Err(error) = supported(pin) {
+                    return error;
                 }
+                self.set_direction_pin(pin, direction, gpio);
             }
+            PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
+                self.set_direction_pin(pin, direction, gpio);
+            }),
         }
         Response::Ack
     }
 
-    fn set_direction_pin<G: Gpio>(
-        &mut self,
-        pin: u8,
-        physical: PinId,
-        direction: Direction,
-        gpio: &mut G,
-    ) {
+    fn set_direction_pin<G: Gpio>(&mut self, pin: Pin, direction: Direction, gpio: &mut G) {
         match direction {
-            Direction::Input => gpio.input(physical, false),
-            Direction::Output => gpio.output(physical, Level::Low),
+            Direction::Input => gpio.input(pin, false),
+            Direction::Output => gpio.output(pin, Level::Low),
         }
-        let state = &mut self.pins[pin as usize];
+        let state = &mut self.pins[pin.index() as usize];
         state.direction = Some(direction);
         state.pullup = false;
-        state.previous = gpio.read(physical);
+        state.previous = gpio.read(pin);
     }
 
     fn set_level<G: Gpio>(&mut self, target: PinTarget, level: Level, gpio: &mut G) -> Response {
         match target {
-            PinTarget::Pin(pin) => match self.initialized(pin) {
-                Ok(physical) => gpio.write(physical, level),
-                Err(error) => return error,
-            },
-            PinTarget::All => {
-                for pin in 0..WIRE_PIN_COUNT {
-                    if self.pins[pin as usize].direction.is_some()
-                        && let Ok(physical) = supported(pin)
-                    {
-                        gpio.write(physical, level);
-                    }
+            PinTarget::Pin(pin) => {
+                if let Err(error) = self.initialized(pin) {
+                    return error;
                 }
+                gpio.write(pin, level);
             }
+            PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
+                if self.pins[pin.index() as usize].direction == Some(Direction::Output) {
+                    gpio.write(pin, level);
+                }
+            }),
         }
         Response::Ack
     }
@@ -310,31 +273,26 @@ impl Firmware {
     fn set_pullup<G: Gpio>(&mut self, target: PinTarget, enabled: bool, gpio: &mut G) -> Response {
         match target {
             PinTarget::Pin(pin) => {
-                let physical = match self.initialized(pin) {
-                    Ok(physical) => physical,
-                    Err(error) => return error,
-                };
-                self.set_pullup_pin(pin, physical, enabled, gpio);
-            }
-            PinTarget::All => {
-                for pin in 0..WIRE_PIN_COUNT {
-                    if self.pins[pin as usize].direction.is_some()
-                        && let Ok(physical) = supported(pin)
-                    {
-                        self.set_pullup_pin(pin, physical, enabled, gpio);
-                    }
+                if let Err(error) = self.initialized(pin) {
+                    return error;
                 }
+                self.set_pullup_pin(pin, enabled, gpio);
             }
+            PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
+                if self.pins[pin.index() as usize].direction.is_some() {
+                    self.set_pullup_pin(pin, enabled, gpio);
+                }
+            }),
         }
         Response::Ack
     }
 
-    fn set_pullup_pin<G: Gpio>(&mut self, pin: u8, physical: PinId, enabled: bool, gpio: &mut G) {
-        let state = &mut self.pins[pin as usize];
+    fn set_pullup_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, gpio: &mut G) {
+        let state = &mut self.pins[pin.index() as usize];
         state.pullup = enabled;
         if state.direction == Some(Direction::Input) {
-            gpio.input(physical, enabled);
-            state.previous = gpio.read(physical);
+            gpio.input(pin, enabled);
+            state.previous = gpio.read(pin);
         }
     }
 
@@ -347,50 +305,38 @@ impl Firmware {
     ) -> Response {
         match target {
             PinTarget::Pin(pin) => {
-                let physical = match self.initialized(pin) {
-                    Ok(physical) => physical,
-                    Err(error) => return error,
-                };
-                self.set_listener_pin(pin, physical, enabled, id, gpio);
-            }
-            PinTarget::All => {
-                for pin in 0..WIRE_PIN_COUNT {
-                    if self.pins[pin as usize].direction.is_some()
-                        && let Ok(physical) = supported(pin)
-                    {
-                        self.set_listener_pin(pin, physical, enabled, id, gpio);
-                    }
+                if let Err(error) = self.initialized(pin) {
+                    return error;
                 }
+                self.set_listener_pin(pin, enabled, id, gpio);
             }
+            PinTarget::Bank(_) | PinTarget::All => for_each_group_pin(target, |pin| {
+                if self.pins[pin.index() as usize].direction == Some(Direction::Input) {
+                    self.set_listener_pin(pin, enabled, id, gpio);
+                }
+            }),
         }
         Response::Ack
     }
 
-    fn set_listener_pin<G: Gpio>(
-        &mut self,
-        pin: u8,
-        physical: PinId,
-        enabled: bool,
-        id: u16,
-        gpio: &G,
-    ) {
-        let state = &mut self.pins[pin as usize];
+    fn set_listener_pin<G: Gpio>(&mut self, pin: Pin, enabled: bool, id: u16, gpio: &G) {
+        let state = &mut self.pins[pin.index() as usize];
         state.listener = enabled.then_some(id);
         if enabled {
-            state.previous = gpio.read(physical);
+            state.previous = gpio.read(pin);
         }
     }
 
-    fn initialized(&self, pin: u8) -> Result<PinId, Response> {
-        let physical = supported(pin)?;
-        if self.pins[pin as usize].direction.is_none() {
+    fn initialized(&self, pin: Pin) -> Result<(), Response> {
+        supported(pin)?;
+        if self.pins[pin.index() as usize].direction.is_none() {
             return Err(pin_error(pin, PinError::Unset));
         }
-        Ok(physical)
+        Ok(())
     }
 
-    fn query(&self, pin: u8, what: Query) -> QueryValue {
-        let state = self.pins[pin as usize];
+    fn query(&self, pin: Pin, what: Query) -> QueryValue {
+        let state = self.pins[pin.index() as usize];
         let Some(direction) = state.direction else {
             return QueryValue::Unset;
         };
@@ -403,25 +349,33 @@ impl Firmware {
 
     fn reset<G: Gpio>(&mut self, gpio: &mut G) {
         self.bulk = None;
-        for pin in 0..WIRE_PIN_COUNT {
-            let state = &mut self.pins[pin as usize];
-            if state.direction.is_some()
-                && let Ok(physical) = supported(pin)
-            {
-                gpio.input(physical, false);
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = &mut self.pins[index as usize];
+            if state.direction.is_some() && supported(pin).is_ok() {
+                gpio.input(pin, false);
             }
             *state = PinState::UNSET;
         }
     }
 }
 
-fn supported(pin: u8) -> Result<PinId, Response> {
-    wire_pin(pin)
-        .filter(|_| !matches!(pin, 40..=43))
+fn for_each_group_pin(target: PinTarget, mut f: impl FnMut(Pin)) {
+    for index in 0..WIRE_PIN_COUNT {
+        let pin = Pin::from_index(index).expect("wire pin index is in range");
+        if target.contains(pin) && pin.is_available() {
+            f(pin);
+        }
+    }
+}
+
+fn supported(pin: Pin) -> Result<(), Response> {
+    pin.is_available()
+        .then_some(())
         .ok_or_else(|| pin_error(pin, PinError::Unavailable))
 }
 
-fn pin_error(pin: u8, reason: PinError) -> Response {
+fn pin_error(pin: Pin, reason: PinError) -> Response {
     Response::Error(ResponseError::Pin { pin, reason })
 }
 
@@ -430,6 +384,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use da_vinci_protocol::Port;
 
     struct FakeGpio {
         values: [Level; WIRE_PIN_COUNT as usize],
@@ -449,109 +404,37 @@ mod tests {
         }
     }
 
-    impl FakeGpio {
-        fn wire_index(pin: PinId) -> usize {
-            match pin.port {
-                Port::A => pin.bit as usize,
-                Port::B => 32 + pin.bit as usize,
-                Port::C => 47 + pin.bit as usize,
-                Port::D => 79 + pin.bit as usize,
-                Port::E => 111 + pin.bit as usize,
-            }
-        }
-    }
-
     impl Gpio for FakeGpio {
-        fn input(&mut self, pin: PinId, pullup: bool) {
-            let i = Self::wire_index(pin);
+        fn input(&mut self, pin: Pin, pullup: bool) {
+            let i = pin.index() as usize;
             self.inputs[i] = true;
             self.outputs[i] = false;
             self.pullups[i] = pullup;
         }
 
-        fn output(&mut self, pin: PinId, level: Level) {
-            let i = Self::wire_index(pin);
+        fn output(&mut self, pin: Pin, level: Level) {
+            let i = pin.index() as usize;
             self.inputs[i] = false;
             self.outputs[i] = true;
             self.pullups[i] = false;
             self.values[i] = level;
         }
 
-        fn write(&mut self, pin: PinId, level: Level) {
-            self.values[Self::wire_index(pin)] = level;
+        fn write(&mut self, pin: Pin, level: Level) {
+            self.values[pin.index() as usize] = level;
         }
 
-        fn read(&self, pin: PinId) -> Level {
-            self.values[Self::wire_index(pin)]
+        fn read(&self, pin: Pin) -> Level {
+            self.values[pin.index() as usize]
         }
+    }
+
+    fn pin(index: u8) -> Pin {
+        Pin::from_index(index).unwrap()
     }
 
     fn packet(id: u16, body: Request) -> Packet<Request> {
         Packet { id, body }
-    }
-
-    #[test]
-    fn wire_mapping_and_reserved_pins_match_current_firmware() {
-        assert_eq!(
-            wire_pin(0),
-            Some(PinId {
-                port: Port::A,
-                bit: 0
-            })
-        );
-        assert_eq!(
-            wire_pin(31),
-            Some(PinId {
-                port: Port::A,
-                bit: 31
-            })
-        );
-        assert_eq!(
-            wire_pin(32),
-            Some(PinId {
-                port: Port::B,
-                bit: 0
-            })
-        );
-        assert_eq!(
-            wire_pin(46),
-            Some(PinId {
-                port: Port::B,
-                bit: 14
-            })
-        );
-        assert_eq!(
-            wire_pin(47),
-            Some(PinId {
-                port: Port::C,
-                bit: 0
-            })
-        );
-        assert_eq!(
-            wire_pin(79),
-            Some(PinId {
-                port: Port::D,
-                bit: 0
-            })
-        );
-        assert_eq!(
-            wire_pin(111),
-            Some(PinId {
-                port: Port::E,
-                bit: 0
-            })
-        );
-        assert_eq!(
-            wire_pin(116),
-            Some(PinId {
-                port: Port::E,
-                bit: 5
-            })
-        );
-        assert_eq!(wire_pin(117), None);
-        for pin in 40..=43 {
-            assert!(supported(pin).is_err());
-        }
     }
 
     #[test]
@@ -564,45 +447,42 @@ mod tests {
                     packet(
                         1,
                         Request::Get {
-                            target: PinTarget::Pin(0)
+                            target: PinTarget::Pin(pin(0))
                         }
                     ),
                     &mut gpio
                 )
                 .body,
-            pin_error(0, PinError::Unset)
+            pin_error(pin(0), PinError::Unset)
         );
-        assert_eq!(
-            firmware
-                .handle(
-                    packet(
-                        2,
-                        Request::Direction {
-                            target: PinTarget::Pin(0),
-                            direction: Direction::Input,
-                        },
-                    ),
-                    &mut gpio,
-                )
-                .body,
-            Response::Ack
+
+        firmware.handle(
+            packet(
+                2,
+                Request::Direction {
+                    target: PinTarget::Pin(pin(0)),
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
         );
         firmware.handle(
             packet(
                 3,
                 Request::Pullup {
-                    target: PinTarget::Pin(0),
+                    target: PinTarget::Pin(pin(0)),
                     enabled: true,
                 },
             ),
             &mut gpio,
         );
         assert!(gpio.pullups[0]);
+
         firmware.handle(
             packet(
                 4,
                 Request::Direction {
-                    target: PinTarget::Pin(0),
+                    target: PinTarget::Pin(pin(0)),
                     direction: Direction::Output,
                 },
             ),
@@ -614,7 +494,7 @@ mod tests {
                     packet(
                         5,
                         Request::Query {
-                            target: PinTarget::Pin(0),
+                            target: PinTarget::Pin(pin(0)),
                             what: Query::Pullup,
                         },
                     ),
@@ -622,7 +502,7 @@ mod tests {
                 )
                 .body,
             Response::State {
-                pin: 0,
+                pin: pin(0),
                 what: Query::Pullup,
                 value: QueryValue::Enabled(false),
             }
@@ -637,26 +517,21 @@ mod tests {
             packet(
                 1,
                 Request::Direction {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Pin(pin(5)),
                     direction: Direction::Input,
                 },
             ),
             &mut gpio,
         );
-        assert_eq!(
-            firmware
-                .handle(
-                    packet(
-                        27,
-                        Request::Listen {
-                            target: PinTarget::Pin(5),
-                            enabled: true,
-                        },
-                    ),
-                    &mut gpio,
-                )
-                .body,
-            Response::Ack
+        firmware.handle(
+            packet(
+                27,
+                Request::Listen {
+                    target: PinTarget::Pin(pin(5)),
+                    enabled: true,
+                },
+            ),
+            &mut gpio,
         );
         gpio.values[5] = Level::High;
         assert_eq!(
@@ -664,7 +539,7 @@ mod tests {
             Some(Packet {
                 id: 27,
                 body: Response::Value {
-                    pin: 5,
+                    pin: pin(5),
                     level: Level::High,
                 },
             })
@@ -673,7 +548,7 @@ mod tests {
             packet(
                 28,
                 Request::Listen {
-                    target: PinTarget::Pin(5),
+                    target: PinTarget::Pin(pin(5)),
                     enabled: false,
                 },
             ),
@@ -684,44 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn bye_releases_initialized_pins_and_clears_state() {
-        let mut firmware = Firmware::new();
-        let mut gpio = FakeGpio::default();
-        firmware.handle(
-            packet(
-                1,
-                Request::Direction {
-                    target: PinTarget::Pin(5),
-                    direction: Direction::Output,
-                },
-            ),
-            &mut gpio,
-        );
-        assert!(gpio.outputs[5]);
-        assert_eq!(
-            firmware.handle(packet(2, Request::Bye), &mut gpio).body,
-            Response::Bye
-        );
-        assert!(gpio.inputs[5]);
-        assert!(!gpio.pullups[5]);
-        assert_eq!(
-            firmware
-                .handle(
-                    packet(
-                        3,
-                        Request::Get {
-                            target: PinTarget::Pin(5)
-                        }
-                    ),
-                    &mut gpio
-                )
-                .body,
-            pin_error(5, PinError::Unset)
-        );
-    }
-
-    #[test]
-    fn reserved_pin_is_never_touched() {
+    fn unavailable_pin_is_never_touched() {
         let mut firmware = Firmware::new();
         let mut gpio = FakeGpio::default();
         assert_eq!(
@@ -730,98 +568,55 @@ mod tests {
                     packet(
                         1,
                         Request::Direction {
-                            target: PinTarget::Pin(40),
+                            target: PinTarget::Pin(pin(40)),
                             direction: Direction::Input,
                         },
                     ),
                     &mut gpio,
                 )
                 .body,
-            pin_error(40, PinError::Unavailable)
+            pin_error(pin(40), PinError::Unavailable)
         );
         assert!(!gpio.inputs[40]);
     }
 
     #[test]
-    fn all_mutations_apply_to_supported_initialized_pins() {
+    fn all_mutations_skip_unavailable_pins() {
         let mut firmware = Firmware::new();
         let mut gpio = FakeGpio::default();
-
-        assert_eq!(
-            firmware
-                .handle(
-                    packet(
-                        10,
-                        Request::Direction {
-                            target: PinTarget::All,
-                            direction: Direction::Input,
-                        },
-                    ),
-                    &mut gpio,
-                )
-                .body,
-            Response::Ack
-        );
-        assert_eq!(
-            firmware
-                .handle(
-                    packet(
-                        11,
-                        Request::Pullup {
-                            target: PinTarget::All,
-                            enabled: true,
-                        },
-                    ),
-                    &mut gpio,
-                )
-                .body,
-            Response::Ack
-        );
-        for pin in 0..WIRE_PIN_COUNT as usize {
-            if matches!(pin, 40..=43) {
-                assert!(!gpio.inputs[pin]);
-                assert!(!gpio.pullups[pin]);
-            } else {
-                assert!(gpio.inputs[pin]);
-                assert!(gpio.pullups[pin]);
-            }
-        }
-
         firmware.handle(
             packet(
-                12,
-                Request::Listen {
+                10,
+                Request::Direction {
+                    target: PinTarget::All,
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                11,
+                Request::Pullup {
                     target: PinTarget::All,
                     enabled: true,
                 },
             ),
             &mut gpio,
         );
-        gpio.values[7] = Level::High;
-        assert_eq!(
-            firmware.poll_listener(&gpio),
-            Some(Packet {
-                id: 12,
-                body: Response::Value {
-                    pin: 7,
-                    level: Level::High,
-                },
-            })
-        );
-        firmware.handle(
-            packet(
-                13,
-                Request::Listen {
-                    target: PinTarget::All,
-                    enabled: false,
-                },
-            ),
-            &mut gpio,
-        );
+        for i in 0..WIRE_PIN_COUNT as usize {
+            if matches!(i, 40..=43) {
+                assert!(!gpio.inputs[i]);
+                assert!(!gpio.pullups[i]);
+            } else {
+                assert!(gpio.inputs[i]);
+                assert!(gpio.pullups[i]);
+            }
+        }
 
         firmware.handle(
             packet(
-                14,
+                12,
                 Request::Direction {
                     target: PinTarget::All,
                     direction: Direction::Output,
@@ -831,7 +626,7 @@ mod tests {
         );
         firmware.handle(
             packet(
-                15,
+                13,
                 Request::Set {
                     target: PinTarget::All,
                     level: Level::High,
@@ -839,37 +634,108 @@ mod tests {
             ),
             &mut gpio,
         );
-        for pin in 0..WIRE_PIN_COUNT as usize {
-            if !matches!(pin, 40..=43) {
-                assert_eq!(gpio.values[pin], Level::High);
+        for i in 0..WIRE_PIN_COUNT as usize {
+            if !matches!(i, 40..=43) {
+                assert_eq!(gpio.values[i], Level::High);
             }
         }
     }
 
     #[test]
-    fn get_all_streams_configured_pins_then_acknowledges() {
+    fn bank_mutations_stay_inside_selected_port() {
         let mut firmware = Firmware::new();
         let mut gpio = FakeGpio::default();
-        for pin in [0, 5] {
+        firmware.handle(
+            packet(
+                20,
+                Request::Direction {
+                    target: PinTarget::Bank(Port::C),
+                    direction: Direction::Output,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                21,
+                Request::Set {
+                    target: PinTarget::Bank(Port::C),
+                    level: Level::High,
+                },
+            ),
+            &mut gpio,
+        );
+
+        for i in 0..WIRE_PIN_COUNT as usize {
+            let in_c = (47..=78).contains(&i);
+            assert_eq!(gpio.outputs[i], in_c);
+            assert_eq!(gpio.values[i], if in_c { Level::High } else { Level::Low });
+        }
+    }
+
+    #[test]
+    fn bank_listener_stays_inside_selected_port() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        firmware.handle(
+            packet(
+                24,
+                Request::Direction {
+                    target: PinTarget::All,
+                    direction: Direction::Input,
+                },
+            ),
+            &mut gpio,
+        );
+        firmware.handle(
+            packet(
+                25,
+                Request::Listen {
+                    target: PinTarget::Bank(Port::C),
+                    enabled: true,
+                },
+            ),
+            &mut gpio,
+        );
+
+        gpio.values[0] = Level::High;
+        gpio.values[47] = Level::High;
+        assert_eq!(
+            firmware.poll_listener(&gpio),
+            Some(Packet {
+                id: 25,
+                body: Response::Value {
+                    pin: pin(47),
+                    level: Level::High,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn get_bank_streams_only_initialized_pins_in_bank() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        for index in [0, 47, 72] {
             firmware.handle(
                 packet(
-                    pin as u16 + 1,
+                    index as u16 + 1,
                     Request::Direction {
-                        target: PinTarget::Pin(pin),
+                        target: PinTarget::Pin(pin(index)),
                         direction: Direction::Input,
                     },
                 ),
                 &mut gpio,
             );
         }
-        gpio.values[0] = Level::High;
+        gpio.values[47] = Level::High;
 
         assert_eq!(
             firmware.handle(
                 packet(
                     30,
                     Request::Get {
-                        target: PinTarget::All,
+                        target: PinTarget::Bank(Port::C),
                     },
                 ),
                 &mut gpio,
@@ -877,7 +743,7 @@ mod tests {
             Packet {
                 id: 30,
                 body: Response::Value {
-                    pin: 0,
+                    pin: pin(47),
                     level: Level::High,
                 },
             }
@@ -887,7 +753,7 @@ mod tests {
             Some(Packet {
                 id: 30,
                 body: Response::Value {
-                    pin: 5,
+                    pin: pin(72),
                     level: Level::Low,
                 },
             })
@@ -899,18 +765,17 @@ mod tests {
                 body: Response::Ack,
             })
         );
-        assert_eq!(firmware.poll_bulk(&gpio), None);
     }
 
     #[test]
-    fn query_all_streams_every_supported_pin_then_acknowledges() {
+    fn query_bank_streams_every_available_pin_in_bank() {
         let mut firmware = Firmware::new();
         let mut gpio = FakeGpio::default();
         let first = firmware.handle(
             packet(
                 40,
                 Request::Query {
-                    target: PinTarget::All,
+                    target: PinTarget::Bank(Port::B),
                     what: Query::Direction,
                 },
             ),
@@ -919,25 +784,60 @@ mod tests {
         assert_eq!(
             first.body,
             Response::State {
-                pin: 0,
+                pin: pin(32),
                 what: Query::Direction,
                 value: QueryValue::Unset,
             }
         );
 
-        let mut states = 1;
+        let mut seen = 1;
         loop {
-            let packet = firmware.poll_bulk(&gpio).unwrap();
-            match packet.body {
+            match firmware.poll_bulk(&gpio).unwrap().body {
                 Response::State { pin, .. } => {
-                    assert!(!matches!(pin, 40..=43));
-                    states += 1;
+                    assert_eq!(pin.port(), Port::B);
+                    assert!(pin.is_available());
+                    seen += 1;
                 }
                 Response::Ack => break,
-                other => panic!("unexpected bulk response: {other:?}"),
+                other => panic!("unexpected grouped response: {other:?}"),
             }
         }
-        assert_eq!(states, WIRE_PIN_COUNT as usize - 4);
-        assert_eq!(firmware.poll_bulk(&gpio), None);
+        assert_eq!(seen, Port::B.pin_count() as usize - 4);
+    }
+
+    #[test]
+    fn bye_releases_initialized_pins_and_clears_state() {
+        let mut firmware = Firmware::new();
+        let mut gpio = FakeGpio::default();
+        firmware.handle(
+            packet(
+                1,
+                Request::Direction {
+                    target: PinTarget::Pin(pin(5)),
+                    direction: Direction::Output,
+                },
+            ),
+            &mut gpio,
+        );
+        assert!(gpio.outputs[5]);
+        assert_eq!(
+            firmware.handle(packet(2, Request::Bye), &mut gpio).body,
+            Response::Bye
+        );
+        assert!(gpio.inputs[5]);
+        assert_eq!(
+            firmware
+                .handle(
+                    packet(
+                        3,
+                        Request::Get {
+                            target: PinTarget::Pin(pin(5))
+                        }
+                    ),
+                    &mut gpio
+                )
+                .body,
+            pin_error(pin(5), PinError::Unset)
+        );
     }
 }

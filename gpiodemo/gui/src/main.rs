@@ -4,22 +4,51 @@ use std::{collections::VecDeque, fmt, time::Duration};
 
 use chrono::Local;
 use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
-use da_vinci_protocol::{Direction, Level, PinTarget, Request, ResponseError, WIRE_PIN_COUNT};
+use da_vinci_protocol::{
+    Direction, Level, Pin, PinTarget, Port, Request, ResponseError, WIRE_PIN_COUNT,
+};
 use iced::{
-    Color, Element, Length, Size, Subscription, Task, Theme,
+    Background, Border, Color, Element, Length, Size, Subscription, Task, Theme,
+    alignment::{Horizontal, Vertical},
     keyboard::{Event as KeyboardEvent, Key, key::Named},
-    widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input},
+    widget::{
+        button, checkbox, column, container, pane_grid, pick_list, row, scrollable, text,
+        text_editor, text_input,
+    },
 };
 
-const PINS_PER_PAGE: usize = 36;
-const PINS_PER_COLUMN: usize = 18;
 const MAX_LOG_LINES: usize = 2_000;
 const MAX_COMMAND_HISTORY: usize = 200;
 const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
-const PIN_NAME_WIDTH: f32 = 72.0;
-const PIN_MODE_WIDTH: f32 = 94.0;
-const PIN_STATUS_WIDTH: f32 = 44.0;
-const PIN_ACTION_WIDTH: f32 = 112.0;
+const BULK_SCOPES: [PinTarget; 6] = [
+    PinTarget::All,
+    PinTarget::Bank(Port::A),
+    PinTarget::Bank(Port::B),
+    PinTarget::Bank(Port::C),
+    PinTarget::Bank(Port::D),
+    PinTarget::Bank(Port::E),
+];
+const BANK_TABS: [BankTab; 4] = [BankTab::A, BankTab::BAndE, BankTab::C, BankTab::D];
+const ROW_HEIGHT: f32 = 34.0;
+const PIN_NAME_WIDTH: f32 = 86.0;
+const PIN_MODE_WIDTH: f32 = 96.0;
+const PIN_STATUS_WIDTH: f32 = 52.0;
+const PIN_RW_WIDTH: f32 = 94.0;
+const PIN_LISTEN_WIDTH: f32 = 70.0;
+const CELL_GAP: f32 = 6.0;
+
+const WINDOW_BG: Color = Color::from_rgb8(0x24, 0x24, 0x24);
+const PANEL_BG: Color = Color::from_rgb8(0x2B, 0x2B, 0x2B);
+const RAISED_BG: Color = Color::from_rgb8(0x3A, 0x3A, 0x3A);
+const RAISED_HOVER: Color = Color::from_rgb8(0x46, 0x46, 0x46);
+const INPUT_BG: Color = Color::from_rgb8(0x34, 0x36, 0x38);
+const UI_BORDER: Color = Color::from_rgb8(0x56, 0x5B, 0x5E);
+const UI_TEXT: Color = Color::from_rgb8(0xDC, 0xE4, 0xEE);
+const MUTED: Color = Color::from_rgb8(0xB0, 0xB0, 0xB0);
+const HIGH_BG: Color = Color::from_rgb8(0x3D, 0xDC, 0x97);
+const LOW_BG: Color = Color::from_rgb8(0x4A, 0x4A, 0x4A);
+const UNSET_BG: Color = Color::from_rgb8(0x38, 0x38, 0x38);
+const DANGER: Color = Color::from_rgb8(0xE0, 0x6C, 0x75);
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -38,12 +67,12 @@ fn app_theme() -> Theme {
     Theme::custom(
         "GPIO Controller",
         iced::theme::Palette {
-            background: Color::from_rgb8(0x16, 0x19, 0x1F),
-            text: Color::from_rgb8(0xE7, 0xEA, 0xF0),
-            primary: Color::from_rgb8(0x5B, 0x8D, 0xEF),
-            success: Color::from_rgb8(0x52, 0xB7, 0x88),
+            background: WINDOW_BG,
+            text: UI_TEXT,
+            primary: Color::from_rgb8(0x3B, 0x8E, 0xD0),
+            success: HIGH_BG,
             warning: Color::from_rgb8(0xD6, 0xA8, 0x4B),
-            danger: Color::from_rgb8(0xE0, 0x6C, 0x75),
+            danger: DANGER,
         },
     )
 }
@@ -59,6 +88,42 @@ impl Mode {
     fn is_input(self) -> bool {
         matches!(self, Self::Input | Self::InputPullup)
     }
+
+    fn direction(self) -> Direction {
+        if self == Self::Output {
+            Direction::Output
+        } else {
+            Direction::Input
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BankTab {
+    A,
+    BAndE,
+    C,
+    D,
+}
+
+impl BankTab {
+    fn index(self) -> usize {
+        BANK_TABS.iter().position(|tab| *tab == self).unwrap()
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::A => "PIOA",
+            Self::BAndE => "PIOB + PIOE",
+            Self::C => "PIOC",
+            Self::D => "PIOD",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PaneKind {
+    Pins,
+    Log,
 }
 
 impl fmt::Display for Mode {
@@ -124,24 +189,32 @@ enum Message {
     PortSelected(String),
     Connect,
     Disconnect,
-    PreviousPage,
-    NextPage,
-    ModeSelected(u8, Mode),
-    Read(u8),
-    Toggle(u8),
-    Listen(u8),
-    AllModeSelected(Mode),
-    ReadAll,
-    ListenAll,
+    PreviousTab,
+    NextTab,
+    TabSelected(BankTab),
+    ModeSelected(Pin, Mode),
+    Read(Pin),
+    Write(Pin),
+    Listen(Pin),
+    BulkScopeSelected(PinTarget),
+    BulkModeSelected(Mode),
+    OverwriteChanged(bool),
+    ApplyBulkMode,
+    BulkRead,
+    BulkListen(bool),
+    BulkSet(Level),
+    BulkSetConfirm,
+    BulkSetCancel,
     Handshake,
     Status,
     Reboot,
     RebootConfirm,
     RebootCancel,
+    PaneResized(pane_grid::ResizeEvent),
     ClearLog,
     ShowTimestamps(bool),
     Autoscroll(bool),
-    LogScrolled(f32),
+    LogAction(text_editor::Action),
     RawChanged(String),
     RawSend,
     HistoryKey(HistoryDirection),
@@ -153,12 +226,18 @@ enum Message {
 
 struct App {
     pins: [PinState; WIRE_PIN_COUNT as usize],
-    page: usize,
+    bank_tab: BankTab,
+    bulk_scope: PinTarget,
+    bulk_mode: Mode,
+    overwrite: bool,
+    confirm_set: Option<(PinTarget, Level)>,
+    panes: pane_grid::State<PaneKind>,
     ports: Vec<String>,
     selected_port: Option<String>,
     connected_port: Option<String>,
     connection: Connection,
     logs: VecDeque<LogEntry>,
+    log_content: text_editor::Content,
     show_timestamps: bool,
     autoscroll: bool,
     log_scroll: iced::widget::Id,
@@ -173,15 +252,26 @@ struct App {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
+        let (mut panes, pins_pane) = pane_grid::State::new(PaneKind::Pins);
+        let (_, split) = panes
+            .split(pane_grid::Axis::Vertical, pins_pane, PaneKind::Log)
+            .expect("initial GPIO/log split must succeed");
+        panes.resize(split, 0.76);
         (
             Self {
                 pins: [PinState::UNSET; WIRE_PIN_COUNT as usize],
-                page: 0,
+                bank_tab: BankTab::A,
+                bulk_scope: PinTarget::All,
+                bulk_mode: Mode::Input,
+                overwrite: false,
+                confirm_set: None,
+                panes,
                 ports: Vec::new(),
                 selected_port: None,
                 connected_port: None,
                 connection: Connection::spawn(),
                 logs: VecDeque::new(),
+                log_content: text_editor::Content::new(),
                 show_timestamps: true,
                 autoscroll: true,
                 log_scroll: iced::widget::Id::unique(),
@@ -248,23 +338,58 @@ impl App {
                 self.error = self.connection.disconnect().err();
                 Task::none()
             }
-            Message::PreviousPage => {
-                self.page = self.page.saturating_sub(1);
+            Message::PreviousTab => {
+                let index = self.bank_tab.index();
+                if index > 0 {
+                    self.bank_tab = BANK_TABS[index - 1];
+                }
                 Task::none()
             }
-            Message::NextPage => {
-                if self.page + 1 < page_count() {
-                    self.page += 1;
+            Message::NextTab => {
+                let index = self.bank_tab.index();
+                if index + 1 < BANK_TABS.len() {
+                    self.bank_tab = BANK_TABS[index + 1];
                 }
+                Task::none()
+            }
+            Message::TabSelected(tab) => {
+                self.bank_tab = tab;
                 Task::none()
             }
             Message::ModeSelected(pin, mode) => self.change_mode(pin, mode),
             Message::Read(pin) => self.read_pin(pin),
-            Message::Toggle(pin) => self.toggle_pin(pin),
+            Message::Write(pin) => self.write_pin(pin),
             Message::Listen(pin) => self.toggle_listener(pin),
-            Message::AllModeSelected(mode) => self.change_all_modes(mode),
-            Message::ReadAll => self.read_all(),
-            Message::ListenAll => self.listen_all(),
+            Message::BulkScopeSelected(scope) => {
+                self.bulk_scope = scope;
+                self.confirm_set = None;
+                Task::none()
+            }
+            Message::BulkModeSelected(mode) => {
+                self.bulk_mode = mode;
+                Task::none()
+            }
+            Message::OverwriteChanged(overwrite) => {
+                self.overwrite = overwrite;
+                Task::none()
+            }
+            Message::ApplyBulkMode => self.apply_bulk_mode(),
+            Message::BulkRead => self.read_scope(self.bulk_scope),
+            Message::BulkListen(enabled) => self.set_listener_scope(self.bulk_scope, enabled),
+            Message::BulkSet(level) => {
+                self.confirm_set = Some((self.bulk_scope, level));
+                Task::none()
+            }
+            Message::BulkSetConfirm => {
+                let Some((target, level)) = self.confirm_set.take() else {
+                    return Task::none();
+                };
+                self.set_scope_level(target, level)
+            }
+            Message::BulkSetCancel => {
+                self.confirm_set = None;
+                Task::none()
+            }
             Message::Handshake => self.send_request(Request::Hello),
             Message::Status => self.send_request(Request::Status),
             Message::Reboot => {
@@ -279,12 +404,18 @@ impl App {
                 self.confirm_reboot = false;
                 Task::none()
             }
+            Message::PaneResized(event) => {
+                self.panes.resize(event.split, event.ratio);
+                Task::none()
+            }
             Message::ClearLog => {
                 self.logs.clear();
+                self.refresh_log_content();
                 Task::none()
             }
             Message::ShowTimestamps(enabled) => {
                 self.show_timestamps = enabled;
+                self.refresh_log_content();
                 Task::none()
             }
             Message::Autoscroll(enabled) => {
@@ -295,9 +426,9 @@ impl App {
                     Task::none()
                 }
             }
-            Message::LogScrolled(offset) => {
-                if self.autoscroll && offset < 0.999 {
-                    self.autoscroll = false;
+            Message::LogAction(action) => {
+                if !action.is_edit() {
+                    self.log_content.perform(action);
                 }
                 Task::none()
             }
@@ -325,21 +456,32 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         let top = self.connection_controls();
-        let pins = self.pin_panel();
-        let logs = self.log_panel();
-        let body = row![pins, logs].spacing(12).height(Length::Fill);
+        let body = pane_grid(&self.panes, |_, pane, _| {
+            pane_grid::Content::new(match pane {
+                PaneKind::Pins => self.pin_panel(),
+                PaneKind::Log => self.log_panel(),
+            })
+        })
+        .spacing(8)
+        .min_size(280)
+        .on_resize(8, Message::PaneResized)
+        .height(Length::Fill);
 
-        let mut content = column![top, body].spacing(12).padding(16);
+        let mut content = column![top, body].spacing(8).padding(8);
         if let Some(error) = &self.error {
             content = content.push(
                 container(text(format!("Error: {error}")).size(13))
-                    .padding([8, 12])
+                    .padding([6, 10])
                     .style(container::danger),
             );
         }
         container(content)
             .height(Length::Fill)
             .width(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Background::Color(WINDOW_BG)),
+                ..Default::default()
+            })
             .into()
     }
 
@@ -350,253 +492,277 @@ impl App {
             Message::PortSelected,
         )
         .placeholder("Serial port")
-        .width(Length::Fixed(250.0));
+        .width(Length::Fixed(240.0));
 
         let connection_button = if self.connected_port.is_some() {
-            button("Disconnect")
-                .style(button::danger)
-                .on_press(Message::Disconnect)
+            native_button("Disconnect").on_press(Message::Disconnect)
         } else {
-            button("Connect")
-                .style(button::primary)
+            native_button("Connect")
                 .on_press_maybe(self.selected_port.as_ref().map(|_| Message::Connect))
         };
 
         let connection = row![
-            text("Connection").size(18).width(Length::Fixed(110.0)),
+            text("Connection").size(18),
             ports,
-            button("Refresh Ports")
-                .style(button::secondary)
-                .on_press(Message::RefreshPorts),
+            native_button("Refresh ports").on_press(Message::RefreshPorts),
             connection_button,
             text(&self.device_status).size(13),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-        let bulk_actions = row![
-            text("Bulk actions").size(12).width(Length::Fixed(110.0)),
-            pick_list(MODES, self.common_mode(), Message::AllModeSelected)
-                .placeholder("All Mode")
-                .width(Length::Fixed(120.0)),
-            button("Read All")
-                .style(button::secondary)
-                .on_press(Message::ReadAll),
-            button("Listen All")
-                .style(button::secondary)
-                .on_press(Message::ListenAll),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center)
-        .width(Length::FillPortion(3));
-
-        let device_actions = row![
-            text("Device").size(12).width(Length::Fixed(54.0)),
-            button("Handshake")
-                .style(button::secondary)
-                .on_press(Message::Handshake),
-            button("Status")
-                .style(button::secondary)
-                .on_press(Message::Status),
-            button("Reset Device")
-                .style(button::danger)
+            iced::widget::Space::new().width(Length::Fill),
+            native_button("Handshake").on_press(Message::Handshake),
+            native_button("Status").on_press(Message::Status),
+            button("Reset device")
+                .style(danger_button)
                 .on_press(Message::Reboot),
         ]
         .spacing(8)
-        .align_y(iced::Alignment::Center)
-        .width(Length::FillPortion(2));
-
-        let actions = row![bulk_actions, device_actions]
-            .spacing(16)
-            .align_y(iced::Alignment::Center);
+        .align_y(iced::Alignment::Center);
 
         let content: Element<'_, Message> = if self.confirm_reboot {
             column![
                 connection,
                 row![
-                    text("Reset device?").size(12).width(Length::Fixed(110.0)),
-                    text("Send BYE and reset the device? This will drop the connection."),
-                    button("Reset Device")
-                        .style(button::danger)
+                    text("Reset device and drop the connection?").size(12),
+                    button("Reset device")
+                        .style(danger_button)
                         .on_press(Message::RebootConfirm),
-                    button("Cancel")
-                        .style(button::secondary)
-                        .on_press(Message::RebootCancel),
+                    native_button("Cancel").on_press(Message::RebootCancel),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             ]
-            .spacing(8)
+            .spacing(6)
             .into()
         } else {
-            column![connection, actions].spacing(8).into()
+            connection.into()
         };
 
         container(content)
-            .padding(12)
+            .padding(8)
             .width(Length::Fill)
-            .style(container::bordered_box)
+            .style(panel_style)
             .into()
     }
 
     fn pin_panel(&self) -> Element<'_, Message> {
-        let start = self.page * PINS_PER_PAGE;
-        let end = (start + PINS_PER_PAGE).min(WIRE_PIN_COUNT as usize);
-        let middle = (start + PINS_PER_COLUMN).min(end);
-
-        let mut left = column![pin_header()].spacing(4);
-        for pin in start..middle {
-            left = left.push(self.pin_row(pin as u8));
+        let index = self.bank_tab.index();
+        let mut tabs =
+            row![native_button("‹").on_press_maybe((index > 0).then_some(Message::PreviousTab))]
+                .spacing(4)
+                .align_y(iced::Alignment::Center);
+        for tab in BANK_TABS {
+            let tab_button = if tab == self.bank_tab {
+                button(tab.label()).style(selected_tab_button)
+            } else {
+                native_button(tab.label())
+            };
+            tabs = tabs.push(tab_button.on_press(Message::TabSelected(tab)));
         }
+        tabs = tabs.push(
+            native_button("›")
+                .on_press_maybe((index + 1 < BANK_TABS.len()).then_some(Message::NextTab)),
+        );
 
-        let mut right = column![pin_header()].spacing(4);
-        for pin in middle..end {
-            right = right.push(self.pin_row(pin as u8));
-        }
-
-        let pager = row![
-            button("Previous")
-                .style(button::secondary)
-                .on_press_maybe((self.page > 0).then_some(Message::PreviousPage)),
-            text(format!("Page {} of {}", self.page + 1, page_count())).size(13),
-            button("Next")
-                .style(button::secondary)
-                .on_press_maybe((self.page + 1 < page_count()).then_some(Message::NextPage)),
+        let bulk_scope = row![
+            text("Scope").size(12),
+            pick_list(
+                BULK_SCOPES,
+                Some(self.bulk_scope),
+                Message::BulkScopeSelected
+            )
+            .width(Length::Fixed(84.0)),
+            text("Mode").size(12),
+            pick_list(MODES, Some(self.bulk_mode), Message::BulkModeSelected)
+                .width(Length::Fixed(104.0)),
+            checkbox(self.overwrite)
+                .label("Overwrite")
+                .on_toggle(Message::OverwriteChanged),
+            native_button("Apply mode").on_press(Message::ApplyBulkMode),
         ]
-        .spacing(8)
+        .spacing(6)
         .align_y(iced::Alignment::Center);
 
-        container(
-            column![
-                text("GPIO Pins").size(18),
-                row![
-                    left.width(Length::FillPortion(1)),
-                    right.width(Length::FillPortion(1)),
-                ]
-                .spacing(12),
-                pager,
+        let bulk_actions: Element<'_, Message> = if let Some((target, level)) = self.confirm_set {
+            let level_name = match level {
+                Level::High => "HIGH",
+                Level::Low => "LOW",
+            };
+            row![
+                text(format!("Set every output in {target} {level_name}?")),
+                button(text(format!("Set {level_name}")))
+                    .style(danger_button)
+                    .on_press(Message::BulkSetConfirm),
+                native_button("Cancel").on_press(Message::BulkSetCancel),
             ]
-            .spacing(10),
-        )
-        .padding(12)
-        .style(container::bordered_box)
-        .width(Length::FillPortion(7))
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            row![
+                native_button("Read").on_press(Message::BulkRead),
+                native_button("Listen").on_press(Message::BulkListen(true)),
+                native_button("Stop listening").on_press(Message::BulkListen(false)),
+                native_button("Set HIGH").on_press(Message::BulkSet(Level::High)),
+                native_button("Set LOW").on_press(Message::BulkSet(Level::Low)),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .into()
+        };
+        let bulk = column![bulk_scope, bulk_actions].spacing(4);
+
+        let table: Element<'_, Message> = match self.bank_tab {
+            BankTab::A => self.full_bank_table(Port::A),
+            BankTab::C => self.full_bank_table(Port::C),
+            BankTab::D => self.full_bank_table(Port::D),
+            BankTab::BAndE => row![
+                self.port_column(Port::B, 0, Port::B.pin_count(), true)
+                    .width(Length::FillPortion(1)),
+                self.port_column(Port::E, 0, Port::E.pin_count(), true)
+                    .width(Length::FillPortion(1)),
+            ]
+            .spacing(12)
+            .height(Length::Fill)
+            .into(),
+        };
+
+        let content = column![tabs, bulk, table].spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(panel_style)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn full_bank_table(&self, port: Port) -> Element<'_, Message> {
+        row![
+            self.port_column(port, 0, 16, false)
+                .width(Length::FillPortion(1)),
+            self.port_column(port, 16, 16, false)
+                .width(Length::FillPortion(1)),
+        ]
+        .spacing(12)
         .height(Length::Fill)
         .into()
     }
 
-    fn pin_row(&self, pin: u8) -> Element<'_, Message> {
-        if is_reserved(pin) {
+    fn port_column(
+        &self,
+        port: Port,
+        start_bit: u8,
+        count: u8,
+        show_bank_name: bool,
+    ) -> iced::widget::Column<'_, Message> {
+        let mut column = column![].spacing(2);
+        if show_bank_name {
+            column = column.push(text(port.to_string()).size(14));
+        }
+        column = column.push(pin_header());
+        let end = (start_bit + count).min(port.pin_count());
+        for bit in start_bit..end {
+            let pin = Pin::new(port, bit).expect("bank table bit is valid");
+            column = column.push(self.pin_row(pin));
+        }
+        column
+    }
+
+    fn pin_row(&self, pin: Pin) -> Element<'_, Message> {
+        let name = fixed_cell(text(pin_display(pin)).size(12), PIN_NAME_WIDTH);
+        if !pin.is_available() {
             return row![
-                text(format!("{} ({pin:03})", pin_name(pin)))
-                    .size(12)
-                    .width(Length::Fixed(PIN_NAME_WIDTH)),
-                text("RESERVED")
-                    .size(11)
-                    .width(Length::Fixed(PIN_MODE_WIDTH)),
-                text("--").size(12).width(Length::Fixed(PIN_STATUS_WIDTH)),
-                text("System")
-                    .size(11)
-                    .width(Length::Fixed(PIN_ACTION_WIDTH)),
+                name,
+                fixed_cell(text("RESERVED").size(11), PIN_MODE_WIDTH),
+                level_box(None, false),
+                fixed_cell(text("System").size(11), PIN_RW_WIDTH),
+                fixed_cell(text(""), PIN_LISTEN_WIDTH),
             ]
-            .spacing(6)
+            .spacing(CELL_GAP)
+            .height(Length::Fixed(ROW_HEIGHT))
             .align_y(iced::Alignment::Center)
             .into();
         }
 
-        let state = self.pins[pin as usize];
-        let mode = pick_list(MODES, state.mode, move |mode| {
-            Message::ModeSelected(pin, mode)
-        })
-        .placeholder("UNSET")
-        .text_size(12)
-        .width(Length::Fixed(PIN_MODE_WIDTH));
-
-        let status = match state.level {
-            Some(Level::High) => "HIGH",
-            Some(Level::Low) => "LOW",
-            None => "--",
-        };
-
-        let actions: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
-            let read = button("Read")
-                .style(button::secondary)
-                .width(Length::Fixed(50.0))
-                .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)));
-            let listen_label = match state.listener {
-                ListenerState::On | ListenerState::Disabling => "Stop",
-                ListenerState::Off | ListenerState::Enabling => "Listen",
-            };
-            let listen = button(listen_label)
-                .style(if state.listener == ListenerState::On {
-                    button::primary
-                } else {
-                    button::secondary
-                })
-                .width(Length::Fixed(58.0))
-                .on_press_maybe((!state.listener.is_pending()).then_some(Message::Listen(pin)));
-            row![read, listen]
-                .spacing(4)
-                .width(Length::Fixed(PIN_ACTION_WIDTH))
-                .into()
-        } else if state.mode == Some(Mode::Output) {
-            button("Toggle")
-                .style(button::secondary)
-                .width(Length::Fixed(PIN_ACTION_WIDTH))
-                .on_press_maybe((!state.value_pending).then_some(Message::Toggle(pin)))
-                .into()
+        let state = self.pins[pin.index() as usize];
+        let mode: Element<'_, Message> = if state.target_mode.is_some() {
+            container(text(
+                state
+                    .mode
+                    .map(|mode| mode.to_string())
+                    .unwrap_or_else(|| "UNSET".into()),
+            ))
+            .padding([5, 10])
+            .width(Length::Fixed(PIN_MODE_WIDTH))
+            .style(input_style)
+            .into()
         } else {
-            text(if state.target_mode.is_some() {
-                "Setting…"
-            } else {
-                ""
+            pick_list(MODES, state.mode, move |mode| {
+                Message::ModeSelected(pin, mode)
             })
-            .size(11)
-            .width(Length::Fixed(PIN_ACTION_WIDTH))
+            .placeholder("UNSET")
+            .text_size(12)
+            .width(Length::Fixed(PIN_MODE_WIDTH))
             .into()
         };
 
+        let rw: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
+            native_button("Read")
+                .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)))
+                .into()
+        } else if state.mode == Some(Mode::Output) {
+            let label = if state.level == Some(Level::High) {
+                "Write LOW"
+            } else {
+                "Write HIGH"
+            };
+            native_button(label)
+                .on_press_maybe((!state.value_pending).then_some(Message::Write(pin)))
+                .into()
+        } else {
+            text("").into()
+        };
+
+        let listen: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
+            let label = if matches!(state.listener, ListenerState::On | ListenerState::Disabling) {
+                "Stop"
+            } else {
+                "Listen"
+            };
+            native_button(label)
+                .on_press_maybe((!state.listener.is_pending()).then_some(Message::Listen(pin)))
+                .into()
+        } else {
+            text("").into()
+        };
+
         row![
-            text(format!("{} ({pin:03})", pin_name(pin)))
-                .size(12)
-                .width(Length::Fixed(PIN_NAME_WIDTH)),
+            name,
             mode,
-            text(status).size(12).width(Length::Fixed(PIN_STATUS_WIDTH)),
-            actions,
+            level_box(state.level, state.value_pending),
+            fixed_cell(rw, PIN_RW_WIDTH),
+            fixed_cell(listen, PIN_LISTEN_WIDTH),
         ]
-        .spacing(6)
+        .spacing(CELL_GAP)
+        .height(Length::Fixed(ROW_HEIGHT))
         .align_y(iced::Alignment::Center)
         .into()
     }
 
     fn log_panel(&self) -> Element<'_, Message> {
-        let mut lines = String::new();
-        for entry in &self.logs {
-            if self.show_timestamps {
-                lines.push('[');
-                lines.push_str(&entry.timestamp);
-                lines.push_str("] ");
-            }
-            lines.push_str(&entry.text);
-            lines.push('\n');
-        }
-
         let log = scrollable(
-            container(text(lines).size(12).font(iced::Font::MONOSPACE))
+            text_editor(&self.log_content)
+                .font(iced::Font::MONOSPACE)
+                .size(12)
                 .padding(8)
-                .width(Length::Fill)
-                .style(container::rounded_box),
+                .on_action(Message::LogAction),
         )
         .id(self.log_scroll.clone())
-        .on_scroll(|viewport| Message::LogScrolled(viewport.relative_offset().y))
         .height(Length::Fill)
         .width(Length::Fill);
         let options = column![
             text("Serial Log").size(18),
             row![
-                button("Clear Log")
-                    .style(button::secondary)
-                    .on_press(Message::ClearLog),
+                native_button("Clear log").on_press(Message::ClearLog),
                 checkbox(self.show_timestamps)
                     .label("Timestamps")
                     .on_toggle(Message::ShowTimestamps),
@@ -611,11 +777,10 @@ impl App {
         let command = row![
             text_input("Enter a command…", &self.raw_input)
                 .id(self.raw_input_id.clone())
+                .font(iced::Font::MONOSPACE)
                 .on_input(Message::RawChanged)
                 .on_submit(Message::RawSend),
-            button("Send Command")
-                .style(button::primary)
-                .on_press(Message::RawSend),
+            native_button("Send command").on_press(Message::RawSend),
         ]
         .spacing(5);
 
@@ -627,42 +792,40 @@ impl App {
             .into()
     }
 
-    fn change_mode(&mut self, pin: u8, mode: Mode) -> Task<Message> {
-        if !self.require_connection() {
+    fn change_mode(&mut self, pin: Pin, mode: Mode) -> Task<Message> {
+        if !self.require_connection() || !pin.is_available() {
             return Task::none();
         }
-        let state = &mut self.pins[pin as usize];
-        if state.target_mode.is_some() || state.listener.is_pending() || is_reserved(pin) {
+        let state = &mut self.pins[pin.index() as usize];
+        if state.target_mode.is_some() || state.listener.is_pending() {
             return Task::none();
         }
 
-        if !mode.is_input() && state.listener == ListenerState::On {
+        let mut tasks = Vec::new();
+        if mode == Mode::Output && state.listener == ListenerState::On {
             state.listener = ListenerState::Disabling;
-            let _ = self.send_request(Request::Listen {
+            tasks.push(self.send_request(Request::Listen {
                 target: PinTarget::Pin(pin),
                 enabled: false,
-            });
+            }));
         }
 
-        let state = &mut self.pins[pin as usize];
+        let state = &mut self.pins[pin.index() as usize];
         state.target_mode = Some(mode);
         state.level = None;
-        self.send_request(Request::Direction {
+        tasks.push(self.send_request(Request::Direction {
             target: PinTarget::Pin(pin),
-            direction: if mode == Mode::Output {
-                Direction::Output
-            } else {
-                Direction::Input
-            },
-        })
+            direction: mode.direction(),
+        }));
+        Task::batch(tasks)
     }
 
-    fn read_pin(&mut self, pin: u8) -> Task<Message> {
+    fn read_pin(&mut self, pin: Pin) -> Task<Message> {
         if !self.require_connection() {
             return Task::none();
         }
-        let state = &mut self.pins[pin as usize];
-        if !state.mode.is_some_and(Mode::is_input) || state.value_pending {
+        let state = &mut self.pins[pin.index() as usize];
+        if state.mode.is_none() || state.value_pending {
             return Task::none();
         }
         state.value_pending = true;
@@ -671,11 +834,11 @@ impl App {
         })
     }
 
-    fn toggle_pin(&mut self, pin: u8) -> Task<Message> {
+    fn write_pin(&mut self, pin: Pin) -> Task<Message> {
         if !self.require_connection() {
             return Task::none();
         }
-        let state = &mut self.pins[pin as usize];
+        let state = &mut self.pins[pin.index() as usize];
         if state.mode != Some(Mode::Output) || state.value_pending {
             return Task::none();
         }
@@ -691,11 +854,11 @@ impl App {
         })
     }
 
-    fn toggle_listener(&mut self, pin: u8) -> Task<Message> {
+    fn toggle_listener(&mut self, pin: Pin) -> Task<Message> {
         if !self.require_connection() {
             return Task::none();
         }
-        let state = &mut self.pins[pin as usize];
+        let state = &mut self.pins[pin.index() as usize];
         if !state.mode.is_some_and(Mode::is_input) {
             return Task::none();
         }
@@ -711,89 +874,131 @@ impl App {
         })
     }
 
-    fn common_mode(&self) -> Option<Mode> {
-        let mut modes = (0..WIRE_PIN_COUNT)
-            .filter(|&pin| !is_reserved(pin))
-            .map(|pin| self.pins[pin as usize].mode);
-        let first = modes.next().flatten()?;
-        modes.all(|mode| mode == Some(first)).then_some(first)
-    }
-
-    fn change_all_modes(&mut self, mode: Mode) -> Task<Message> {
+    fn apply_bulk_mode(&mut self) -> Task<Message> {
         if !self.require_connection() {
             return Task::none();
         }
+        let target = self.bulk_scope;
+        let mode = self.bulk_mode;
 
-        if self
-            .pins
-            .iter()
-            .any(|pin| pin.target_mode.is_some() || pin.listener.is_pending())
-        {
+        if self.overwrite {
+            if self.target_has_pending(target) {
+                return Task::none();
+            }
+            let mut tasks = Vec::new();
+            if mode == Mode::Output && self.target_has_listener(target) {
+                self.mark_listener_pending(target, false);
+                tasks.push(self.send_request(Request::Listen {
+                    target,
+                    enabled: false,
+                }));
+            }
+            self.mark_mode_pending(target, mode);
+            tasks.push(self.send_request(Request::Direction {
+                target,
+                direction: mode.direction(),
+            }));
+            return Task::batch(tasks);
+        }
+
+        let mut tasks = Vec::new();
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = self.pins[index as usize];
+            if target.contains(pin)
+                && pin.is_available()
+                && state.mode.is_none()
+                && state.target_mode.is_none()
+            {
+                self.pins[index as usize].target_mode = Some(mode);
+                self.pins[index as usize].level = None;
+                tasks.push(self.send_request(Request::Direction {
+                    target: PinTarget::Pin(pin),
+                    direction: mode.direction(),
+                }));
+            }
+        }
+        if tasks.is_empty() {
+            self.device_status = "No UNSET pins in selected scope".into();
+        }
+        Task::batch(tasks)
+    }
+
+    fn read_scope(&mut self, target: PinTarget) -> Task<Message> {
+        if !self.require_connection() {
             return Task::none();
         }
-
-        if mode == Mode::Output
-            && self
-                .pins
-                .iter()
-                .any(|pin| pin.listener != ListenerState::Off)
-        {
-            for pin in &mut self.pins {
-                if pin.listener != ListenerState::Off {
-                    pin.listener = ListenerState::Disabling;
-                }
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = &mut self.pins[index as usize];
+            if target.contains(pin) && pin.is_available() && state.mode.is_some() {
+                state.value_pending = true;
             }
-            let _ = self.send_request(Request::Listen {
-                target: PinTarget::All,
-                enabled: false,
-            });
         }
+        self.send_request(Request::Get { target })
+    }
 
-        for pin in 0..WIRE_PIN_COUNT {
-            if !is_reserved(pin) {
-                let state = &mut self.pins[pin as usize];
+    fn set_listener_scope(&mut self, target: PinTarget, enabled: bool) -> Task<Message> {
+        if !self.require_connection() {
+            return Task::none();
+        }
+        self.mark_listener_pending(target, enabled);
+        self.send_request(Request::Listen { target, enabled })
+    }
+
+    fn set_scope_level(&mut self, target: PinTarget, level: Level) -> Task<Message> {
+        if !self.require_connection() {
+            return Task::none();
+        }
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = &mut self.pins[index as usize];
+            if target.contains(pin) && state.mode == Some(Mode::Output) {
+                state.value_pending = true;
+            }
+        }
+        self.send_request(Request::Set { target, level })
+    }
+
+    fn target_has_pending(&self, target: PinTarget) -> bool {
+        (0..WIRE_PIN_COUNT).any(|index| {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            target.contains(pin)
+                && (self.pins[index as usize].target_mode.is_some()
+                    || self.pins[index as usize].listener.is_pending())
+        })
+    }
+
+    fn target_has_listener(&self, target: PinTarget) -> bool {
+        (0..WIRE_PIN_COUNT).any(|index| {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            target.contains(pin) && self.pins[index as usize].listener == ListenerState::On
+        })
+    }
+
+    fn mark_mode_pending(&mut self, target: PinTarget, mode: Mode) {
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            if target.contains(pin) && pin.is_available() {
+                let state = &mut self.pins[index as usize];
                 state.target_mode = Some(mode);
                 state.level = None;
             }
         }
-
-        self.send_request(Request::Direction {
-            target: PinTarget::All,
-            direction: if mode == Mode::Output {
-                Direction::Output
-            } else {
-                Direction::Input
-            },
-        })
     }
 
-    fn read_all(&mut self) -> Task<Message> {
-        if !self.require_connection() {
-            return Task::none();
-        }
-        for state in &mut self.pins {
-            if state.mode.is_some() {
-                state.value_pending = true;
+    fn mark_listener_pending(&mut self, target: PinTarget, enabled: bool) {
+        for index in 0..WIRE_PIN_COUNT {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            let state = &mut self.pins[index as usize];
+            if target.contains(pin) && state.mode.is_some_and(Mode::is_input) {
+                state.listener = if enabled {
+                    ListenerState::Enabling
+                } else {
+                    ListenerState::Disabling
+                };
             }
         }
-        self.send_request(Request::Get {
-            target: PinTarget::All,
-        })
-    }
-
-    fn listen_all(&mut self) -> Task<Message> {
-        if !self.require_connection() {
-            return Task::none();
-        }
-        for state in &mut self.pins {
-            if state.mode.is_some() {
-                state.listener = ListenerState::Enabling;
-            }
-        }
-        self.send_request(Request::Listen {
-            target: PinTarget::All,
-            enabled: true,
-        })
     }
 
     fn send_request(&mut self, request: Request) -> Task<Message> {
@@ -876,101 +1081,58 @@ impl App {
             DeviceEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
             DeviceEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
             DeviceEvent::Ack(request) => match request {
-                Request::Direction {
-                    target: PinTarget::Pin(pin),
-                    ..
-                } => {
-                    let mode = self.pins[pin as usize]
-                        .target_mode
-                        .expect("direction ACK requires a pending mode change");
+                Request::Direction { target, .. } => {
+                    let Some(mode) = self.pending_mode(target) else {
+                        return;
+                    };
                     tasks.push(self.send_request(Request::Pullup {
-                        target: PinTarget::Pin(pin),
+                        target,
                         enabled: mode == Mode::InputPullup,
                     }));
                 }
-                Request::Direction {
-                    target: PinTarget::All,
-                    ..
-                } => {
-                    let mode = self
-                        .pins
-                        .iter()
-                        .find_map(|pin| pin.target_mode)
-                        .expect("bulk direction ACK requires a pending mode change");
-                    tasks.push(self.send_request(Request::Pullup {
-                        target: PinTarget::All,
-                        enabled: mode == Mode::InputPullup,
-                    }));
-                }
-                Request::Pullup {
-                    target: PinTarget::Pin(pin),
-                    ..
-                } => {
-                    let state = &mut self.pins[pin as usize];
-                    state.mode = Some(
-                        state
-                            .target_mode
-                            .take()
-                            .expect("pull-up ACK requires a pending mode change"),
-                    );
-                    if state.mode.is_some_and(Mode::is_input) {
-                        tasks.push(self.read_pin(pin));
-                    }
-                }
-                Request::Pullup {
-                    target: PinTarget::All,
-                    ..
-                } => {
+                Request::Pullup { target, .. } => {
                     let mut read = false;
-                    for pin in 0..WIRE_PIN_COUNT {
-                        if !is_reserved(pin) {
-                            let state = &mut self.pins[pin as usize];
-                            if let Some(mode) = state.target_mode.take() {
-                                state.mode = Some(mode);
-                                read |= mode.is_input();
+                    for index in 0..WIRE_PIN_COUNT {
+                        let pin = Pin::from_index(index).expect("wire pin index is in range");
+                        if !target.contains(pin) {
+                            continue;
+                        }
+                        let state = &mut self.pins[index as usize];
+                        if let Some(mode) = state.target_mode.take() {
+                            state.mode = Some(mode);
+                            if mode.is_input() {
+                                read = true;
+                            } else {
+                                state.level = Some(Level::Low);
                             }
                         }
                     }
                     if read {
-                        tasks.push(self.read_all());
+                        tasks.push(match target {
+                            PinTarget::Pin(pin) => self.read_pin(pin),
+                            PinTarget::Bank(_) | PinTarget::All => self.read_scope(target),
+                        });
                     }
                 }
-                Request::Set {
-                    target: PinTarget::Pin(pin),
-                    level,
-                } => {
-                    let state = &mut self.pins[pin as usize];
-                    state.level = Some(level);
-                    state.value_pending = false;
-                }
-                Request::Set {
-                    target: PinTarget::All,
-                    level,
-                } => {
-                    for state in &mut self.pins {
-                        if state.mode.is_some() {
+                Request::Set { target, level } => {
+                    for index in 0..WIRE_PIN_COUNT {
+                        let pin = Pin::from_index(index).expect("wire pin index is in range");
+                        if target.contains(pin)
+                            && self.pins[index as usize].mode == Some(Mode::Output)
+                        {
+                            let state = &mut self.pins[index as usize];
                             state.level = Some(level);
                             state.value_pending = false;
                         }
                     }
                 }
-                Request::Listen {
-                    target: PinTarget::Pin(pin),
-                    enabled,
-                } => {
-                    self.pins[pin as usize].listener = if enabled {
-                        ListenerState::On
-                    } else {
-                        ListenerState::Off
-                    };
-                }
-                Request::Listen {
-                    target: PinTarget::All,
-                    enabled,
-                } => {
-                    for state in &mut self.pins {
-                        if state.mode.is_some() {
-                            state.listener = if enabled {
+                Request::Listen { target, enabled } => {
+                    for index in 0..WIRE_PIN_COUNT {
+                        let pin = Pin::from_index(index).expect("wire pin index is in range");
+                        if target.contains(pin)
+                            && self.pins[index as usize].mode.is_some_and(Mode::is_input)
+                        {
+                            self.pins[index as usize].listener = if enabled {
                                 ListenerState::On
                             } else {
                                 ListenerState::Off
@@ -981,19 +1143,19 @@ impl App {
                 _ => {}
             },
             DeviceEvent::PinValue { pin, level } => {
-                let state = &mut self.pins[pin as usize];
+                let state = &mut self.pins[pin.index() as usize];
                 state.level = Some(level);
                 state.value_pending = false;
             }
             DeviceEvent::PinState { pin, what, value } => {
-                self.device_status = format!("{} {what:?}: {value:?}", pin_name(pin));
+                self.device_status = format!("{} {what:?}: {value:?}", pin_display(pin));
             }
             DeviceEvent::DeviceError { request, error } => {
                 self.fail_request(request);
                 self.error = Some(match error {
                     ResponseError::BadPacket => "Device rejected a malformed packet".into(),
                     ResponseError::Pin { pin, reason } => {
-                        format!("{}: {reason:?}", pin_name(pin))
+                        format!("{}: {reason:?}", pin_display(pin))
                     }
                 });
             }
@@ -1009,63 +1171,39 @@ impl App {
         }
     }
 
+    fn pending_mode(&self, target: PinTarget) -> Option<Mode> {
+        (0..WIRE_PIN_COUNT).find_map(|index| {
+            let pin = Pin::from_index(index).expect("wire pin index is in range");
+            target
+                .contains(pin)
+                .then_some(self.pins[index as usize].target_mode)
+                .flatten()
+        })
+    }
+
     fn fail_request(&mut self, request: Request) {
         match request {
-            Request::Direction {
-                target: PinTarget::Pin(pin),
-                ..
-            }
-            | Request::Pullup {
-                target: PinTarget::Pin(pin),
-                ..
-            } => self.pins[pin as usize].target_mode = None,
-            Request::Direction {
-                target: PinTarget::All,
-                ..
-            }
-            | Request::Pullup {
-                target: PinTarget::All,
-                ..
-            } => {
-                for state in &mut self.pins {
-                    state.target_mode = None;
+            Request::Direction { target, .. } | Request::Pullup { target, .. } => {
+                for index in 0..WIRE_PIN_COUNT {
+                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                    if target.contains(pin) {
+                        self.pins[index as usize].target_mode = None;
+                    }
                 }
             }
-            Request::Get {
-                target: PinTarget::Pin(pin),
-            }
-            | Request::Set {
-                target: PinTarget::Pin(pin),
-                ..
-            } => self.pins[pin as usize].value_pending = false,
-            Request::Get {
-                target: PinTarget::All,
-            }
-            | Request::Set {
-                target: PinTarget::All,
-                ..
-            } => {
-                for state in &mut self.pins {
-                    state.value_pending = false;
+            Request::Get { target } | Request::Set { target, .. } => {
+                for index in 0..WIRE_PIN_COUNT {
+                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                    if target.contains(pin) {
+                        self.pins[index as usize].value_pending = false;
+                    }
                 }
             }
-            Request::Listen {
-                target: PinTarget::Pin(pin),
-                enabled,
-            } => {
-                self.pins[pin as usize].listener = if enabled {
-                    ListenerState::Off
-                } else {
-                    ListenerState::On
-                };
-            }
-            Request::Listen {
-                target: PinTarget::All,
-                enabled,
-            } => {
-                for state in &mut self.pins {
-                    if state.mode.is_some() {
-                        state.listener = if enabled {
+            Request::Listen { target, enabled } => {
+                for index in 0..WIRE_PIN_COUNT {
+                    let pin = Pin::from_index(index).expect("wire pin index is in range");
+                    if target.contains(pin) && self.pins[index as usize].mode.is_some() {
+                        self.pins[index as usize].listener = if enabled {
                             ListenerState::Off
                         } else {
                             ListenerState::On
@@ -1097,7 +1235,22 @@ impl App {
         if self.logs.len() > MAX_LOG_LINES {
             self.logs.pop_front();
         }
+        self.refresh_log_content();
         self.snap_log()
+    }
+
+    fn refresh_log_content(&mut self) {
+        let mut content = String::new();
+        for entry in &self.logs {
+            if self.show_timestamps {
+                content.push('[');
+                content.push_str(&entry.timestamp);
+                content.push_str("] ");
+            }
+            content.push_str(&entry.text);
+            content.push('\n');
+        }
+        self.log_content = text_editor::Content::with_text(&content);
     }
 
     fn snap_log(&self) -> Task<Message> {
@@ -1137,36 +1290,135 @@ impl App {
 
 fn pin_header<'a>() -> Element<'a, Message> {
     row![
-        text("PIN").size(11).width(Length::Fixed(PIN_NAME_WIDTH)),
-        text("MODE").size(11).width(Length::Fixed(PIN_MODE_WIDTH)),
-        text("LEVEL")
-            .size(11)
-            .width(Length::Fixed(PIN_STATUS_WIDTH)),
-        text("ACTIONS")
-            .size(11)
-            .width(Length::Fixed(PIN_ACTION_WIDTH)),
+        fixed_cell(text("PIN").size(11), PIN_NAME_WIDTH),
+        fixed_cell(text("MODE").size(11), PIN_MODE_WIDTH),
+        fixed_cell(text("LEVEL").size(11), PIN_STATUS_WIDTH),
+        fixed_cell(text("READ / WRITE").size(11), PIN_RW_WIDTH),
+        fixed_cell(text("LISTEN / STOP").size(11), PIN_LISTEN_WIDTH),
     ]
-    .spacing(6)
+    .spacing(CELL_GAP)
     .into()
 }
 
-fn page_count() -> usize {
-    (WIRE_PIN_COUNT as usize).div_ceil(PINS_PER_PAGE)
+fn fixed_cell<'a>(content: impl Into<Element<'a, Message>>, width: f32) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(ROW_HEIGHT))
+        .align_x(Horizontal::Left)
+        .align_y(Vertical::Center)
+        .into()
 }
 
-fn is_reserved(pin: u8) -> bool {
-    matches!(pin, 40..=43)
+fn level_box(level: Option<Level>, pending: bool) -> Element<'static, Message> {
+    let label = if pending {
+        "…"
+    } else {
+        match level {
+            Some(Level::High) => "HIGH",
+            Some(Level::Low) => "LOW",
+            None => "—",
+        }
+    };
+    let background = if pending {
+        UNSET_BG
+    } else {
+        match level {
+            Some(Level::High) => HIGH_BG,
+            Some(Level::Low) => LOW_BG,
+            None => UNSET_BG,
+        }
+    };
+    container(text(label).size(11))
+        .width(Length::Fixed(PIN_STATUS_WIDTH))
+        .height(Length::Fixed(28.0))
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(background)),
+            text_color: Some(UI_TEXT),
+            border: Border {
+                radius: 3.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
-fn pin_name(pin: u8) -> String {
-    match pin {
-        0..=31 => format!("PA{pin}"),
-        32..=46 => format!("PB{}", pin - 32),
-        47..=78 => format!("PC{}", pin - 47),
-        79..=110 => format!("PD{}", pin - 79),
-        111..=116 => format!("PE{}", pin - 111),
-        _ => format!("?{pin}"),
+fn pin_display(pin: Pin) -> String {
+    format!(
+        "P{}{} ({})",
+        pin.port().letter(),
+        pin.bit(),
+        pin.package_pin()
+    )
+}
+
+fn panel_style(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border {
+            color: UI_BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
     }
+}
+
+fn input_style(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(INPUT_BG)),
+        text_color: Some(UI_TEXT),
+        border: Border {
+            color: UI_BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn native_button<'a>(label: &'a str) -> iced::widget::Button<'a, Message> {
+    button(label).style(neutral_button)
+}
+
+fn neutral_button(_: &Theme, status: button::Status) -> button::Style {
+    let (background, text_color) = match status {
+        button::Status::Hovered => (RAISED_HOVER, UI_TEXT),
+        button::Status::Disabled => (RAISED_BG, MUTED),
+        button::Status::Active | button::Status::Pressed => (RAISED_BG, UI_TEXT),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: UI_BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn selected_tab_button(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = neutral_button(theme, status);
+    style.background = Some(Background::Color(if status == button::Status::Hovered {
+        Color::from_rgb8(0x50, 0x50, 0x50)
+    } else {
+        Color::from_rgb8(0x46, 0x46, 0x46)
+    }));
+    style
+}
+
+fn danger_button(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = neutral_button(theme, status);
+    style.text_color = if status == button::Status::Disabled {
+        MUTED
+    } else {
+        DANGER
+    };
+    style
 }
 
 fn load_ports() -> Task<Message> {
@@ -1191,35 +1443,85 @@ mod tests {
     }
 
     #[test]
-    fn bulk_controls_send_all_targets() {
+    fn bulk_controls_send_selected_symbolic_scope() {
         let mut app = connected_app();
         let mut tasks = Vec::new();
+        app.bulk_scope = PinTarget::Bank(Port::C);
+        app.bulk_mode = Mode::InputPullup;
+        app.overwrite = true;
 
-        let _ = app.change_all_modes(Mode::InputPullup);
-        assert_eq!(last_log(&app), "TX 001 DIR ALL IN OK?");
+        let _ = app.apply_bulk_mode();
+        assert_eq!(last_log(&app), "TX 001 DIR PIOC IN OK?");
 
         app.handle_device_event(
             DeviceEvent::Ack(Request::Direction {
-                target: PinTarget::All,
+                target: PinTarget::Bank(Port::C),
                 direction: Direction::Input,
             }),
             &mut tasks,
         );
-        assert_eq!(last_log(&app), "TX 002 PLL ALL ON OK?");
+        assert_eq!(last_log(&app), "TX 002 PLL PIOC ON OK?");
 
         app.handle_device_event(
             DeviceEvent::Ack(Request::Pullup {
-                target: PinTarget::All,
+                target: PinTarget::Bank(Port::C),
                 enabled: true,
             }),
             &mut tasks,
         );
-        assert_eq!(last_log(&app), "TX 003 GET ALL OK?");
+        assert_eq!(last_log(&app), "TX 003 GET PIOC OK?");
 
-        let _ = app.listen_all();
-        assert_eq!(last_log(&app), "TX 004 LSN ALL ON OK?");
+        let _ = app.set_listener_scope(PinTarget::Bank(Port::C), true);
+        assert_eq!(last_log(&app), "TX 004 LSN PIOC ON OK?");
 
-        let _ = app.read_all();
-        assert_eq!(last_log(&app), "TX 005 GET ALL OK?");
+        let _ = app.read_scope(PinTarget::Bank(Port::C));
+        assert_eq!(last_log(&app), "TX 005 GET PIOC OK?");
+    }
+
+    #[test]
+    fn bulk_set_waits_for_confirmation() {
+        let mut app = connected_app();
+
+        let _ = app.update(Message::BulkSet(Level::High));
+        assert!(app.logs.is_empty());
+        assert_eq!(app.confirm_set, Some((PinTarget::All, Level::High)));
+
+        let _ = app.update(Message::BulkSetConfirm);
+        assert_eq!(last_log(&app), "TX 001 SET ALL HIGH OK?");
+    }
+
+    #[test]
+    fn tab_selection_does_not_change_bulk_scope() {
+        let mut app = connected_app();
+        app.bulk_scope = PinTarget::Bank(Port::C);
+
+        let _ = app.update(Message::TabSelected(BankTab::D));
+
+        assert_eq!(app.bank_tab, BankTab::D);
+        assert_eq!(app.bulk_scope, PinTarget::Bank(Port::C));
+    }
+
+    #[test]
+    fn overwrite_off_only_targets_unset_pins_individually() {
+        let mut app = connected_app();
+        let configured = Pin::new(Port::A, 0).unwrap();
+        app.pins[configured.index() as usize].mode = Some(Mode::Input);
+        app.bulk_scope = PinTarget::Bank(Port::A);
+        app.bulk_mode = Mode::Output;
+        app.overwrite = false;
+
+        let _ = app.apply_bulk_mode();
+
+        assert!(!app.logs.iter().any(|entry| entry.text.contains("DIR PA00")));
+        assert!(
+            app.logs
+                .iter()
+                .all(|entry| !entry.text.contains("DIR PIOA"))
+        );
+        assert!(
+            app.logs
+                .iter()
+                .any(|entry| entry.text.contains("DIR PA01 OUT"))
+        );
     }
 }
