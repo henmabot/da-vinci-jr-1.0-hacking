@@ -8,12 +8,12 @@
 # printed to stdout and answered with a plausible slave packet per
 # protocol.py:
 #
-#   - GET / WYD replies return a random HIGH/LOW (or IN/OUT, ON/OFF for
-#     WYD DIR/PLL) -- pin state isn't tracked at all.
-#   - DIR / SET / PLL / LSN are always acked immediately.
-#   - LSN ... ON starts a background loop that pushes a random HIGH/LOW
-#     under the same packet id every 5 seconds until a matching
-#     LSN ... OFF is received for that pin.
+#   - DIR initializes a pin and tracks its direction.
+#   - GET on an input returns a random HIGH/LOW; output reads return the last
+#     value written with SET.
+#   - WYD reports tracked state and identifies pins with no DIR as UNSET.
+#   - LSN ... ON pushes a random HIGH/LOW every 5 seconds until LSN ... OFF.
+#   - BYE clears every tracked pin and listener state.
 
 import random
 import threading
@@ -28,6 +28,9 @@ LISTEN_INTERVAL_S = 5.0
 class MockSerial:
     def __init__(self):
         self._inbox: Queue[bytes] = Queue()
+        self._directions: dict[str, str] = {}
+        self._pullups: dict[str, str] = {}
+        self._values: dict[str, str] = {}
         self._listeners: dict[str, bool] = {}
         self._lock = threading.Lock()
 
@@ -66,31 +69,68 @@ class MockSerial:
             self._reply(f"{packet_id} HII <3")
         elif command == "HRU":
             self._reply(f"{packet_id} IAM MOCK <3")
-        elif command in ("DIR", "SET", "PLL"):
+        elif command == "DIR":
+            pin, direction = rest[0], rest[1]
+            with self._lock:
+                self._directions[pin] = direction
+                self._pullups[pin] = "OFF"
+                self._values[pin] = "LOW"
             self._reply(f"{packet_id} OKA <3")
+        elif command == "SET":
+            pin, value = rest[0], rest[1]
+            if not self._initialized(pin):
+                self._reply(f"{packet_id} UMM {pin} UNSET <3")
+            else:
+                with self._lock:
+                    self._values[pin] = value
+                self._reply(f"{packet_id} OKA <3")
+        elif command == "PLL":
+            pin, state = rest[0], rest[1]
+            if not self._initialized(pin):
+                self._reply(f"{packet_id} UMM {pin} UNSET <3")
+            else:
+                with self._lock:
+                    self._pullups[pin] = state
+                self._reply(f"{packet_id} OKA <3")
         elif command == "GET":
             pin = rest[0]
-            value = random.choice(["HIGH", "LOW"])
-            self._reply(f"{packet_id} HYG {pin} {value} <3")
+            if not self._initialized(pin):
+                self._reply(f"{packet_id} UMM {pin} UNSET <3")
+            else:
+                with self._lock:
+                    if self._directions[pin] == "IN":
+                        self._values[pin] = random.choice(["HIGH", "LOW"])
+                    value = self._values[pin]
+                self._reply(f"{packet_id} HYG {pin} {value} <3")
         elif command == "LSN":
             pin, state = rest[0], rest[1]
-            self._reply(f"{packet_id} OKA <3")
-            if state == "ON":
-                self._start_listener(packet_id, pin)
+            if not self._initialized(pin):
+                self._reply(f"{packet_id} UMM {pin} UNSET <3")
             else:
-                self._stop_listener(pin)
+                self._reply(f"{packet_id} OKA <3")
+                if state == "ON":
+                    self._start_listener(packet_id, pin)
+                else:
+                    self._stop_listener(pin)
         elif command == "WYD":
             pin, kind = rest[0], rest[1]
             if kind == "DIR":
-                value = random.choice(["IN", "OUT"])
+                value = self._directions.get(pin, "UNSET")
             elif kind == "PLL":
-                value = random.choice(["ON", "OFF"])
+                value = self._pullups.get(pin, "UNSET")
             elif kind == "LSN":
-                value = "ON" if self._listeners.get(pin) else "OFF"
+                value = (
+                    "UNSET"
+                    if not self._initialized(pin)
+                    else "ON"
+                    if self._listeners.get(pin)
+                    else "OFF"
+                )
             else:
                 value = "OFF"
             self._reply(f"{packet_id} HYG {pin} {kind} {value} <3")
         elif command == "BYE":
+            self.reset()
             self._reply(f"{packet_id} CYA <3")
         else:
             self._reply(f"{packet_id} IDK <3")
@@ -105,7 +145,8 @@ class MockSerial:
                 with self._lock:
                     if not self._listeners.get(pin):
                         return
-                value = random.choice(["HIGH", "LOW"])
+                    value = random.choice(["HIGH", "LOW"])
+                    self._values[pin] = value
                 self._reply(f"{packet_id} HYG {pin} {value} <3")
 
         threading.Thread(target=loop, daemon=True).start()
@@ -113,3 +154,14 @@ class MockSerial:
     def _stop_listener(self, pin: str):
         with self._lock:
             self._listeners[pin] = False
+
+    def _initialized(self, pin: str) -> bool:
+        with self._lock:
+            return pin in self._directions
+
+    def reset(self):
+        with self._lock:
+            self._directions.clear()
+            self._pullups.clear()
+            self._values.clear()
+            self._listeners.clear()
