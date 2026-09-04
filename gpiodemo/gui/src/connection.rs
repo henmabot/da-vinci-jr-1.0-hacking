@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{self, Read, Write},
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -247,67 +248,76 @@ enum IoEvent {
 fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
     let mut port: Option<Box<dyn serialport::SerialPort>> = None;
     let mut reader = LineBuffer::new();
+    let mut writes = VecDeque::new();
+    let mut write_offset = 0;
     let mut buffer = [0u8; 64];
 
     loop {
-        let command = if port.is_some() {
-            match commands.try_recv() {
-                Ok(command) => Some(command),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            }
+        if port.is_none() {
+            let Ok(command) = commands.recv() else {
+                return;
+            };
+            handle_io_command(
+                command,
+                &mut port,
+                &mut reader,
+                &mut writes,
+                &mut write_offset,
+                &events,
+            );
         } else {
-            match commands.recv() {
-                Ok(command) => Some(command),
-                Err(_) => return,
+            loop {
+                match commands.try_recv() {
+                    Ok(command) => handle_io_command(
+                        command,
+                        &mut port,
+                        &mut reader,
+                        &mut writes,
+                        &mut write_offset,
+                        &events,
+                    ),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => return,
+                }
             }
-        };
+        }
 
-        if let Some(command) = command {
-            match command {
-                IoCommand::Connect(name) => {
-                    reader.clear();
-                    match serialport::new(&name, 115_200)
-                        .timeout(Duration::from_millis(20))
-                        .open()
-                    {
-                        Ok(opened) => {
-                            port = Some(opened);
-                            let _ = events.send(IoEvent::Connected(name));
-                        }
-                        Err(error) => {
-                            port = None;
-                            let _ = events
-                                .send(IoEvent::Error(format!("Could not open {name}: {error}")));
-                        }
-                    }
-                }
-                IoCommand::Disconnect => {
-                    port = None;
-                    reader.clear();
-                    let _ = events.send(IoEvent::Disconnected(None));
-                }
-                IoCommand::Write(bytes) => {
-                    let Some(opened) = port.as_mut() else {
-                        let _ = events.send(IoEvent::Error("Serial device is disconnected".into()));
-                        continue;
-                    };
-                    if let Err(error) = opened.write_all(&bytes) {
-                        port = None;
-                        let _ = events.send(IoEvent::Disconnected(Some(format!(
-                            "Serial write failed: {error}"
-                        ))));
-                    }
-                }
-            }
+        if port.is_none() {
             continue;
         }
 
-        let Some(opened) = port.as_mut() else {
-            continue;
-        };
+        if let Some(bytes) = writes.front() {
+            let result = port
+                .as_mut()
+                .expect("connected serial port")
+                .write(&bytes[write_offset..]);
+            match result {
+                Ok(written) => {
+                    write_offset += written;
+                    if write_offset == bytes.len() {
+                        writes.pop_front();
+                        write_offset = 0;
+                    }
+                }
+                Err(error) if transient_io_error(&error) => {}
+                Err(error) => {
+                    port = None;
+                    writes.clear();
+                    write_offset = 0;
+                    reader.clear();
+                    let _ = events.send(IoEvent::Disconnected(Some(format!(
+                        "Serial write failed: {error}"
+                    ))));
+                    continue;
+                }
+            }
+        }
 
-        match opened.read(&mut buffer) {
+        match port
+            .as_mut()
+            .expect("connected serial port")
+            .read(&mut buffer)
+        {
             Ok(count) => {
                 for &byte in &buffer[..count] {
                     match reader.push(byte) {
@@ -325,19 +335,67 @@ fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
                     }
                 }
             }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-                ) => {}
+            Err(error) if transient_io_error(&error) => {}
             Err(error) => {
                 port = None;
+                writes.clear();
+                write_offset = 0;
+                reader.clear();
                 let _ = events.send(IoEvent::Disconnected(Some(format!(
                     "Serial read failed: {error}"
                 ))));
             }
         }
     }
+}
+
+fn handle_io_command(
+    command: IoCommand,
+    port: &mut Option<Box<dyn serialport::SerialPort>>,
+    reader: &mut LineBuffer,
+    writes: &mut VecDeque<Vec<u8>>,
+    write_offset: &mut usize,
+    events: &Sender<IoEvent>,
+) {
+    match command {
+        IoCommand::Connect(name) => {
+            writes.clear();
+            *write_offset = 0;
+            reader.clear();
+            match serialport::new(&name, 115_200)
+                .timeout(Duration::from_millis(20))
+                .open()
+            {
+                Ok(opened) => {
+                    *port = Some(opened);
+                    let _ = events.send(IoEvent::Connected(name));
+                }
+                Err(error) => {
+                    *port = None;
+                    let _ = events.send(IoEvent::Error(format!("Could not open {name}: {error}")));
+                }
+            }
+        }
+        IoCommand::Disconnect => {
+            *port = None;
+            writes.clear();
+            *write_offset = 0;
+            reader.clear();
+            let _ = events.send(IoEvent::Disconnected(None));
+        }
+        IoCommand::Write(bytes) => {
+            if port.is_some() {
+                writes.push_back(bytes);
+            }
+        }
+    }
+}
+
+fn transient_io_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+    )
 }
 
 #[cfg(test)]
@@ -350,6 +408,41 @@ mod tests {
 
     fn prepared(connection: &mut Connection, request: Request) -> (u16, Vec<u8>) {
         connection.prepare(request).unwrap()
+    }
+
+    #[test]
+    fn transient_serial_errors_are_retryable() {
+        for kind in [
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::Interrupted,
+        ] {
+            assert!(transient_io_error(&io::Error::from(kind)));
+        }
+        assert!(!transient_io_error(&io::Error::from(
+            io::ErrorKind::BrokenPipe
+        )));
+    }
+
+    #[test]
+    fn stale_write_after_disconnect_is_dropped_without_error() {
+        let (events, received) = mpsc::channel();
+        let mut port = None;
+        let mut reader = LineBuffer::new();
+        let mut writes = VecDeque::new();
+        let mut write_offset = 0;
+
+        handle_io_command(
+            IoCommand::Write(b"001 HAI\n".to_vec()),
+            &mut port,
+            &mut reader,
+            &mut writes,
+            &mut write_offset,
+            &events,
+        );
+
+        assert!(writes.is_empty());
+        assert!(received.try_recv().is_err());
     }
 
     #[test]
