@@ -27,7 +27,6 @@ fn main() -> iced::Result {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
-    Unset,
     Input,
     InputPullup,
     Output,
@@ -42,7 +41,6 @@ impl Mode {
 impl fmt::Display for Mode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Unset => "UNSET",
             Self::Input => "INPUT",
             Self::InputPullup => "IN_PULLUP",
             Self::Output => "OUTPUT",
@@ -50,28 +48,42 @@ impl fmt::Display for Mode {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum HistoryDirection {
+    Previous,
+    Next,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListenerState {
+    Off,
+    Enabling,
+    On,
+    Disabling,
+}
+
+impl ListenerState {
+    fn is_pending(self) -> bool {
+        matches!(self, Self::Enabling | Self::Disabling)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct PinState {
-    mode: Mode,
+    mode: Option<Mode>,
     target_mode: Option<Mode>,
     level: Option<Level>,
-    listening: bool,
-    mode_pending: bool,
-    read_pending: bool,
-    listen_pending: bool,
-    toggle_pending: bool,
+    listener: ListenerState,
+    value_pending: bool,
 }
 
 impl PinState {
     const UNSET: Self = Self {
-        mode: Mode::Unset,
+        mode: None,
         target_mode: None,
         level: None,
-        listening: false,
-        mode_pending: false,
-        read_pending: false,
-        listen_pending: false,
-        toggle_pending: false,
+        listener: ListenerState::Off,
+        value_pending: false,
     };
 }
 
@@ -108,8 +120,11 @@ enum Message {
     LogScrolled(f32),
     RawChanged(String),
     RawSend,
-    HistoryKey(bool),
-    HistoryKeyFocus { previous: bool, focused: bool },
+    HistoryKey(HistoryDirection),
+    HistoryKeyFocus {
+        direction: HistoryDirection,
+        focused: bool,
+    },
 }
 
 struct App {
@@ -125,7 +140,7 @@ struct App {
     log_scroll: iced::widget::Id,
     raw_input_id: iced::widget::Id,
     raw_input: String,
-    command_history: Vec<String>,
+    command_history: VecDeque<String>,
     history_index: Option<usize>,
     device_status: String,
     error: Option<String>,
@@ -148,7 +163,7 @@ impl App {
                 log_scroll: iced::widget::Id::unique(),
                 raw_input_id: iced::widget::Id::unique(),
                 raw_input: String::new(),
-                command_history: Vec::new(),
+                command_history: VecDeque::new(),
                 history_index: None,
                 device_status: "Disconnected".into(),
                 error: None,
@@ -165,11 +180,11 @@ impl App {
                 iced::Event::Keyboard(KeyboardEvent::KeyPressed {
                     key: Key::Named(Named::ArrowUp),
                     ..
-                }) => Some(Message::HistoryKey(true)),
+                }) => Some(Message::HistoryKey(HistoryDirection::Previous)),
                 iced::Event::Keyboard(KeyboardEvent::KeyPressed {
                     key: Key::Named(Named::ArrowDown),
                     ..
-                }) => Some(Message::HistoryKey(false)),
+                }) => Some(Message::HistoryKey(HistoryDirection::Next)),
                 _ => None,
             }),
         ])
@@ -267,16 +282,15 @@ impl App {
                 Task::none()
             }
             Message::RawSend => self.send_raw(),
-            Message::HistoryKey(previous) => {
+            Message::HistoryKey(direction) => {
                 iced::widget::operation::is_focused(self.raw_input_id.clone())
-                    .map(move |focused| Message::HistoryKeyFocus { previous, focused })
+                    .map(move |focused| Message::HistoryKeyFocus { direction, focused })
             }
-            Message::HistoryKeyFocus { previous, focused } => {
+            Message::HistoryKeyFocus { direction, focused } => {
                 if focused {
-                    if previous {
-                        self.history_previous();
-                    } else {
-                        self.history_next();
+                    match direction {
+                        HistoryDirection::Previous => self.history_previous(),
+                        HistoryDirection::Next => self.history_next(),
                     }
                 }
                 Task::none()
@@ -401,11 +415,9 @@ impl App {
         }
 
         let state = self.pins[pin as usize];
-        let mode = pick_list(
-            MODES,
-            (state.mode != Mode::Unset).then_some(state.mode),
-            move |mode| Message::ModeSelected(pin, mode),
-        )
+        let mode = pick_list(MODES, state.mode, move |mode| {
+            Message::ModeSelected(pin, mode)
+        })
         .placeholder("UNSET")
         .width(Length::Fixed(105.0));
 
@@ -415,33 +427,36 @@ impl App {
             None => "--",
         };
 
-        let actions: Element<'_, Message> = if state.mode.is_input() {
-            let read = button(if state.read_pending {
+        let actions: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
+            let read = button(if state.value_pending {
                 "Reading..."
             } else {
                 "Read"
             })
-            .on_press_maybe((!state.read_pending).then_some(Message::Read(pin)));
-            let listen_label = if state.listen_pending {
-                "Sending..."
-            } else if state.listening {
-                "Listening"
-            } else {
-                "Listen"
+            .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)));
+            let listen_label = match state.listener {
+                ListenerState::Enabling | ListenerState::Disabling => "Sending...",
+                ListenerState::On => "Listening",
+                ListenerState::Off => "Listen",
             };
             let listen = button(listen_label)
-                .on_press_maybe((!state.listen_pending).then_some(Message::Listen(pin)));
+                .on_press_maybe((!state.listener.is_pending()).then_some(Message::Listen(pin)));
             row![read, listen].spacing(4).into()
-        } else if state.mode == Mode::Output {
-            button(if state.toggle_pending {
+        } else if state.mode == Some(Mode::Output) {
+            button(if state.value_pending {
                 "Sending..."
             } else {
                 "Toggle"
             })
-            .on_press_maybe((!state.toggle_pending).then_some(Message::Toggle(pin)))
+            .on_press_maybe((!state.value_pending).then_some(Message::Toggle(pin)))
             .into()
         } else {
-            text(if state.mode_pending { "Setting..." } else { "" }).into()
+            text(if state.target_mode.is_some() {
+                "Setting..."
+            } else {
+                ""
+            })
+            .into()
         };
 
         row![
@@ -503,12 +518,12 @@ impl App {
             return Task::none();
         }
         let state = &mut self.pins[pin as usize];
-        if state.mode_pending || is_reserved(pin) {
+        if state.target_mode.is_some() || state.listener.is_pending() || is_reserved(pin) {
             return Task::none();
         }
 
-        if !mode.is_input() && state.listening && !state.listen_pending {
-            state.listen_pending = true;
+        if !mode.is_input() && state.listener == ListenerState::On {
+            state.listener = ListenerState::Disabling;
             let _ = self.send_request(Request::Listen {
                 pin,
                 enabled: false,
@@ -516,7 +531,6 @@ impl App {
         }
 
         let state = &mut self.pins[pin as usize];
-        state.mode_pending = true;
         state.target_mode = Some(mode);
         state.level = None;
         self.send_request(Request::Direction {
@@ -534,10 +548,10 @@ impl App {
             return Task::none();
         }
         let state = &mut self.pins[pin as usize];
-        if !state.mode.is_input() || state.read_pending {
+        if !state.mode.is_some_and(Mode::is_input) || state.value_pending {
             return Task::none();
         }
-        state.read_pending = true;
+        state.value_pending = true;
         self.send_request(Request::Get { pin })
     }
 
@@ -546,10 +560,10 @@ impl App {
             return Task::none();
         }
         let state = &mut self.pins[pin as usize];
-        if state.mode != Mode::Output || state.toggle_pending {
+        if state.mode != Some(Mode::Output) || state.value_pending {
             return Task::none();
         }
-        state.toggle_pending = true;
+        state.value_pending = true;
         let level = if state.level == Some(Level::High) {
             Level::Low
         } else {
@@ -563,18 +577,24 @@ impl App {
             return Task::none();
         }
         let state = &mut self.pins[pin as usize];
-        if !state.mode.is_input() || state.listen_pending {
+        if !state.mode.is_some_and(Mode::is_input) {
             return Task::none();
         }
-        let enabled = !state.listening;
-        state.listen_pending = true;
+        let (enabled, pending) = match state.listener {
+            ListenerState::Off => (true, ListenerState::Enabling),
+            ListenerState::On => (false, ListenerState::Disabling),
+            ListenerState::Enabling | ListenerState::Disabling => return Task::none(),
+        };
+        state.listener = pending;
         self.send_request(Request::Listen { pin, enabled })
     }
 
     fn read_all(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         for pin in 0..WIRE_PIN_COUNT {
-            if self.pins[pin as usize].mode.is_input() && !self.pins[pin as usize].read_pending {
+            if self.pins[pin as usize].mode.is_some_and(Mode::is_input)
+                && !self.pins[pin as usize].value_pending
+            {
                 tasks.push(self.read_pin(pin));
             }
         }
@@ -585,7 +605,7 @@ impl App {
         let mut tasks = Vec::new();
         for pin in 0..WIRE_PIN_COUNT {
             let state = self.pins[pin as usize];
-            if state.mode.is_input() && !state.listening && !state.listen_pending {
+            if state.mode.is_some_and(Mode::is_input) && state.listener == ListenerState::Off {
                 tasks.push(self.toggle_listener(pin));
             }
         }
@@ -615,9 +635,9 @@ impl App {
         }
 
         let line = std::mem::take(&mut self.raw_input);
-        self.command_history.push(line.clone());
+        self.command_history.push_back(line.clone());
         if self.command_history.len() > MAX_COMMAND_HISTORY {
-            self.command_history.remove(0);
+            self.command_history.pop_front();
         }
         self.history_index = None;
         match self.connection.send_raw(&line) {
@@ -673,41 +693,44 @@ impl App {
             DeviceEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
             DeviceEvent::Ack(request) => match request {
                 Request::Direction { pin, .. } => {
-                    let target = self.pins[pin as usize].target_mode;
-                    if let Some(target) = target {
-                        tasks.push(self.send_request(Request::Pullup {
-                            pin,
-                            enabled: target == Mode::InputPullup,
-                        }));
-                    }
+                    let target = self.pins[pin as usize]
+                        .target_mode
+                        .expect("direction ACK requires a pending mode change");
+                    tasks.push(self.send_request(Request::Pullup {
+                        pin,
+                        enabled: target == Mode::InputPullup,
+                    }));
                 }
                 Request::Pullup { pin, .. } => {
                     let state = &mut self.pins[pin as usize];
-                    if let Some(mode) = state.target_mode.take() {
-                        state.mode = mode;
-                    }
-                    state.mode_pending = false;
-                    if state.mode.is_input() {
+                    state.mode = Some(
+                        state
+                            .target_mode
+                            .take()
+                            .expect("pull-up ACK requires a pending mode change"),
+                    );
+                    if state.mode.is_some_and(Mode::is_input) {
                         tasks.push(self.read_pin(pin));
                     }
                 }
                 Request::Set { pin, level } => {
                     let state = &mut self.pins[pin as usize];
                     state.level = Some(level);
-                    state.toggle_pending = false;
+                    state.value_pending = false;
                 }
                 Request::Listen { pin, enabled } => {
-                    let state = &mut self.pins[pin as usize];
-                    state.listening = enabled;
-                    state.listen_pending = false;
+                    self.pins[pin as usize].listener = if enabled {
+                        ListenerState::On
+                    } else {
+                        ListenerState::Off
+                    };
                 }
                 _ => {}
             },
             DeviceEvent::PinValue { pin, level } => {
                 let state = &mut self.pins[pin as usize];
                 state.level = Some(level);
-                state.read_pending = false;
-                state.toggle_pending = false;
+                state.value_pending = false;
             }
             DeviceEvent::PinState { pin, what, value } => {
                 self.device_status = format!("{} {what:?}: {value:?}", pin_name(pin));
@@ -737,12 +760,18 @@ impl App {
         match request {
             Request::Direction { pin, .. } | Request::Pullup { pin, .. } => {
                 let state = &mut self.pins[pin as usize];
-                state.mode_pending = false;
                 state.target_mode = None;
             }
-            Request::Get { pin } => self.pins[pin as usize].read_pending = false,
-            Request::Set { pin, .. } => self.pins[pin as usize].toggle_pending = false,
-            Request::Listen { pin, .. } => self.pins[pin as usize].listen_pending = false,
+            Request::Get { pin } | Request::Set { pin, .. } => {
+                self.pins[pin as usize].value_pending = false;
+            }
+            Request::Listen { pin, enabled } => {
+                self.pins[pin as usize].listener = if enabled {
+                    ListenerState::Off
+                } else {
+                    ListenerState::On
+                };
+            }
             _ => {}
         }
     }
@@ -753,12 +782,9 @@ impl App {
 
     fn reset_pending(&mut self) {
         for pin in &mut self.pins {
-            pin.mode_pending = false;
-            pin.read_pending = false;
-            pin.listen_pending = false;
-            pin.toggle_pending = false;
+            pin.value_pending = false;
             pin.target_mode = None;
-            pin.listening = false;
+            pin.listener = ListenerState::Off;
         }
     }
 

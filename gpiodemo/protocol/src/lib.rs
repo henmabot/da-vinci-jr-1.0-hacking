@@ -2,6 +2,62 @@
 
 pub const WIRE_PIN_COUNT: u8 = 117;
 pub const MAX_PACKET_LEN: usize = 64;
+pub const MAX_PACKET_ID: u16 = 999;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineError {
+    TooLong,
+}
+
+pub struct LineBuffer {
+    bytes: [u8; MAX_PACKET_LEN],
+    len: usize,
+    discarding: bool,
+}
+
+impl Default for LineBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LineBuffer {
+    pub const fn new() -> Self {
+        Self {
+            bytes: [0; MAX_PACKET_LEN],
+            len: 0,
+            discarding: false,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.discarding = false;
+    }
+
+    pub fn push(&mut self, byte: u8) -> Result<Option<&[u8]>, LineError> {
+        if byte == b'\r' {
+            return Ok(None);
+        }
+        if byte == b'\n' {
+            let line = (!self.discarding && self.len != 0).then_some(&self.bytes[..self.len]);
+            self.len = 0;
+            self.discarding = false;
+            return Ok(line);
+        }
+        if self.discarding {
+            return Ok(None);
+        }
+        if self.len + 1 >= self.bytes.len() {
+            self.len = 0;
+            self.discarding = true;
+            return Err(LineError::TooLong);
+        }
+        self.bytes[self.len] = byte;
+        self.len += 1;
+        Ok(None)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Packet<T> {
@@ -26,16 +82,6 @@ pub enum Query {
 pub enum Level {
     Low,
     High,
-}
-
-impl Level {
-    pub const fn from_bool(high: bool) -> Self {
-        if high { Self::High } else { Self::Low }
-    }
-
-    pub const fn is_high(self) -> bool {
-        matches!(self, Self::High)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +154,7 @@ pub enum EncodeError {
 }
 
 pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
-    let mut tokens = Tokens::new(line);
+    let mut tokens = split_tokens(line);
     let id = tokens.next().and_then(parse_decimal3).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
@@ -124,46 +170,52 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
     };
 
     let body = match command {
-        b"HAI" if tokens.done() => Request::Hello,
-        b"HRU" if tokens.done() => Request::Status,
-        b"BYE" if tokens.done() => Request::Bye,
+        b"HAI" if tokens.next().is_none() => Request::Hello,
+        b"HRU" if tokens.next().is_none() => Request::Status,
+        b"BYE" if tokens.next().is_none() => Request::Bye,
         b"DIR" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
             let direction = match tokens.next() {
                 Some(b"IN") => Direction::Input,
                 Some(b"OUT") => Direction::Output,
                 _ => return Err(malformed()),
             };
-            require_ok_suffix(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Direction { pin, direction }
         }
         b"GET" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
-            require_ok_suffix(&mut tokens).map_err(|_| malformed())?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Get { pin }
         }
         b"SET" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
-            let level = parse_level(tokens.next()).ok_or_else(malformed)?;
-            require_ok_suffix(&mut tokens).map_err(|_| malformed())?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let level = tokens.next().and_then(parse_level).ok_or_else(malformed)?;
+            expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Set { pin, level }
         }
         b"PLL" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
-            let enabled = parse_enabled(tokens.next()).ok_or_else(malformed)?;
-            require_ok_suffix(&mut tokens).map_err(|_| malformed())?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let enabled = tokens
+                .next()
+                .and_then(parse_enabled)
+                .ok_or_else(malformed)?;
+            expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Pullup { pin, enabled }
         }
         b"LSN" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
-            let enabled = parse_enabled(tokens.next()).ok_or_else(malformed)?;
-            require_ok_suffix(&mut tokens).map_err(|_| malformed())?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let enabled = tokens
+                .next()
+                .and_then(parse_enabled)
+                .ok_or_else(malformed)?;
+            expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Listen { pin, enabled }
         }
         b"WYD" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
-            let what = parse_query(tokens.next()).ok_or_else(malformed)?;
-            if !tokens.done() {
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
+            let what = tokens.next().and_then(parse_query).ok_or_else(malformed)?;
+            if tokens.next().is_some() {
                 return Err(malformed());
             }
             Request::Query { pin, what }
@@ -181,7 +233,7 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
 }
 
 pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
-    let mut tokens = Tokens::new(line);
+    let mut tokens = split_tokens(line);
     let id = tokens.next().and_then(parse_decimal3).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
@@ -197,36 +249,33 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
 
     let body = match command {
         b"HII" => {
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Hello
         }
         b"IAM" => {
             if tokens.next() != Some(b"SAM4E8E") || tokens.next() != Some(b"GPIO") {
                 return Err(malformed());
             }
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Status
         }
         b"OKA" => {
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Ack
         }
         b"CYA" => {
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Bye
         }
         b"IDK" => {
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Unknown
         }
         b"UMM" => {
             let error = match tokens.next() {
                 Some(b"BAD_PACKET") => ResponseError::BadPacket,
                 Some(pin) => {
-                    let pin = parse_decimal3(pin)
-                        .filter(|pin| *pin < u16::from(WIRE_PIN_COUNT))
-                        .map(|pin| pin as u8)
-                        .ok_or_else(malformed)?;
+                    let pin = parse_pin(pin).ok_or_else(malformed)?;
                     let reason = match tokens.next() {
                         Some(b"UNSET") => PinError::Unset,
                         Some(b"UNAVAILABLE") => PinError::Unavailable,
@@ -236,17 +285,17 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
                 }
                 None => return Err(malformed()),
             };
-            require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Error(error)
         }
         b"HYG" => {
-            let pin = parse_pin(tokens.next()).ok_or_else(malformed)?;
+            let pin = tokens.next().and_then(parse_pin).ok_or_else(malformed)?;
             let next = tokens.next().ok_or_else(malformed)?;
-            if let Some(level) = parse_level(Some(next)) {
-                require_end_marker(&mut tokens).map_err(|_| malformed())?;
+            if let Some(level) = parse_level(next) {
+                expect_suffix(&mut tokens, b"<3", malformed())?;
                 Response::Value { pin, level }
             } else {
-                let what = parse_query(Some(next)).ok_or_else(malformed)?;
+                let what = parse_query(next).ok_or_else(malformed)?;
                 let value_token = tokens.next().ok_or_else(malformed)?;
                 let value = match what {
                     Query::Direction => match value_token {
@@ -262,7 +311,7 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
                         _ => return Err(malformed()),
                     },
                 };
-                require_end_marker(&mut tokens).map_err(|_| malformed())?;
+                expect_suffix(&mut tokens, b"<3", malformed())?;
                 Response::State { pin, what, value }
             }
         }
@@ -375,50 +424,62 @@ pub fn encode_response(packet: Packet<Response>, out: &mut [u8]) -> Result<usize
     Ok(writer.len())
 }
 
-fn require_ok_suffix(tokens: &mut Tokens<'_>) -> Result<(), ()> {
-    if tokens.next() == Some(b"OK?") && tokens.done() {
-        Ok(())
-    } else {
-        Err(())
+fn split_tokens(line: &[u8]) -> Tokens<'_> {
+    Tokens(line)
+}
+
+struct Tokens<'a>(&'a [u8]);
+
+impl<'a> Iterator for Tokens<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0 = self.0.trim_ascii_start();
+        let end = self
+            .0
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .unwrap_or(self.0.len());
+        let (token, rest) = self.0.split_at(end);
+        self.0 = rest;
+        (!token.is_empty()).then_some(token)
     }
 }
 
-fn require_end_marker(tokens: &mut Tokens<'_>) -> Result<(), ()> {
-    if tokens.next() == Some(b"<3") && tokens.done() {
-        Ok(())
-    } else {
-        Err(())
-    }
+fn expect_suffix(
+    tokens: &mut Tokens<'_>,
+    suffix: &[u8],
+    error: DecodeError,
+) -> Result<(), DecodeError> {
+    (tokens.next() == Some(suffix) && tokens.next().is_none())
+        .then_some(())
+        .ok_or(error)
 }
 
-fn parse_pin(token: Option<&[u8]>) -> Option<u8> {
-    parse_decimal3(token?).and_then(|pin| {
-        if pin < u16::from(WIRE_PIN_COUNT) {
-            Some(pin as u8)
-        } else {
-            None
-        }
-    })
+fn parse_pin(token: &[u8]) -> Option<u8> {
+    u8::try_from(parse_decimal3(token)?)
+        .ok()
+        .filter(|pin| *pin < WIRE_PIN_COUNT)
 }
 
-fn parse_level(token: Option<&[u8]>) -> Option<Level> {
-    match token? {
+fn parse_level(token: &[u8]) -> Option<Level> {
+    match token {
         b"LOW" => Some(Level::Low),
         b"HIGH" => Some(Level::High),
         _ => None,
     }
 }
 
-fn parse_enabled(token: Option<&[u8]>) -> Option<bool> {
-    match token? {
+fn parse_enabled(token: &[u8]) -> Option<bool> {
+    match token {
         b"ON" => Some(true),
         b"OFF" => Some(false),
         _ => None,
     }
 }
 
-fn parse_query(token: Option<&[u8]>) -> Option<Query> {
-    match token? {
+fn parse_query(token: &[u8]) -> Option<Query> {
+    match token {
         b"DIR" => Some(Query::Direction),
         b"PLL" => Some(Query::Pullup),
         b"LSN" => Some(Query::Listen),
@@ -438,42 +499,6 @@ fn parse_decimal3(token: &[u8]) -> Option<u16> {
         value = value * 10 + u16::from(byte - b'0');
     }
     Some(value)
-}
-
-struct Tokens<'a> {
-    line: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Tokens<'a> {
-    fn new(line: &'a [u8]) -> Self {
-        let mut end = line.len();
-        while end > 0 && matches!(line[end - 1], b'\r' | b'\n' | b' ' | b'\t') {
-            end -= 1;
-        }
-        Self {
-            line: &line[..end],
-            offset: 0,
-        }
-    }
-
-    fn next(&mut self) -> Option<&'a [u8]> {
-        while self.offset < self.line.len() && matches!(self.line[self.offset], b' ' | b'\t') {
-            self.offset += 1;
-        }
-        if self.offset == self.line.len() {
-            return None;
-        }
-        let start = self.offset;
-        while self.offset < self.line.len() && !matches!(self.line[self.offset], b' ' | b'\t') {
-            self.offset += 1;
-        }
-        Some(&self.line[start..self.offset])
-    }
-
-    fn done(&mut self) -> bool {
-        self.next().is_none()
-    }
 }
 
 struct Writer<'a> {
@@ -502,7 +527,7 @@ impl<'a> Writer<'a> {
     }
 
     fn id(&mut self, value: u16) -> Result<(), EncodeError> {
-        if value > 999 {
+        if value > MAX_PACKET_ID {
             return Err(EncodeError::InvalidPacketId);
         }
         self.decimal3(value)
@@ -530,6 +555,32 @@ mod tests {
         let len = encode_request(Packet { id, body }, &mut out).unwrap();
         assert_eq!(decode_request(&out[..len]), Ok(Packet { id, body }));
         out
+    }
+
+    #[test]
+    fn line_buffer_frames_and_recovers_after_overflow() {
+        let mut buffer = LineBuffer::new();
+        let mut seen = false;
+        for &byte in b"\r001 HAI\r\n" {
+            if let Some(line) = buffer.push(byte).unwrap() {
+                assert_eq!(line, b"001 HAI");
+                seen = true;
+            }
+        }
+        assert!(seen);
+
+        for _ in 0..MAX_PACKET_LEN - 1 {
+            assert_eq!(buffer.push(b'x'), Ok(None));
+        }
+        assert_eq!(buffer.push(b'x'), Err(LineError::TooLong));
+        assert_eq!(buffer.push(b'x'), Ok(None));
+        assert_eq!(buffer.push(b'\n'), Ok(None));
+
+        for &byte in b"008 HII <3\n" {
+            if let Some(line) = buffer.push(byte).unwrap() {
+                assert_eq!(line, b"008 HII <3");
+            }
+        }
     }
 
     #[test]

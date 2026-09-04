@@ -16,11 +16,21 @@ pub enum Port {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PinId {
-    pub port: Port,
-    pub bit: u8,
+    port: Port,
+    bit: u8,
 }
 
-pub const fn wire_pin(id: u8) -> Option<PinId> {
+impl PinId {
+    pub const fn port(self) -> Port {
+        self.port
+    }
+
+    pub const fn bit(self) -> u8 {
+        self.bit
+    }
+}
+
+const fn wire_pin(id: u8) -> Option<PinId> {
     match id {
         0..=31 => Some(PinId {
             port: Port::A,
@@ -46,38 +56,27 @@ pub const fn wire_pin(id: u8) -> Option<PinId> {
     }
 }
 
-pub const fn available(id: u8) -> bool {
-    id < WIRE_PIN_COUNT && !matches!(id, 40..=43)
-}
-
 pub trait Gpio {
     fn input(&mut self, pin: PinId, pullup: bool);
-    fn output(&mut self, pin: PinId, high: bool);
-    fn write(&mut self, pin: PinId, high: bool);
-    fn read(&self, pin: PinId) -> bool;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PinDirection {
-    Unset,
-    Input,
-    Output,
+    fn output(&mut self, pin: PinId, level: Level);
+    fn write(&mut self, pin: PinId, level: Level);
+    fn read(&self, pin: PinId) -> Level;
 }
 
 #[derive(Clone, Copy)]
 struct PinState {
-    direction: PinDirection,
+    direction: Option<Direction>,
     pullup: bool,
     listener: Option<u16>,
-    previous: bool,
+    previous: Level,
 }
 
 impl PinState {
     const UNSET: Self = Self {
-        direction: PinDirection::Unset,
+        direction: None,
         pullup: false,
         listener: None,
-        previous: false,
+        previous: Level::Low,
     };
 }
 
@@ -102,35 +101,30 @@ impl Firmware {
         let body = match packet.body {
             Request::Hello => Response::Hello,
             Request::Status => Response::Status,
-            Request::Direction { pin, direction } => {
-                if let Err(error) = supported(pin) {
-                    error
-                } else {
-                    let physical = wire_pin(pin).expect("validated wire pin");
+            Request::Direction { pin, direction } => match supported(pin) {
+                Ok(physical) => {
                     match direction {
                         Direction::Input => gpio.input(physical, false),
-                        Direction::Output => gpio.output(physical, false),
+                        Direction::Output => gpio.output(physical, Level::Low),
                     }
                     let state = &mut self.pins[pin as usize];
-                    state.direction = match direction {
-                        Direction::Input => PinDirection::Input,
-                        Direction::Output => PinDirection::Output,
-                    };
+                    state.direction = Some(direction);
                     state.pullup = false;
                     state.previous = gpio.read(physical);
                     Response::Ack
                 }
-            }
+                Err(error) => error,
+            },
             Request::Get { pin } => match self.initialized(pin) {
                 Ok(physical) => Response::Value {
                     pin,
-                    level: Level::from_bool(gpio.read(physical)),
+                    level: gpio.read(physical),
                 },
                 Err(error) => error,
             },
             Request::Set { pin, level } => match self.initialized(pin) {
                 Ok(physical) => {
-                    gpio.write(physical, level.is_high());
+                    gpio.write(physical, level);
                     Response::Ack
                 }
                 Err(error) => error,
@@ -139,7 +133,7 @@ impl Firmware {
                 Ok(physical) => {
                     let state = &mut self.pins[pin as usize];
                     state.pullup = enabled;
-                    if state.direction == PinDirection::Input {
+                    if state.direction == Some(Direction::Input) {
                         gpio.input(physical, enabled);
                         state.previous = gpio.read(physical);
                     }
@@ -159,7 +153,7 @@ impl Firmware {
                 Err(error) => error,
             },
             Request::Query { pin, what } => match supported(pin) {
-                Ok(()) => Response::State {
+                Ok(_) => Response::State {
                     pin,
                     what,
                     value: self.query(pin, what),
@@ -184,7 +178,9 @@ impl Firmware {
             let Some(listener) = state.listener else {
                 continue;
             };
-            let physical = wire_pin(pin).expect("wire pin table covers state table");
+            let Ok(physical) = supported(pin) else {
+                continue;
+            };
             let value = gpio.read(physical);
             if value == state.previous {
                 continue;
@@ -192,34 +188,27 @@ impl Firmware {
             state.previous = value;
             return Some(Packet {
                 id: listener,
-                body: Response::Value {
-                    pin,
-                    level: Level::from_bool(value),
-                },
+                body: Response::Value { pin, level: value },
             });
         }
         None
     }
 
     fn initialized(&self, pin: u8) -> Result<PinId, Response> {
-        supported(pin)?;
-        if self.pins[pin as usize].direction == PinDirection::Unset {
+        let physical = supported(pin)?;
+        if self.pins[pin as usize].direction.is_none() {
             return Err(pin_error(pin, PinError::Unset));
         }
-        Ok(wire_pin(pin).expect("validated wire pin"))
+        Ok(physical)
     }
 
     fn query(&self, pin: u8, what: Query) -> QueryValue {
         let state = self.pins[pin as usize];
-        if state.direction == PinDirection::Unset {
+        let Some(direction) = state.direction else {
             return QueryValue::Unset;
-        }
+        };
         match what {
-            Query::Direction => QueryValue::Direction(match state.direction {
-                PinDirection::Input => Direction::Input,
-                PinDirection::Output => Direction::Output,
-                PinDirection::Unset => unreachable!(),
-            }),
+            Query::Direction => QueryValue::Direction(direction),
             Query::Pullup => QueryValue::Enabled(state.pullup),
             Query::Listen => QueryValue::Enabled(state.listener.is_some()),
         }
@@ -228,23 +217,20 @@ impl Firmware {
     fn reset<G: Gpio>(&mut self, gpio: &mut G) {
         for pin in 0..WIRE_PIN_COUNT {
             let state = &mut self.pins[pin as usize];
-            if available(pin) && state.direction != PinDirection::Unset {
-                gpio.input(
-                    wire_pin(pin).expect("wire pin table covers state table"),
-                    false,
-                );
+            if state.direction.is_some()
+                && let Ok(physical) = supported(pin)
+            {
+                gpio.input(physical, false);
             }
             *state = PinState::UNSET;
         }
     }
 }
 
-fn supported(pin: u8) -> Result<(), Response> {
-    if available(pin) {
-        Ok(())
-    } else {
-        Err(pin_error(pin, PinError::Unavailable))
-    }
+fn supported(pin: u8) -> Result<PinId, Response> {
+    wire_pin(pin)
+        .filter(|_| !matches!(pin, 40..=43))
+        .ok_or_else(|| pin_error(pin, PinError::Unavailable))
 }
 
 fn pin_error(pin: u8, reason: PinError) -> Response {
@@ -258,7 +244,7 @@ mod tests {
     use super::*;
 
     struct FakeGpio {
-        values: [bool; WIRE_PIN_COUNT as usize],
+        values: [Level; WIRE_PIN_COUNT as usize],
         inputs: [bool; WIRE_PIN_COUNT as usize],
         pullups: [bool; WIRE_PIN_COUNT as usize],
         outputs: [bool; WIRE_PIN_COUNT as usize],
@@ -267,7 +253,7 @@ mod tests {
     impl Default for FakeGpio {
         fn default() -> Self {
             Self {
-                values: [false; WIRE_PIN_COUNT as usize],
+                values: [Level::Low; WIRE_PIN_COUNT as usize],
                 inputs: [false; WIRE_PIN_COUNT as usize],
                 pullups: [false; WIRE_PIN_COUNT as usize],
                 outputs: [false; WIRE_PIN_COUNT as usize],
@@ -295,19 +281,19 @@ mod tests {
             self.pullups[i] = pullup;
         }
 
-        fn output(&mut self, pin: PinId, high: bool) {
+        fn output(&mut self, pin: PinId, level: Level) {
             let i = Self::wire_index(pin);
             self.inputs[i] = false;
             self.outputs[i] = true;
             self.pullups[i] = false;
-            self.values[i] = high;
+            self.values[i] = level;
         }
 
-        fn write(&mut self, pin: PinId, high: bool) {
-            self.values[Self::wire_index(pin)] = high;
+        fn write(&mut self, pin: PinId, level: Level) {
+            self.values[Self::wire_index(pin)] = level;
         }
 
-        fn read(&self, pin: PinId) -> bool {
+        fn read(&self, pin: PinId) -> Level {
             self.values[Self::wire_index(pin)]
         }
     }
@@ -376,7 +362,7 @@ mod tests {
         );
         assert_eq!(wire_pin(117), None);
         for pin in 40..=43 {
-            assert!(!available(pin));
+            assert!(supported(pin).is_err());
         }
     }
 
@@ -476,7 +462,7 @@ mod tests {
                 .body,
             Response::Ack
         );
-        gpio.values[5] = true;
+        gpio.values[5] = Level::High;
         assert_eq!(
             firmware.poll_listener(&gpio),
             Some(Packet {
@@ -497,7 +483,7 @@ mod tests {
             ),
             &mut gpio,
         );
-        gpio.values[5] = false;
+        gpio.values[5] = Level::Low;
         assert_eq!(firmware.poll_listener(&gpio), None);
     }
 

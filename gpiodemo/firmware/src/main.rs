@@ -16,22 +16,23 @@ mod board {
     use cortex_m_rt::entry;
     use da_vinci_firmware::{Firmware, Gpio, PinId, Port};
     use da_vinci_protocol::{
-        DecodeErrorKind, MAX_PACKET_LEN, Packet, Response, ResponseError, decode_request,
-        encode_response,
+        DecodeErrorKind, Level, LineBuffer, MAX_PACKET_LEN, Packet, Response, ResponseError,
+        decode_request, encode_response,
     };
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-    const RX_CAPACITY: usize = MAX_PACKET_LEN;
-
     struct SamGpio;
 
     macro_rules! with_port {
         ($pin:expr, |$port:ident, $mask:ident| $body:block) => {{
-            let $mask = 1u32 << $pin.bit;
+            let $mask = 1u32 << $pin.bit();
+            // SAFETY: Firmware is the only SamGpio caller and only passes PinIds created by
+            // the validated wire-pin mapping. Reserved clock/USB pins never reach this adapter,
+            // and the firmware loop is single-threaded, so these MMIO registers are not aliased.
             unsafe {
-                match $pin.port {
+                match $pin.port() {
                     Port::A => {
                         let $port = &*pac::PIOA::ptr();
                         $body
@@ -72,11 +73,11 @@ mod board {
             });
         }
 
-        fn output(&mut self, pin: PinId, high: bool) {
+        fn output(&mut self, pin: PinId, level: Level) {
             with_port!(pin, |port, mask| {
                 port.pudr.write_with_zero(|w| w.bits(mask));
                 port.ppddr.write_with_zero(|w| w.bits(mask));
-                if high {
+                if level == Level::High {
                     port.sodr.write_with_zero(|w| w.bits(mask));
                 } else {
                     port.codr.write_with_zero(|w| w.bits(mask));
@@ -87,9 +88,9 @@ mod board {
             });
         }
 
-        fn write(&mut self, pin: PinId, high: bool) {
+        fn write(&mut self, pin: PinId, level: Level) {
             with_port!(pin, |port, mask| {
-                if high {
+                if level == Level::High {
                     port.sodr.write_with_zero(|w| w.bits(mask));
                 } else {
                     port.codr.write_with_zero(|w| w.bits(mask));
@@ -97,47 +98,14 @@ mod board {
             });
         }
 
-        fn read(&self, pin: PinId) -> bool {
-            with_port!(pin, |port, mask| { (port.pdsr.read().bits() & mask) != 0 })
-        }
-    }
-
-    struct LineReader {
-        bytes: [u8; RX_CAPACITY],
-        len: usize,
-        discarding: bool,
-    }
-
-    impl LineReader {
-        const fn new() -> Self {
-            Self {
-                bytes: [0; RX_CAPACITY],
-                len: 0,
-                discarding: false,
-            }
-        }
-
-        fn push(&mut self, byte: u8) -> Option<&[u8]> {
-            if byte == b'\r' {
-                return None;
-            }
-            if byte == b'\n' {
-                let line = (!self.discarding && self.len != 0).then_some(&self.bytes[..self.len]);
-                self.len = 0;
-                self.discarding = false;
-                return line;
-            }
-            if self.discarding {
-                return None;
-            }
-            if self.len + 1 >= self.bytes.len() {
-                self.len = 0;
-                self.discarding = true;
-                return None;
-            }
-            self.bytes[self.len] = byte;
-            self.len += 1;
-            None
+        fn read(&self, pin: PinId) -> Level {
+            with_port!(pin, |port, mask| {
+                if port.pdsr.read().bits() & mask == 0 {
+                    Level::Low
+                } else {
+                    Level::High
+                }
+            })
         }
     }
 
@@ -223,7 +191,7 @@ mod board {
 
         let mut firmware = Firmware::new();
         let mut gpio = SamGpio;
-        let mut reader = LineReader::new();
+        let mut reader = LineBuffer::new();
         let mut tx = PendingTx::new();
         let mut rx = [0u8; 1];
 
@@ -235,7 +203,7 @@ mod board {
                 && let Ok(count) = serial.read(&mut rx)
             {
                 for &byte in &rx[..count] {
-                    if let Some(line) = reader.push(byte) {
+                    if let Ok(Some(line)) = reader.push(byte) {
                         match decode_request(line) {
                             Ok(packet) => tx.queue(firmware.handle(packet, &mut gpio)),
                             Err(error) => {

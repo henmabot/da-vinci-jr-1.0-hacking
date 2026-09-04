@@ -6,8 +6,8 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    Level, MAX_PACKET_LEN, Packet, Query, QueryValue, Request, Response, ResponseError,
-    WIRE_PIN_COUNT, decode_response, encode_request,
+    Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Query, QueryValue,
+    Request, Response, ResponseError, WIRE_PIN_COUNT, decode_response, encode_request,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub(super) enum Event {
     IoError(String),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DeviceEvent {
     Hello,
     Status,
@@ -48,7 +48,7 @@ pub(super) enum DeviceEvent {
 
 pub(super) struct Connection {
     next_id: u16,
-    pending: [Option<Request>; 1000],
+    pending: [Option<Request>; MAX_PACKET_ID as usize + 1],
     listeners: [Option<u16>; WIRE_PIN_COUNT as usize],
     commands: Sender<IoCommand>,
     events: Receiver<IoEvent>,
@@ -61,7 +61,7 @@ impl Connection {
         thread::spawn(move || io_worker(command_rx, event_tx));
         Self {
             next_id: 1,
-            pending: [None; 1000],
+            pending: [None; MAX_PACKET_ID as usize + 1],
             listeners: [None; WIRE_PIN_COUNT as usize],
             commands: command_tx,
             events: event_rx,
@@ -141,9 +141,9 @@ impl Connection {
     }
 
     fn allocate_id(&mut self) -> Result<u16, String> {
-        for _ in 0..999 {
+        for _ in 0..MAX_PACKET_ID {
             let id = self.next_id;
-            self.next_id = if id == 999 { 1 } else { id + 1 };
+            self.next_id = if id == MAX_PACKET_ID { 1 } else { id + 1 };
             if self.pending[id as usize].is_none() {
                 return Ok(id);
             }
@@ -246,8 +246,7 @@ enum IoEvent {
 
 fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
     let mut port: Option<Box<dyn serialport::SerialPort>> = None;
-    let mut line = Vec::with_capacity(128);
-    let mut discarding = false;
+    let mut reader = LineBuffer::new();
     let mut buffer = [0u8; 64];
 
     loop {
@@ -267,8 +266,7 @@ fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
         if let Some(command) = command {
             match command {
                 IoCommand::Connect(name) => {
-                    line.clear();
-                    discarding = false;
+                    reader.clear();
                     match serialport::new(&name, 115_200)
                         .timeout(Duration::from_millis(20))
                         .open()
@@ -286,8 +284,7 @@ fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
                 }
                 IoCommand::Disconnect => {
                     port = None;
-                    line.clear();
-                    discarding = false;
+                    reader.clear();
                     let _ = events.send(IoEvent::Disconnected(None));
                 }
                 IoCommand::Write(bytes) => {
@@ -313,25 +310,17 @@ fn io_worker(commands: Receiver<IoCommand>, events: Sender<IoEvent>) {
         match opened.read(&mut buffer) {
             Ok(count) => {
                 for &byte in &buffer[..count] {
-                    if byte == b'\r' {
-                        continue;
-                    }
-                    if byte == b'\n' {
-                        if !discarding && !line.is_empty() {
-                            let packet = String::from_utf8_lossy(&line).into_owned();
+                    match reader.push(byte) {
+                        Ok(Some(line)) => {
+                            let packet = String::from_utf8_lossy(line).into_owned();
                             let _ = events.send(IoEvent::Line(packet));
                         }
-                        line.clear();
-                        discarding = false;
-                    } else if !discarding {
-                        if line.len() < 1024 {
-                            line.push(byte);
-                        } else {
-                            line.clear();
-                            discarding = true;
-                            let _ = events.send(IoEvent::Error(
-                                "Incoming serial line exceeded 1024 bytes; discarded".into(),
-                            ));
+                        Ok(None) => {}
+                        Err(LineError::TooLong) => {
+                            let _ = events.send(IoEvent::Error(format!(
+                                "Incoming serial line exceeded {} bytes; discarded",
+                                MAX_PACKET_LEN - 1
+                            )));
                         }
                     }
                 }
@@ -366,7 +355,7 @@ mod tests {
     #[test]
     fn request_ids_wrap_from_999_to_001() {
         let mut connection = Connection::spawn();
-        for expected in 1..=999 {
+        for expected in 1..=MAX_PACKET_ID {
             let (id, _) = prepared(&mut connection, Request::Hello);
             assert_eq!(id, expected);
             connection.received(response(id, Response::Hello));
@@ -387,7 +376,7 @@ mod tests {
         );
         connection.received(response(listener, Response::Ack));
 
-        for _ in 2..=999 {
+        for _ in 2..=MAX_PACKET_ID {
             let (id, _) = prepared(&mut connection, Request::Hello);
             connection.received(response(id, Response::Hello));
         }
