@@ -546,6 +546,7 @@ class PinsFrame(ctk.CTkFrame):
             "Reboot device",
             "Send BYE and reset the device? This will drop the connection.",
         ):
+
             def on_result(result):
                 if result["type"] == "goodbye_ack":
                     self.after(0, self.reset_pin_states)

@@ -41,7 +41,7 @@ class MockSerial:
     def write(self, data: bytes) -> int:
         line = data.decode().strip()
         print(f"[mock] <- {line}")
-        threading.Thread(target=self._handle, args=(line,), daemon=True).start()
+        self._handle(line)
         return len(data)
 
     def readline(self) -> bytes:
