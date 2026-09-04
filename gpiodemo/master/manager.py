@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import TypedDict
 
 import customtkinter as ctk
@@ -134,8 +134,45 @@ class PinsFrame(ctk.CTkFrame):
                 )
 
     def _build_pager(self):
-        pager = ttk.Frame(self)
-        pager.grid(row=1, column=0, sticky="e", padx=8, pady=(0, 8))
+        footer = ttk.Frame(self)
+        footer.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        footer.grid_columnconfigure(0, weight=1)
+
+        # Reboot uses the same gray as every other button, just with red
+        # text to flag it as dangerous -- everything else (including
+        # this one's shape) matches the plain ttk.Button look of the
+        # pager buttons below (auto-sized to their text, no explicit
+        # width, so they hug their labels with the theme's own padding).
+        style = ttk.Style()
+        style.configure("Reboot.TButton", foreground="#c0392b")
+        style.map("Reboot.TButton", foreground=[("active", "#8e2a1b")])
+
+        # Device-wide, non-stateful actions (fire-and-forget, no toggled
+        # state to track -- see parser.py for the task contract each of
+        # these enqueues). Reboot is kept apart on the far left (with
+        # extra spacing) so it can't be fat-fingered while reaching for
+        # the other buttons.
+        actions = ttk.Frame(footer)
+        actions.grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            actions,
+            text="Reboot",
+            style="Reboot.TButton",
+            command=self.reboot,
+        ).pack(side="left", padx=(0, 20))
+        ttk.Button(actions, text="Read All", command=self.read_all_inputs).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Button(actions, text="Listen All", command=self.listen_all_inputs).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Button(actions, text="Handshake", command=self.handshake).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Button(actions, text="Status", command=self.get_status).pack(side="left")
+
+        pager = ttk.Frame(footer)
+        pager.grid(row=0, column=1, sticky="e")
         self._prev_button = ttk.Button(
             pager,
             text="Previous",
@@ -227,7 +264,10 @@ class PinsFrame(ctk.CTkFrame):
             values=MODES,
             textvariable=row["mode_var"],
             state="readonly",
-            width=13,
+            # ttk.Combobox renders wider than its character width due to
+            # theme padding + the dropdown arrow, so keep this tight --
+            # 9 chars is exactly enough for the longest mode, "IN_PULLUP".
+            width=9,
         )
         mode_menu.bind(
             "<<ComboboxSelected>>",
@@ -432,6 +472,26 @@ class PinsFrame(ctk.CTkFrame):
         row = self._rows.get(pin)
         return bool(row and row["listening"])
 
+    def read_all_inputs(self):
+        """Fire a one-shot read for every pin currently in an input mode."""
+        for pin in self._pin_names:
+            row = self._rows[pin]
+            if row["mode_var"].get() in INPUT_MODES:
+                self._handle_read(pin)
+
+    def listen_all_inputs(self):
+        """Turn listening on for every pin currently in an input mode."""
+        for pin in self._pin_names:
+            row = self._rows[pin]
+            if (
+                row["mode_var"].get() in INPUT_MODES
+                and not row["listening"]
+                and not row["listen_pending"]
+            ):
+                row["listen_pending"] = True
+                self._refresh_listen_button(pin)
+                self._send_listen(pin, True)
+
     def _handle_primary_action(self, pin):
         row = self._rows[pin]
         if row["mode_var"].get() in INPUT_MODES:
@@ -445,17 +505,31 @@ class PinsFrame(ctk.CTkFrame):
         if row["mode_var"].get() in INPUT_MODES and not row["listen_pending"]:
             self._handle_listen_toggle(pin)
 
-    def _send(self, action, pin, value=None, callback=None):
+    def _send(self, action, pin=None, value=None, callback=None):
         """Enqueue a window task for the parser (see parser.py header docs)."""
         task = {
             "window": True,
             "action": action,
-            "pin": self.pin_map[pin][1],
             "callback": callback,
         }
+        if pin is not None:
+            task["pin"] = self.pin_map[pin][1]
         if value is not None:
             task["value"] = value
         self.queue.put(task)
+
+    def handshake(self):
+        self._send("handshake")
+
+    def get_status(self):
+        self._send("get_status")
+
+    def reboot(self):
+        if messagebox.askyesno(
+            "Reboot device",
+            "Send BYE and reset the device? This will drop the connection.",
+        ):
+            self._send("goodbye")
 
     def _handle_mode_change(self, pin, mode):
         row = self._rows[pin]

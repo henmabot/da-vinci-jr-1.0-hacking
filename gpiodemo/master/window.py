@@ -13,7 +13,7 @@ from .pins import pin_map
 __all__ = ["HEIGHT", "WIDTH", "create_window"]
 
 
-WIDTH = 1200
+WIDTH = 1250
 HEIGHT = 800
 
 
@@ -72,7 +72,7 @@ def create_window(queue):
     window.update_idletasks()
 
     # place the sash
-    sash_pos = int(WIDTH * (3 / 4))
+    sash_pos = int(WIDTH * (11 / 15))
     main_window.sash_place(0, sash_pos, 0)
 
     # Return the window and frames
