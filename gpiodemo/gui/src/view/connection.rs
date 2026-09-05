@@ -36,6 +36,14 @@ impl App {
         .padding([5, 8])
         .width(Length::Fill);
 
+        let routes = pick_list(
+            self.routes.as_slice(),
+            Some(&self.selected_route),
+            Message::RouteSelected,
+        )
+        .text_size(CONTROL_TEXT_SIZE)
+        .padding([5, 8]);
+
         let connection_button = if self.connected_port.is_some() {
             native_button("Disconnect").on_press(Message::Disconnect)
         } else {
@@ -48,6 +56,8 @@ impl App {
             ports,
             native_button("Refresh").on_press(Message::RefreshPorts),
             connection_button,
+            text("Route").size(12),
+            routes,
             text(&self.device_status).size(13),
         ]
         .spacing(8)

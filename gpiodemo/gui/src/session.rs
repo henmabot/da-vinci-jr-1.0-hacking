@@ -133,6 +133,14 @@ impl Mode {
         matches!(self, Self::Input | Self::InputPullup)
     }
 
+    pub(super) const fn supported_by(self, capabilities: PinCapabilities) -> bool {
+        match self {
+            Self::Input => capabilities.input(),
+            Self::InputPullup => capabilities.input() && capabilities.pull_up(),
+            Self::Output => capabilities.output(),
+        }
+    }
+
     const fn direction(self) -> Direction {
         if matches!(self, Self::Output) {
             Direction::Output
@@ -329,6 +337,7 @@ impl DeviceSession {
             .map(|index| PinKey { route, index })
     }
 
+    #[cfg(test)]
     pub(super) fn bank_key(&self, route: RouteKey, token: &str) -> Option<BankKey> {
         self.routes
             .get(route.0)?

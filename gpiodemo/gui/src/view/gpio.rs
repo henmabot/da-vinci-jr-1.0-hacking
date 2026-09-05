@@ -1,4 +1,4 @@
-use da_vinci_protocol::Level;
+use da_vinci_protocol::{Level, PinCapabilities};
 use iced::{
     Background, Border, Element, Length,
     alignment::{Horizontal, Vertical},
@@ -7,12 +7,11 @@ use iced::{
 
 use super::{CONTROL_TEXT_SIZE, danger_native_button, native_button};
 use crate::{
-    app::{App, BANK_TABS, BankTab, Message},
-    session::{ListenerState, Mode, PinInfo, PinKey, PinState},
+    app::{App, BankGroup, MODES, Message},
+    session::{BankKey, ListenerState, Mode, PinInfo, PinKey, PinState},
     theme::{HIGH_BG, LOW_BG, UI_TEXT, UNSET_BG, input_style, panel_style, selected_tab_button},
 };
 
-const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
 const ROW_HEIGHT: f32 = 34.0;
 const PIN_CONTROL_TEXT_SIZE: f32 = 12.0;
 const PIN_NAME_SHARE: u16 = 5;
@@ -25,24 +24,31 @@ const CELL_GAP: f32 = 4.0;
 
 impl App {
     pub(super) fn pin_panel(&self) -> Element<'_, Message> {
-        let index = self.bank_tab.index();
+        let index = self.bank_group;
         let mut tabs =
-            row![native_button("‹").on_press_maybe((index > 0).then_some(Message::PreviousTab))]
+            row![native_button("‹").on_press_maybe((index > 0).then_some(Message::PreviousGroup))]
                 .spacing(4)
                 .align_y(iced::Alignment::Center);
-        for tab in BANK_TABS {
-            let tab_button = if tab == self.bank_tab {
-                native_button(tab.label()).style(selected_tab_button)
+        for (group_index, group) in self.bank_groups.iter().enumerate() {
+            let tab_button = if group_index == index {
+                native_button(&group.label).style(selected_tab_button)
             } else {
-                native_button(tab.label())
+                native_button(&group.label)
             };
-            tabs = tabs.push(tab_button.on_press(Message::TabSelected(tab)));
+            tabs = tabs.push(tab_button.on_press(Message::GroupSelected(group_index)));
         }
-        tabs = tabs.push(
-            native_button("›")
-                .on_press_maybe((index + 1 < BANK_TABS.len()).then_some(Message::NextTab)),
-        );
+        tabs = tabs
+            .push(native_button("›").on_press_maybe(
+                (index + 1 < self.bank_groups.len()).then_some(Message::NextGroup),
+            ));
+        let tabs = tabs.wrap().vertical_spacing(4);
 
+        let bulk_modes = self.bulk_modes();
+        let has_input = bulk_modes.iter().any(|mode| mode.is_input());
+        let has_output = bulk_modes.contains(&Mode::Output);
+        let selected_bulk_mode = bulk_modes
+            .contains(&self.bulk_mode)
+            .then_some(self.bulk_mode);
         let bulk_scope = row![
             text("Scope").size(12),
             pick_list(
@@ -53,7 +59,7 @@ impl App {
             .text_size(PIN_CONTROL_TEXT_SIZE)
             .padding([5, 8]),
             text("Mode").size(12),
-            pick_list(MODES, Some(self.bulk_mode), Message::BulkModeSelected)
+            pick_list(bulk_modes, selected_bulk_mode, Message::BulkModeSelected)
                 .text_size(PIN_CONTROL_TEXT_SIZE)
                 .padding([5, 8]),
             checkbox(self.overwrite)
@@ -62,7 +68,8 @@ impl App {
                 .spacing(5)
                 .text_size(CONTROL_TEXT_SIZE)
                 .on_toggle(Message::OverwriteChanged),
-            native_button("Apply mode").on_press(Message::ApplyBulkMode),
+            native_button("Apply mode")
+                .on_press_maybe(selected_bulk_mode.map(|_| Message::ApplyBulkMode)),
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center)
@@ -86,11 +93,15 @@ impl App {
             .into()
         } else {
             row![
-                native_button("Read").on_press(Message::BulkRead),
-                native_button("Listen").on_press(Message::BulkListen(true)),
-                native_button("Stop listening").on_press(Message::BulkListen(false)),
-                native_button("Set HIGH").on_press(Message::BulkSet(Level::High)),
-                native_button("Set LOW").on_press(Message::BulkSet(Level::Low)),
+                native_button("Read").on_press_maybe(has_input.then_some(Message::BulkRead)),
+                native_button("Listen")
+                    .on_press_maybe(has_input.then_some(Message::BulkListen(true))),
+                native_button("Stop listening")
+                    .on_press_maybe(has_input.then_some(Message::BulkListen(false))),
+                native_button("Set HIGH")
+                    .on_press_maybe(has_output.then_some(Message::BulkSet(Level::High))),
+                native_button("Set LOW")
+                    .on_press_maybe(has_output.then_some(Message::BulkSet(Level::Low))),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center)
@@ -100,21 +111,10 @@ impl App {
         };
         let bulk = column![bulk_scope, bulk_actions].spacing(4);
 
-        let table: Element<'_, Message> = match self.bank_tab {
-            BankTab::A => self.full_bank_table("PIOA"),
-            BankTab::C => self.full_bank_table("PIOC"),
-            BankTab::D => self.full_bank_table("PIOD"),
-            BankTab::BAndE => responsive(|size| {
-                responsive_pin_columns(
-                    size.width,
-                    self.bank_column("PIOB", 0, u8::MAX, true),
-                    self.bank_column("PIOE", 0, u8::MAX, true),
-                )
-            })
-            .height(Length::Fill)
-            .into(),
-        };
-
+        let table = self.bank_groups.get(index).map_or_else(
+            || text("Waiting for pin map…").into(),
+            |group| self.group_table(group),
+        );
         let content = column![tabs, bulk, table].spacing(6);
 
         container(content)
@@ -125,36 +125,76 @@ impl App {
             .into()
     }
 
-    fn full_bank_table(&self, bank_token: &'static str) -> Element<'_, Message> {
-        responsive(move |size| {
-            responsive_pin_columns(
-                size.width,
-                self.bank_column(bank_token, 0, 16, false),
-                self.bank_column(bank_token, 16, 16, false),
-            )
-        })
-        .height(Length::Fill)
-        .into()
+    fn group_table(&self, group: &BankGroup) -> Element<'_, Message> {
+        match group.banks.as_slice() {
+            [] => text("No discovered banks").into(),
+            [bank] => self.single_bank_table(*bank),
+            [left, right] => {
+                let (left, right) = (*left, *right);
+                responsive(move |size| {
+                    responsive_pin_columns(
+                        size.width,
+                        self.bank_column(left, 0, None, true),
+                        self.bank_column(right, 0, None, true),
+                    )
+                })
+                .height(Length::Fill)
+                .into()
+            }
+            banks => {
+                let mut content = column![].spacing(8);
+                for &bank in banks {
+                    content = content.push(self.bank_column(bank, 0, None, true));
+                }
+                scrollable(content)
+                    .height(Length::Fill)
+                    .width(Length::Fill)
+                    .into()
+            }
+        }
+    }
+
+    fn single_bank_table(&self, bank: BankKey) -> Element<'_, Message> {
+        let route = self.selected_route_key();
+        let has_upper_half = self
+            .session
+            .pins(route)
+            .any(|(_, info)| info.bank == bank && info.bit >= 16);
+        if has_upper_half {
+            responsive(move |size| {
+                responsive_pin_columns(
+                    size.width,
+                    self.bank_column(bank, 0, Some(16), false),
+                    self.bank_column(bank, 16, None, false),
+                )
+            })
+            .height(Length::Fill)
+            .into()
+        } else {
+            scrollable(self.bank_column(bank, 0, None, false))
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .into()
+        }
     }
 
     fn bank_column(
         &self,
-        bank_token: &str,
+        bank: BankKey,
         start_bit: u8,
-        count: u8,
+        end_bit: Option<u8>,
         show_bank_name: bool,
     ) -> iced::widget::Column<'_, Message> {
         let mut column = column![].spacing(2);
-        if show_bank_name {
-            column = column.push(text(bank_token.to_owned()).size(14));
+        if show_bank_name && let Some(info) = self.session.bank_info(bank) {
+            column = column.push(text(info.token.clone()).size(14));
         }
         column = column.push(pin_header());
-        let Some(bank) = self.session.bank_key(self.sam_route, bank_token) else {
-            return column;
-        };
-        let end = start_bit.saturating_add(count);
-        for (pin, info) in self.session.pins(self.sam_route) {
-            if info.bank != bank || info.bit < start_bit || info.bit >= end {
+        for (pin, info) in self.session.pins(self.selected_route_key()) {
+            if info.bank != bank
+                || info.bit < start_bit
+                || end_bit.is_some_and(|end| info.bit >= end)
+            {
                 continue;
             }
             column = column.push(self.pin_row(pin));
@@ -199,7 +239,7 @@ impl App {
             .style(input_style)
             .into()
         } else {
-            pick_list(MODES, state.mode, move |mode| {
+            pick_list(pin_modes(info.capabilities), state.mode, move |mode| {
                 Message::ModeSelected(pin, mode)
             })
             .placeholder("UNSET")
@@ -209,24 +249,27 @@ impl App {
             .into()
         };
 
-        let rw: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
-            native_button("Read")
-                .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)))
-                .into()
-        } else if state.mode == Some(Mode::Output) {
-            let label = if state.level == Some(Level::High) {
-                "Write LOW"
+        let rw: Element<'_, Message> =
+            if state.mode.is_some_and(Mode::is_input) && info.capabilities.input() {
+                native_button("Read")
+                    .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)))
+                    .into()
+            } else if state.mode == Some(Mode::Output) && info.capabilities.output() {
+                let label = if state.level == Some(Level::High) {
+                    "Write LOW"
+                } else {
+                    "Write HIGH"
+                };
+                native_button(label)
+                    .on_press_maybe((!state.value_pending).then_some(Message::Write(pin)))
+                    .into()
             } else {
-                "Write HIGH"
+                text("").into()
             };
-            native_button(label)
-                .on_press_maybe((!state.value_pending).then_some(Message::Write(pin)))
-                .into()
-        } else {
-            text("").into()
-        };
 
-        let listen: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input) {
+        let listen: Element<'_, Message> = if state.mode.is_some_and(Mode::is_input)
+            && info.capabilities.input()
+        {
             let label = if matches!(state.listener, ListenerState::On | ListenerState::Disabling) {
                 "Stop"
             } else {
@@ -251,6 +294,21 @@ impl App {
         .height(Length::Fixed(ROW_HEIGHT))
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+fn pin_modes(capabilities: PinCapabilities) -> &'static [Mode] {
+    match (
+        capabilities.input(),
+        capabilities.pull_up(),
+        capabilities.output(),
+    ) {
+        (false, _, false) => &[],
+        (true, false, false) => &[Mode::Input],
+        (true, true, false) => &[Mode::Input, Mode::InputPullup],
+        (false, _, true) => &[Mode::Output],
+        (true, false, true) => &[Mode::Input, Mode::Output],
+        (true, true, true) => &MODES,
     }
 }
 
@@ -342,5 +400,25 @@ pub(super) fn pin_display(pin: &PinInfo) -> String {
     match pin.package_pin {
         Some(package_pin) => format!("{} ({package_pin})", pin.token),
         None => pin.token.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pin_modes_follow_discovered_capabilities() {
+        assert_eq!(pin_modes(PinCapabilities::NONE), []);
+        assert_eq!(pin_modes(PinCapabilities::INPUT), [Mode::Input]);
+        assert_eq!(
+            pin_modes(PinCapabilities::INPUT_PULLUP),
+            [Mode::Input, Mode::InputPullup]
+        );
+        assert_eq!(
+            pin_modes(PinCapabilities::new(false, true, false)),
+            [Mode::Output]
+        );
+        assert_eq!(pin_modes(PinCapabilities::GPIO), MODES);
     }
 }

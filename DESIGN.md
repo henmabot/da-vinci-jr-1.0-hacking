@@ -22,12 +22,13 @@ The visual baseline is the existing Python GPIO demo: compact desktop controls, 
    - Match the Python/ttk feel as closely as Iced allows.
    - A button's width should follow its label and native padding.
 
-4. **GPIO identity is physical-first.**
-   - GUI: `PB12 (87)`.
-   - Wire protocol: `PB12` / `PA01` style with a zero-padded two-digit bit number.
+4. **GPIO identity is physical-first and route-native.**
+   - GUI: use the discovered native pin token and package pin when present, for example `PB12 (87)` or `PIO2_3 (38)`.
+   - Wire protocol: use the discovered symbolic target token. Never substitute a virtual numeric GPIO ID.
    - Never show virtual numeric GPIO IDs to the user.
 
-5. **PIO banks are the navigation model.**
+5. **Route-local banks are the navigation model.**
+   - The user selects a configured route first, then navigates the banks discovered for that route.
    - No arbitrary `Page 2 of 4` navigation.
 
 6. **The serial log remains visible beside the GPIO view and the divider is resizable.**
@@ -119,11 +120,15 @@ The serial log keeps:
 
 ## GPIO bank navigation
 
-Replace page navigation with a tab-like bank selector:
+The connection area includes a route selector. Changing the route changes only the route-local discovered state that the UI renders. It must not reconnect the serial device or reset another route's modes, values, listeners, or pending requests.
+
+Below it, use a tab-like selector built from the selected route's discovered banks. For the SAM route, retain the established presentation grouping:
 
 ```text
 [ ‹ ]   PIOA   PIOB + PIOE   PIOC   PIOD   [ › ]
 ```
+
+Routes without a presentation override render one tab per discovered bank using the native bank labels, such as `PIO0`, `PIO1`, `PIO2`, and `PIO3`.
 
 Rules:
 
@@ -131,25 +136,16 @@ Rules:
 - left/right arrow buttons switch one tab at a time;
 - arrows stop at the first/last tab and disable there;
 - no wrap-around;
-- changing the visible tab **must not** change the bulk-action scope dropdown;
+- tab rows can wrap when needed instead of overflowing the pane.
+- changing the visible tab **must not** change the bulk-action scope dropdown.
+- changing the selected route rebuilds tabs and scopes from that route's discovered map.
 - the selected tab must remain visually obvious without changing its geometry.
 
 ### Bank layouts
 
-`PIOA`, `PIOC`, and `PIOD` each contain 32 pins and render as two 16-row columns.
+A discovered bank with pins in both lower and upper halves can render as two columns. Smaller banks render as one column with internal scrolling. The renderer derives rows from discovered `BankKey` and pin metadata rather than MCU-name branches.
 
-Example:
-
-```text
-PIOA
-
-Pin          Mode          Level      Read/Write     Listen/Stop      Pin          Mode ...
-PA0 (102)    [ INPUT  ▼ ]  [ HIGH ]   [ Read ]       [ Stop ]         PA16 (45)    ...
-PA1 (99)     [ OUTPUT ▼ ]  [ LOW  ]   [ Write HIGH ]                 PA17 (25)    ...
-...
-```
-
-`PIOB + PIOE` is a **listing-only merge**. The two banks remain visually and semantically separate:
+For SAM, `PIOB + PIOE` is a **listing-only merge**. The two discovered banks remain visually and semantically separate:
 
 ```text
 PIOB                                      PIOE
@@ -159,7 +155,7 @@ PB1 (...)                                 PE1 (...)
 ...
 ```
 
-Do not create a `PIOB + PIOE` protocol target or bulk scope.
+Do not create a `PIOB + PIOE` protocol target or bulk scope. The merge is presentation configuration only. Routes without an override render their discovered banks generically.
 
 ---
 
@@ -305,16 +301,12 @@ It uses **one independent scope dropdown**:
 Scope [ ALL ▼ ]
 ```
 
-Options:
+Build the options from the selected route's discovered map:
 
 - `ALL`
-- `PIOA`
-- `PIOB`
-- `PIOC`
-- `PIOD`
-- `PIOE`
+- one entry for each discovered bank. Use its native token, for example `PIOA` or `PIO2`.
 
-The bulk scope is independent from the currently visible tab.
+The bulk scope is independent from the visible tab. Switching routes resets the scope selector to that route's `ALL`. It does not alter device state.
 
 Full toolbar concept:
 
@@ -403,15 +395,7 @@ Do not accept or emit numeric virtual GPIO target IDs such as `001`, `044`, or `
 
 ### Bank targets
 
-Add:
-
-```text
-PIOA
-PIOB
-PIOC
-PIOD
-PIOE
-```
+Bank targets use each MCU's native discovered bank token. SAM examples are `PIOA` through `PIOE`. LPC examples are `PIO0` through `PIO3`.
 
 ### Global target
 
@@ -455,10 +439,8 @@ Numeric virtual GPIO IDs should disappear from raw logs as pin identities too.
 
 ### Scope semantics
 
-- `PIOA` affects eligible pins in bank A only;
-- `PIOB` affects eligible pins in bank B only;
-- and so on;
-- `ALL` affects eligible pins across all banks;
+- a native bank token affects eligible pins in that discovered bank only.
+- `ALL` affects eligible pins across all banks of the addressed route.
 - reserved/unavailable pins are skipped during bank/global expansion;
 - directly targeting a reserved/unavailable pin still produces the normal unavailable error;
 - `PIOB + PIOE` is never a protocol target.
@@ -471,15 +453,9 @@ Bulk GET/query/listener streams retain the same packet ID for their per-pin resp
 
 ### Do not spread pin mapping logic
 
-There should be one authoritative mapping capable of answering:
+Each firmware adapter owns its native bank/pin metadata and exposes it through route-local MAP discovery. The desktop session turns that discovery into compact `RouteKey` / `BankKey` / `PinKey` identities and remains the authoritative owner of the discovered metadata and mutable device state.
 
-- internal compact/index representation → PIO bank + bit;
-- PIO bank + bit → internal representation;
-- PIO name → physical package pin;
-- physical display label (`PB12 (87)`);
-- wire label (`PB12`, zero-padded when needed such as `PA01`).
-
-The UI, protocol encoder/decoder, firmware grouping, errors, and logs should all use that shared mapping rather than rebuilding it independently.
+The UI must render those session-owned keys and metadata directly. It must not rebuild MCU pin tables, derive package pins from names, or repeatedly translate presentation strings back into protocol targets. Presentation-only grouping can resolve native bank tokens to `BankKey`s once when a route map becomes available.
 
 ### Layout model
 
@@ -540,21 +516,21 @@ The redesign is not done until all of these are true:
 - [ ] Controls look native/desktop-like rather than web-dashboard-like.
 - [ ] Normal buttons are visually neutral.
 - [ ] HIGH/LOW state is immediately scannable by background color.
-- [ ] PIO bank tabs replace page-number navigation.
-- [ ] PIOB and PIOE are separate groups inside one combined listing tab.
+- [ ] A route selector switches the rendered route without reconnecting or resetting session state.
+- [ ] Bank tabs come from the selected route's discovered map instead of page-number navigation.
+- [ ] PIOB and PIOE remain separate discovered banks inside the optional SAM combined listing tab.
 - [ ] GPIO/log divider is user-resizable.
 
 ### Pin identity
 
-- [ ] GUI shows `PB12 (87)` style labels.
+- [ ] GUI shows route-native symbolic labels plus package pins when discovered, such as `PB12 (87)` or `PIO2_3 (38)`.
 - [ ] No virtual numeric GPIO IDs are visible in the GUI.
-- [ ] Wire commands use `PA01` / `PC25` style pin targets.
-- [ ] Wire responses/errors use symbolic PIO pin targets.
+- [ ] Wire commands and responses use the selected route's native symbolic pin/bank targets.
 - [ ] packet correlation IDs remain unchanged.
 
 ### Bulk behavior
 
-- [ ] Scope dropdown contains ALL and each real PIO bank.
+- [ ] Scope dropdown contains ALL and each discovered bank for the selected route.
 - [ ] Scope dropdown does not follow the visible tab.
 - [ ] Apply mode requires an explicit button press.
 - [ ] Overwrite off skips already configured pins and iterates only UNSET pins.

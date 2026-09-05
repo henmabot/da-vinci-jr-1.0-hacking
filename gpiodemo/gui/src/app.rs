@@ -10,7 +10,7 @@ use iced::{
 use crate::{
     serial_log::SerialLog,
     session::{
-        DeviceEvent, DeviceSession, Event as ConnectionEvent, Mode, PinKey,
+        BankKey, DeviceEvent, DeviceSession, Event as ConnectionEvent, Mode, PinKey,
         Request as RoutedRequest, ResponseError, RouteKey, Target as RoutedTarget,
     },
     view::{self, pin_display},
@@ -19,9 +19,10 @@ use crate::{
 const MAX_IO_EVENTS_PER_TICK: usize = 256;
 const MAX_COMMAND_HISTORY: usize = 200;
 const ROUTES: [&str; 2] = ["SAM", "LPC"];
-pub(super) const BANK_TABS: [BankTab; 4] = [BankTab::A, BankTab::BAndE, BankTab::C, BankTab::D];
 
 type Request = RoutedRequest;
+
+pub(super) const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ScopeChoice {
@@ -67,27 +68,54 @@ impl fmt::Display for PortChoice {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum BankTab {
-    A,
-    BAndE,
-    C,
-    D,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RouteChoice {
+    key: RouteKey,
+    label: String,
 }
 
-impl BankTab {
-    pub(super) fn index(self) -> usize {
-        BANK_TABS.iter().position(|tab| *tab == self).unwrap()
-    }
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::A => "PIOA",
-            Self::BAndE => "PIOB + PIOE",
-            Self::C => "PIOC",
-            Self::D => "PIOD",
-        }
+impl fmt::Display for RouteChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
     }
 }
+
+#[derive(Debug)]
+pub(super) struct BankGroup {
+    pub(super) label: String,
+    pub(super) banks: Vec<BankKey>,
+}
+
+#[derive(Clone, Copy)]
+struct BankGroupSpec {
+    label: &'static str,
+    banks: &'static [&'static str],
+}
+
+#[derive(Clone, Copy)]
+struct RouteLayout {
+    route: RouteKey,
+    groups: &'static [BankGroupSpec],
+}
+
+const SAM_BANK_GROUPS: &[BankGroupSpec] = &[
+    BankGroupSpec {
+        label: "PIOA",
+        banks: &["PIOA"],
+    },
+    BankGroupSpec {
+        label: "PIOB + PIOE",
+        banks: &["PIOB", "PIOE"],
+    },
+    BankGroupSpec {
+        label: "PIOC",
+        banks: &["PIOC"],
+    },
+    BankGroupSpec {
+        label: "PIOD",
+        banks: &["PIOD"],
+    },
+];
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PaneKind {
@@ -119,9 +147,10 @@ pub(super) enum Message {
     PortSelected(PortChoice),
     Connect,
     Disconnect,
-    PreviousTab,
-    NextTab,
-    TabSelected(BankTab),
+    RouteSelected(RouteChoice),
+    PreviousGroup,
+    NextGroup,
+    GroupSelected(usize),
     ModeSelected(PinKey, Mode),
     Read(PinKey),
     Write(PinKey),
@@ -155,7 +184,11 @@ pub(super) enum Message {
 }
 
 pub(super) struct App {
-    pub(super) bank_tab: BankTab,
+    pub(super) routes: Vec<RouteChoice>,
+    pub(super) selected_route: RouteChoice,
+    route_layout: Option<RouteLayout>,
+    pub(super) bank_groups: Vec<BankGroup>,
+    pub(super) bank_group: usize,
     pub(super) bulk_scope: ScopeChoice,
     pub(super) bulk_scopes: Vec<ScopeChoice>,
     pub(super) bulk_mode: Mode,
@@ -166,8 +199,6 @@ pub(super) struct App {
     pub(super) selected_port: Option<PortChoice>,
     pub(super) connected_port: Option<String>,
     pub(super) session: DeviceSession,
-    pub(super) sam_route: RouteKey,
-    lpc_route: RouteKey,
     pub(super) log: SerialLog,
     pub(super) autoscroll: bool,
     pub(super) log_scroll: iced::widget::Id,
@@ -182,43 +213,62 @@ pub(super) struct App {
 
 impl App {
     pub(super) fn new() -> (Self, Task<Message>) {
+        (Self::with_routes(&ROUTES), load_ports())
+    }
+
+    fn with_routes(route_names: &[&str]) -> Self {
         let (mut panes, pins_pane) = pane_grid::State::new(PaneKind::Pins);
         let (_, split) = panes
             .split(pane_grid::Axis::Vertical, pins_pane, PaneKind::Log)
             .expect("initial GPIO/log split must succeed");
         panes.resize(split, 0.76);
-        let session = DeviceSession::spawn(&ROUTES);
-        let sam_route = session.route_key("SAM").expect("SAM route is configured");
-        let lpc_route = session.route_key("LPC").expect("LPC route is configured");
 
-        (
-            Self {
-                bank_tab: BankTab::A,
-                bulk_scope: ScopeChoice::all(),
-                bulk_scopes: vec![ScopeChoice::all()],
-                bulk_mode: Mode::Input,
-                overwrite: false,
-                confirm_set: None,
-                panes,
-                ports: Vec::new(),
-                selected_port: None,
-                connected_port: None,
-                session,
-                sam_route,
-                lpc_route,
-                log: SerialLog::new(),
-                autoscroll: true,
-                log_scroll: iced::widget::Id::unique(),
-                raw_input_id: iced::widget::Id::unique(),
-                raw_input: String::new(),
-                command_history: VecDeque::new(),
-                history_index: None,
-                device_status: "Disconnected".into(),
-                error: None,
-                confirm_reboot: false,
-            },
-            load_ports(),
-        )
+        let session = DeviceSession::spawn(route_names);
+        let routes: Vec<_> = route_names
+            .iter()
+            .map(|name| RouteChoice {
+                key: session
+                    .route_key(name)
+                    .expect("configured route must exist"),
+                label: (*name).to_owned(),
+            })
+            .collect();
+        let selected_route = routes
+            .first()
+            .cloned()
+            .expect("at least one route is configured");
+        let route_layout = session.route_key("SAM").map(|route| RouteLayout {
+            route,
+            groups: SAM_BANK_GROUPS,
+        });
+
+        Self {
+            routes,
+            selected_route,
+            route_layout,
+            bank_groups: Vec::new(),
+            bank_group: 0,
+            bulk_scope: ScopeChoice::all(),
+            bulk_scopes: vec![ScopeChoice::all()],
+            bulk_mode: Mode::Input,
+            overwrite: false,
+            confirm_set: None,
+            panes,
+            ports: Vec::new(),
+            selected_port: None,
+            connected_port: None,
+            session,
+            log: SerialLog::new(),
+            autoscroll: true,
+            log_scroll: iced::widget::Id::unique(),
+            raw_input_id: iced::widget::Id::unique(),
+            raw_input: String::new(),
+            command_history: VecDeque::new(),
+            history_index: None,
+            device_status: "Disconnected".into(),
+            error: None,
+            confirm_reboot: false,
+        }
     }
 
     pub(super) fn view(&self) -> Element<'_, Message> {
@@ -275,19 +325,23 @@ impl App {
                 }
             }
             Message::Disconnect => self.error = self.session.disconnect().err(),
-            Message::PreviousTab => {
-                let index = self.bank_tab.index();
-                if index > 0 {
-                    self.bank_tab = BANK_TABS[index - 1];
+            Message::RouteSelected(route) => {
+                self.selected_route = route;
+                self.sync_route_ui();
+            }
+            Message::PreviousGroup => {
+                self.bank_group = self.bank_group.saturating_sub(1);
+            }
+            Message::NextGroup => {
+                if self.bank_group + 1 < self.bank_groups.len() {
+                    self.bank_group += 1;
                 }
             }
-            Message::NextTab => {
-                let index = self.bank_tab.index();
-                if index + 1 < BANK_TABS.len() {
-                    self.bank_tab = BANK_TABS[index + 1];
+            Message::GroupSelected(index) => {
+                if index < self.bank_groups.len() {
+                    self.bank_group = index;
                 }
             }
-            Message::TabSelected(tab) => self.bank_tab = tab,
             Message::ModeSelected(pin, mode) => self.change_mode(pin, mode),
             Message::Read(pin) => self.read_pin(pin),
             Message::Write(pin) => self.write_pin(pin),
@@ -295,6 +349,7 @@ impl App {
             Message::BulkScopeSelected(scope) => {
                 self.bulk_scope = scope;
                 self.confirm_set = None;
+                self.normalize_bulk_mode();
             }
             Message::BulkModeSelected(mode) => self.bulk_mode = mode,
             Message::OverwriteChanged(overwrite) => self.overwrite = overwrite,
@@ -389,8 +444,12 @@ impl App {
         if !self.require_connection() {
             return;
         }
+        if !self.bulk_modes().contains(&self.bulk_mode) {
+            self.device_status = "No eligible pins in selected scope".into();
+            return;
+        }
         let result = self.session.apply_mode(
-            self.sam_route,
+            self.selected_route_key(),
             self.bulk_scope.target,
             self.bulk_mode,
             self.overwrite,
@@ -404,7 +463,7 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        let result = self.session.read_scope(self.sam_route, target);
+        let result = self.session.read_scope(self.selected_route_key(), target);
         self.record_session_action(result);
     }
 
@@ -414,7 +473,7 @@ impl App {
         }
         let result = self
             .session
-            .set_listener_scope(self.sam_route, target, enabled);
+            .set_listener_scope(self.selected_route_key(), target, enabled);
         self.record_session_action(result);
     }
 
@@ -422,24 +481,106 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        let result = self.session.set_scope_level(self.sam_route, target, level);
+        let result = self
+            .session
+            .set_scope_level(self.selected_route_key(), target, level);
         self.record_session_action(result);
     }
 
-    fn sync_sam_state(&mut self) {
-        self.bulk_scopes.clear();
-        self.bulk_scopes.push(ScopeChoice::all());
-        self.bulk_scopes
-            .extend(
-                self.session
-                    .banks(self.sam_route)
-                    .map(|(bank, info)| ScopeChoice {
-                        target: RoutedTarget::Bank(bank),
-                        label: info.token.clone(),
-                    }),
-            );
+    pub(super) fn selected_route_key(&self) -> RouteKey {
+        self.selected_route.key
+    }
+
+    pub(super) fn bulk_modes(&self) -> Vec<Mode> {
+        let route = self.selected_route_key();
+        let pins = self.session.target_pins(route, self.bulk_scope.target);
+        MODES
+            .into_iter()
+            .filter(|mode| {
+                pins.iter().any(|&pin| {
+                    self.session
+                        .pin_info(pin)
+                        .is_some_and(|info| mode.supported_by(info.capabilities))
+                })
+            })
+            .collect()
+    }
+
+    fn normalize_bulk_mode(&mut self) {
+        let modes = self.bulk_modes();
+        if !modes.contains(&self.bulk_mode)
+            && let Some(mode) = modes.first().copied()
+        {
+            self.bulk_mode = mode;
+        }
+    }
+
+    fn sync_route_ui(&mut self) {
+        let route = self.selected_route_key();
+        self.bulk_scopes = std::iter::once(ScopeChoice::all())
+            .chain(self.session.banks(route).map(|(bank, info)| ScopeChoice {
+                target: RoutedTarget::Bank(bank),
+                label: info.token.clone(),
+            }))
+            .collect();
         self.bulk_scope = ScopeChoice::all();
+        self.bank_groups = self.bank_groups_for(route);
+        self.bank_group = 0;
         self.confirm_set = None;
+        self.normalize_bulk_mode();
+    }
+
+    fn bank_groups_for(&self, route: RouteKey) -> Vec<BankGroup> {
+        let discovered: Vec<_> = self
+            .session
+            .banks(route)
+            .map(|(key, info)| (key, info.token.clone()))
+            .collect();
+        let Some(specs) = self
+            .route_layout
+            .filter(|layout| layout.route == route)
+            .map(|layout| layout.groups)
+        else {
+            return discovered
+                .into_iter()
+                .map(|(bank, label)| BankGroup {
+                    label,
+                    banks: vec![bank],
+                })
+                .collect();
+        };
+
+        let mut used = Vec::new();
+        let mut groups = Vec::new();
+        for spec in specs {
+            let banks: Vec<_> = spec
+                .banks
+                .iter()
+                .filter_map(|token| {
+                    discovered
+                        .iter()
+                        .find(|(_, label)| label == token)
+                        .map(|(bank, _)| *bank)
+                })
+                .collect();
+            if !banks.is_empty() {
+                used.extend(banks.iter().copied());
+                groups.push(BankGroup {
+                    label: spec.label.to_owned(),
+                    banks,
+                });
+            }
+        }
+        groups.extend(
+            discovered
+                .into_iter()
+                .filter(|(bank, _)| !used.contains(bank))
+                .map(|(bank, label)| BankGroup {
+                    label,
+                    banks: vec![bank],
+                }),
+        );
+        groups
     }
 
     fn record_session_action(&mut self, result: Result<Vec<String>, String>) -> usize {
@@ -469,7 +610,7 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        match self.session.send(self.sam_route, request) {
+        match self.session.send(self.selected_route_key(), request) {
             Ok(line) => self.push_log(format!("TX {line}")),
             Err(error) => self.error = Some(error),
         }
@@ -515,17 +656,16 @@ impl App {
                     self.connected_port = Some(port.clone());
                     self.device_status = "Connected; discovering pin maps".into();
                     self.error = None;
-                    self.bulk_scopes = vec![ScopeChoice::all()];
-                    self.bulk_scope = ScopeChoice::all();
-                    self.send_routed_request(self.sam_route, RoutedRequest::Map);
-                    self.send_routed_request(self.lpc_route, RoutedRequest::Map);
+                    self.sync_route_ui();
+                    let routes: Vec<_> = self.routes.iter().map(|route| route.key).collect();
+                    for route in routes {
+                        self.send_routed_request(route, RoutedRequest::Map);
+                    }
                 }
                 ConnectionEvent::Disconnected(reason) => {
                     self.connected_port = None;
                     self.device_status = "Disconnected".into();
-                    self.bulk_scopes = vec![ScopeChoice::all()];
-                    self.bulk_scope = ScopeChoice::all();
-                    self.confirm_set = None;
+                    self.sync_route_ui();
                     self.error = reason;
                 }
                 ConnectionEvent::Received { line, event } => {
@@ -564,8 +704,8 @@ impl App {
                 self.device_status = format!("{}: {identity}", self.session.route_name(route));
             }
             DeviceEvent::MapReady { route } => {
-                if route == self.sam_route {
-                    self.sync_sam_state();
+                if route == self.selected_route_key() {
+                    self.sync_route_ui();
                 }
                 self.device_status = format!(
                     "{} map: {} banks, {} pins",
@@ -675,20 +815,36 @@ mod tests {
     use super::*;
     use da_vinci_protocol::PinCapabilities;
 
+    fn install_sam_map(app: &mut App) {
+        let sam = app.session.route_key("SAM").unwrap();
+        let banks = vec!["PIOA", "PIOB", "PIOE", "PIOC", "PIOD"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let pins = vec![
+            ("PA00".into(), 0, 0, PinCapabilities::GPIO),
+            ("PB00".into(), 1, 0, PinCapabilities::GPIO),
+            ("PE00".into(), 2, 0, PinCapabilities::INPUT_PULLUP),
+            ("PC00".into(), 3, 0, PinCapabilities::GPIO),
+            ("PD00".into(), 4, 0, PinCapabilities::GPIO),
+        ];
+        app.session.install_map_for_test(sam, banks, pins);
+    }
+
     fn connected_app() -> App {
-        let (mut app, _) = App::new();
+        let mut app = App::with_routes(&ROUTES);
         app.connected_port = Some("test".into());
-        let mut pins = Vec::new();
-        pins.extend((0..32).map(|bit| (format!("PA{bit:02}"), 0, bit, PinCapabilities::GPIO)));
-        pins.extend((0..32).map(|bit| (format!("PC{bit:02}"), 1, bit, PinCapabilities::GPIO)));
-        app.session
-            .install_map_for_test(app.sam_route, vec!["PIOA".into(), "PIOC".into()], pins);
-        app.sync_sam_state();
+        install_sam_map(&mut app);
+        app.sync_route_ui();
         app
     }
 
-    fn bank(app: &App, token: &str) -> RoutedTarget {
-        RoutedTarget::Bank(app.session.bank_key(app.sam_route, token).unwrap())
+    fn route(app: &App, label: &str) -> RouteChoice {
+        app.routes
+            .iter()
+            .find(|route| route.label == label)
+            .unwrap()
+            .clone()
     }
 
     fn scope(app: &App, token: &str) -> ScopeChoice {
@@ -704,21 +860,119 @@ mod tests {
     }
 
     #[test]
-    fn bulk_controls_send_selected_symbolic_scope() {
+    fn bulk_controls_send_selected_discovered_scope() {
         let mut app = connected_app();
-        let port_c = bank(&app, "PIOC");
-        app.bulk_scope = scope(&app, "PIOC");
+        let port_c = scope(&app, "PIOC");
+        app.bulk_scope = port_c.clone();
         app.bulk_mode = Mode::InputPullup;
         app.overwrite = true;
 
         app.apply_bulk_mode();
         assert_eq!(last_log(&app), "TX 001 SAM DIR PIOC IN OK?");
 
-        app.set_listener_scope(port_c, true);
+        app.set_listener_scope(port_c.target, true);
         assert_eq!(last_log(&app), "TX 002 SAM LSN PIOC ON OK?");
 
-        app.read_scope(port_c);
+        app.read_scope(port_c.target);
         assert_eq!(last_log(&app), "TX 003 SAM GET PIOC OK?");
+    }
+
+    #[test]
+    fn sam_layout_groups_discovered_banks_without_owning_topology() {
+        let app = connected_app();
+        let labels: Vec<_> = app
+            .bank_groups
+            .iter()
+            .map(|group| group.label.as_str())
+            .collect();
+        assert_eq!(labels, ["PIOA", "PIOB + PIOE", "PIOC", "PIOD"]);
+        assert_eq!(app.bank_groups[1].banks.len(), 2);
+        assert_eq!(app.bulk_scopes.len(), 6);
+    }
+
+    #[test]
+    fn route_switch_preserves_session_owned_pin_state() {
+        let mut app = connected_app();
+        let sam = app.session.route_key("SAM").unwrap();
+        let lpc = app.session.route_key("LPC").unwrap();
+        app.session.install_map_for_test(
+            lpc,
+            vec!["PIO2".into()],
+            vec![("PIO2_3".into(), 0, 3, PinCapabilities::INPUT)],
+        );
+        let sam_pin = app.session.pin_key(sam, "PA00").unwrap();
+        app.change_mode(sam_pin, Mode::Input);
+        assert_eq!(
+            app.session.pin_state(sam_pin).unwrap().target_mode,
+            Some(Mode::Input)
+        );
+
+        let _ = app.update(Message::RouteSelected(route(&app, "LPC")));
+        assert_eq!(app.selected_route_key(), lpc);
+        assert_eq!(
+            app.session.pin_state(sam_pin).unwrap().target_mode,
+            Some(Mode::Input)
+        );
+
+        let _ = app.update(Message::RouteSelected(route(&app, "SAM")));
+        assert_eq!(app.selected_route_key(), sam);
+        assert_eq!(
+            app.session.pin_state(sam_pin).unwrap().target_mode,
+            Some(Mode::Input)
+        );
+    }
+
+    #[test]
+    fn synthetic_route_uses_discovery_for_groups_scopes_and_commands() {
+        let mut app = App::with_routes(&["SAM", "LPC", "AUX"]);
+        app.connected_port = Some("test".into());
+        let aux = app.session.route_key("AUX").unwrap();
+        app.session.install_map_for_test(
+            aux,
+            vec!["GPIOX".into(), "GPIOY".into()],
+            vec![
+                ("X0".into(), 0, 0, PinCapabilities::INPUT_PULLUP),
+                ("Y7".into(), 1, 7, PinCapabilities::new(false, true, false)),
+            ],
+        );
+
+        let _ = app.update(Message::RouteSelected(route(&app, "AUX")));
+        assert_eq!(app.selected_route_key(), aux);
+        assert_eq!(
+            app.bank_groups
+                .iter()
+                .map(|group| group.label.as_str())
+                .collect::<Vec<_>>(),
+            ["GPIOX", "GPIOY"]
+        );
+        assert_eq!(
+            app.bulk_scopes
+                .iter()
+                .map(|scope| scope.label.as_str())
+                .collect::<Vec<_>>(),
+            ["ALL", "GPIOX", "GPIOY"]
+        );
+        let _ = view::view(&app);
+
+        app.bulk_scope = scope(&app, "GPIOY");
+        app.bulk_mode = Mode::Output;
+        app.overwrite = true;
+        app.apply_bulk_mode();
+        assert_eq!(last_log(&app), "TX 001 AUX DIR GPIOY OUT OK?");
+    }
+
+    #[test]
+    fn intermediate_route_error_is_visible_independent_of_selection() {
+        let mut app = connected_app();
+        let lpc = app.session.route_key("LPC").unwrap();
+        app.handle_device_event(DeviceEvent::DeviceError {
+            route: lpc,
+            source: "SAM".into(),
+            error: ResponseError::RouteDown {
+                next_hop: "LPC".into(),
+            },
+        });
+        assert_eq!(app.error.as_deref(), Some("SAM: route LPC is down"));
     }
 
     #[test]
@@ -739,14 +993,14 @@ mod tests {
     }
 
     #[test]
-    fn tab_selection_does_not_change_bulk_scope() {
+    fn group_selection_does_not_change_bulk_scope() {
         let mut app = connected_app();
         let selected = scope(&app, "PIOC");
         app.bulk_scope = selected.clone();
 
-        let _ = app.update(Message::TabSelected(BankTab::D));
+        let _ = app.update(Message::GroupSelected(3));
 
-        assert_eq!(app.bank_tab, BankTab::D);
+        assert_eq!(app.bank_group, 3);
         assert_eq!(app.bulk_scope, selected);
     }
 }
