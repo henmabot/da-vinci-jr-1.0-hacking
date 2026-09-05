@@ -3,9 +3,95 @@ use crate::{
         Command, DecodedRequest, DecodedResponse, Direction, Level, Query, QueryValue, Request,
         Response, ResponseError, TargetError, Toggle,
     },
-    framing::MAX_PACKET_LEN,
+    framing::{Frame, MAX_PACKET_LEN},
     message::{Message, Packet, RawMessage, RequestId, parse_packet_id, valid_route_token},
 };
+
+impl<'a> TryFrom<&'a [u8]> for RawMessage<'a> {
+    type Error = DecodeError;
+
+    fn try_from(line: &'a [u8]) -> Result<Self, Self::Error> {
+        decode_message(line)
+    }
+}
+
+impl<'a> TryFrom<&'a Frame> for RawMessage<'a> {
+    type Error = DecodeError;
+
+    fn try_from(frame: &'a Frame) -> Result<Self, Self::Error> {
+        frame.as_ref().try_into()
+    }
+}
+
+impl<'a> TryFrom<RawMessage<'a>> for Message<&'a [u8], DecodedRequest<'a>> {
+    type Error = DecodeError;
+
+    fn try_from(message: RawMessage<'a>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            route: message.route,
+            packet: decode_request(message.packet)?,
+        })
+    }
+}
+
+impl<'a> TryFrom<RawMessage<'a>> for Message<&'a [u8], DecodedResponse<'a>> {
+    type Error = DecodeError;
+
+    fn try_from(message: RawMessage<'a>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            route: message.route,
+            packet: decode_response(message)?,
+        })
+    }
+}
+
+impl<'a, R> TryFrom<Message<R, &'a [u8]>> for Frame
+where
+    R: AsRef<[u8]>,
+{
+    type Error = EncodeError;
+
+    fn try_from(message: Message<R, &'a [u8]>) -> Result<Self, Self::Error> {
+        encode_frame(|out| {
+            encode_message_with(message.packet.id, message.route.as_ref(), out, |writer| {
+                writer.bytes(message.packet.body)
+            })
+        })
+    }
+}
+
+impl<R, T> TryFrom<Message<R, Request<T>>> for Frame
+where
+    R: AsRef<[u8]>,
+    T: AsRef<[u8]>,
+{
+    type Error = EncodeError;
+
+    fn try_from(message: Message<R, Request<T>>) -> Result<Self, Self::Error> {
+        encode_frame(|out| encode_request(message.packet, message.route.as_ref(), out))
+    }
+}
+
+impl<R, T, D> TryFrom<Message<R, Response<T, D>>> for Frame
+where
+    R: AsRef<[u8]>,
+    T: AsRef<[u8]>,
+    D: AsRef<[u8]>,
+{
+    type Error = EncodeError;
+
+    fn try_from(message: Message<R, Response<T, D>>) -> Result<Self, Self::Error> {
+        encode_frame(|out| encode_response(message.packet, message.route.as_ref(), out))
+    }
+}
+
+fn encode_frame(
+    encode: impl FnOnce(&mut [u8]) -> Result<usize, EncodeError>,
+) -> Result<Frame, EncodeError> {
+    let mut bytes = [0; MAX_PACKET_LEN];
+    let len = encode(&mut bytes)?;
+    Ok(Frame::from_parts(bytes, len))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeErrorKind {

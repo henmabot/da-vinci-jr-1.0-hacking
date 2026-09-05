@@ -25,6 +25,12 @@ impl TryFrom<&[u8]> for Frame {
     }
 }
 
+impl Frame {
+    pub(crate) const fn from_parts(bytes: [u8; MAX_PACKET_LEN], len: usize) -> Self {
+        Self { bytes, len }
+    }
+}
+
 impl AsRef<[u8]> for Frame {
     fn as_ref(&self) -> &[u8] {
         &self.bytes[..self.len]
