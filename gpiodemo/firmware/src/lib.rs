@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod router;
+pub mod transport;
 
 use da_vinci_protocol::{
     Direction, Level, Packet, Pin, PinError, PinTable, PinTarget, Port, Query, QueryValue, Request,
