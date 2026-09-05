@@ -15,15 +15,11 @@ mod board {
     };
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
-        BankId, Firmware, GpioHal, PinId,
-        router::Router,
+        BankId, GpioHal, Node, PinId,
         sam::{SAM_IDENTITY, SAM_PIN_MAP},
-        transport::{ByteError, FramedTransport, NonBlockingBytes},
+        transport::{ByteError, NonBlockingBytes},
     };
-    use da_vinci_protocol::{
-        DecodeError, DecodeErrorKind, Level, MAX_PACKET_LEN, Packet, Response, ResponseError,
-        decode_request, decode_request_envelope, encode_response,
-    };
+    use da_vinci_protocol::Level;
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
@@ -183,75 +179,12 @@ mod board {
             .device_class(USB_CLASS_CDC)
             .build();
 
-        let mut firmware = Firmware::new(SAM_IDENTITY);
         let mut gpio = SamGpio;
-        let mut router = Router::new(LOCAL_ROUTE, []);
-        let mut transport = FramedTransport::new();
-        let mut frame = [0; MAX_PACKET_LEN];
+        let mut node = Node::new(SAM_IDENTITY, LOCAL_ROUTE, []);
 
         loop {
             usb.poll(&mut [&mut serial]);
-            let _ = transport.poll(&mut UsbBytes(&mut serial));
-
-            if transport.tx_idle()
-                && let Some(packet) = firmware.poll_bulk(&gpio)
-            {
-                queue_response(&mut transport, router.local_route(), packet);
-            }
-
-            if transport.tx_idle()
-                && let Ok(Some(len)) = transport.next_frame(&mut frame)
-            {
-                match decode_request_envelope(&frame[..len]) {
-                    Ok(envelope) => {
-                        let response = router.dispatch(&frame[..len], envelope, |body| {
-                            decode_request(body)
-                                .map(|packet| firmware.handle(packet, &mut gpio))
-                                .unwrap_or_else(|error| {
-                                    decode_error_response::<&[u8]>(error)
-                                        .expect("local command decode errors keep their ID")
-                                })
-                        });
-                        if let Some(response) = response {
-                            queue_response(&mut transport, router.local_route(), response);
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(response) = decode_error_response::<&[u8]>(error) {
-                            queue_response(&mut transport, router.local_route(), response);
-                        }
-                    }
-                }
-            }
-
-            if transport.tx_idle()
-                && let Some(packet) = firmware.poll_listener(&gpio)
-            {
-                queue_response(&mut transport, router.local_route(), packet);
-            }
-            let _ = transport.poll(&mut UsbBytes(&mut serial));
+            let _ = node.poll(&mut UsbBytes(&mut serial), &mut gpio);
         }
-    }
-
-    fn queue_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
-        transport: &mut FramedTransport,
-        source: &[u8],
-        packet: Packet<Response<T, D>>,
-    ) {
-        let mut frame = [0; MAX_PACKET_LEN];
-        let len = encode_response(packet, source, &mut frame)
-            .expect("protocol response always fits fixed packet buffer");
-        transport
-            .enqueue(&frame[..len])
-            .expect("response queued only while transport TX is idle");
-    }
-
-    fn decode_error_response<T>(error: DecodeError) -> Option<Packet<Response<T, &'static [u8]>>> {
-        let id = error.id?;
-        let body = match error.kind {
-            DecodeErrorKind::Malformed => Response::Error(ResponseError::BadPacket),
-            DecodeErrorKind::UnknownCommand => Response::Unknown,
-        };
-        Some(Packet { id, body })
     }
 }

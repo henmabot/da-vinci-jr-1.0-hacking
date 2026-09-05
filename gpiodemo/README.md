@@ -5,7 +5,7 @@ The GPIO controller is a Rust workspace with one shared wire-protocol crate and 
 ```text
 gpiodemo/
 ├── protocol/   no_std packet types plus ASCII encode/decode
-├── firmware/   no_std SAM4E8E USB CDC + GPIO firmware
+├── firmware/   shared no_std node/GPIO logic plus SAM4E8E and LPC1115 targets
 └── gui/        iced desktop controller
 ```
 
@@ -17,12 +17,13 @@ From the repository root:
 
 ```sh
 just build       # build SAM4E8E firmware and emit build/firmware.bin
+just build-lpc   # build LPC1115 firmware and emit build/lpc1115.bin
 just gui         # run the desktop controller
 just gui-release # run an optimized desktop build for performance testing
-just check       # formatting, tests, clippy, and firmware-target clippy
+just check       # formatting, tests, clippy, and both firmware-target checks
 ```
 
-Install the Rust `thumbv7em-none-eabi` target before building firmware. `just build` also needs `arm-none-eabi-objcopy`. `just flash` needs BOSSA.
+Install the Rust `thumbv7em-none-eabi` target for the SAM4E8E build and `thumbv6m-none-eabi` for the LPC1115 build. Firmware binary generation also needs `arm-none-eabi-objcopy`. `just flash` uses BOSSA for the SAM target.
 
 `just flash` flashes `build/firmware.bin` with BOSSA. Set `DEVICE` to override the default serial device.
 
@@ -33,6 +34,14 @@ cargo run --manifest-path gpiodemo/Cargo.toml -p da-vinci-gui
 ```
 
 Running the GUI does not require firmware cross-compilation tools. If you have `just`, `just gui` runs the same command. Use `just gui-release` when measuring desktop performance. The firmware uses its own size-optimized release profile.
+
+## LPC1115 assumptions and safety
+
+The LPC1115 target passes compile and protocol tests, but no one has electrically tested it on the printer board. The checked-in schematic supplies the 48-pin package mapping. The firmware keeps RESET/PIO0_0, SWCLK/PIO0_10, SWDIO/PIO1_3, and the PIO1_6/PIO1_7 UART link unavailable to ordinary GPIO control.
+
+Until hardware measurements identify printer-specific loads, the LPC pin map advertises all other pads as input-only and disables pull-up control. This is stricter than the MCU electrical capability. It prevents the controller from claiming that an unknown board net is safe to drive or bias. PIO0_4 and PIO0_5 are special open-drain/I2C pads, so their adapter selects Standard-I/O mode instead of ordinary push-pull configuration.
+
+The LPC firmware assumes the reset-default 12 MHz internal RC oscillator and configures its upstream UART for approximately 115200 baud. Hardware measurements can require different clock or baud settings. The code does not claim physical validation of the SAM-to-LPC link.
 
 ## Protocol
 

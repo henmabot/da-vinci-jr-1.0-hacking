@@ -42,6 +42,7 @@ impl Capabilities {
 
     pub const NONE: Self = Self(0);
     pub const GPIO: Self = Self(Self::INPUT_BIT | Self::OUTPUT_BIT | Self::PULL_UP_BIT);
+    pub(crate) const INPUT: Self = Self(Self::INPUT_BIT);
     pub const INPUT_ONLY: Self = Self(Self::INPUT_BIT | Self::PULL_UP_BIT);
 
     pub const fn new(input: bool, output: bool, pull_up: bool) -> Self {
