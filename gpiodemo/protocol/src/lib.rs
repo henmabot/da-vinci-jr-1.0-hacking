@@ -446,6 +446,8 @@ pub enum ResponseError<R = &'static [u8]> {
     BadPacket,
     Pin { pin: Pin, reason: PinError },
     NoRoute { destination: R },
+    RouteBusy { next_hop: R },
+    RouteDown { next_hop: R },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -634,6 +636,20 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>,
                     }
                     ResponseError::NoRoute { destination }
                 }
+                Some(b"ROUTE_BUSY") => {
+                    let next_hop = tokens.next().ok_or_else(malformed)?;
+                    if !valid_route_token(next_hop) {
+                        return Err(malformed());
+                    }
+                    ResponseError::RouteBusy { next_hop }
+                }
+                Some(b"ROUTE_DOWN") => {
+                    let next_hop = tokens.next().ok_or_else(malformed)?;
+                    if !valid_route_token(next_hop) {
+                        return Err(malformed());
+                    }
+                    ResponseError::RouteDown { next_hop }
+                }
                 Some(pin) => {
                     let pin = Pin::try_from(pin).map_err(|_| malformed())?;
                     let reason = match tokens.next() {
@@ -793,6 +809,16 @@ pub fn encode_response<R: AsRef<[u8]>>(
         Response::Error(ResponseError::NoRoute { destination }) => {
             writer.bytes(b" UMM NO_ROUTE ")?;
             writer.route(destination.as_ref())?;
+            writer.bytes(b" <3\n")?;
+        }
+        Response::Error(ResponseError::RouteBusy { next_hop }) => {
+            writer.bytes(b" UMM ROUTE_BUSY ")?;
+            writer.route(next_hop.as_ref())?;
+            writer.bytes(b" <3\n")?;
+        }
+        Response::Error(ResponseError::RouteDown { next_hop }) => {
+            writer.bytes(b" UMM ROUTE_DOWN ")?;
+            writer.route(next_hop.as_ref())?;
             writer.bytes(b" <3\n")?;
         }
         Response::Unknown => writer.bytes(b" IDK <3\n")?,
@@ -1257,6 +1283,18 @@ mod tests {
                     destination: b"LPC".as_slice(),
                 }),
                 "008 SAM UMM NO_ROUTE LPC <3\n",
+            ),
+            (
+                Response::Error(ResponseError::RouteBusy {
+                    next_hop: b"LPC".as_slice(),
+                }),
+                "008 SAM UMM ROUTE_BUSY LPC <3\n",
+            ),
+            (
+                Response::Error(ResponseError::RouteDown {
+                    next_hop: b"LPC".as_slice(),
+                }),
+                "008 SAM UMM ROUTE_DOWN LPC <3\n",
             ),
             (Response::Unknown, "008 SAM IDK <3\n"),
             (Response::Bye, "008 SAM CYA <3\n"),

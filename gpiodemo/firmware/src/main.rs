@@ -177,7 +177,7 @@ mod board {
 
         let mut firmware = Firmware::new();
         let mut gpio = SamGpio;
-        let router = Router::new(LOCAL_ROUTE);
+        let mut router = Router::new(LOCAL_ROUTE, []);
         let mut transport = FramedTransport::new();
         let mut frame = [0; MAX_PACKET_LEN];
 
@@ -196,7 +196,7 @@ mod board {
             {
                 match decode_request_envelope(&frame[..len]) {
                     Ok(envelope) => {
-                        let response = router.dispatch(envelope, |body| {
+                        let response = router.dispatch(&frame[..len], envelope, |body| {
                             decode_request(body)
                                 .map(|packet| firmware.handle(packet, &mut gpio))
                                 .unwrap_or_else(|error| {
@@ -204,7 +204,9 @@ mod board {
                                         .expect("local command decode errors keep their ID")
                                 })
                         });
-                        queue_response(&mut transport, router.local_route(), response);
+                        if let Some(response) = response {
+                            queue_response(&mut transport, router.local_route(), response);
+                        }
                     }
                     Err(error) => {
                         if let Some(response) = decode_error_response(error) {

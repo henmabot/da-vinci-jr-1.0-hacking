@@ -522,6 +522,16 @@ fn decode_owned_response(line: &[u8]) -> Result<Packet<Response<String>>, Decode
                 destination: String::from_utf8_lossy(destination).into_owned(),
             })
         }
+        Response::Error(ResponseError::RouteBusy { next_hop }) => {
+            Response::Error(ResponseError::RouteBusy {
+                next_hop: String::from_utf8_lossy(next_hop).into_owned(),
+            })
+        }
+        Response::Error(ResponseError::RouteDown { next_hop }) => {
+            Response::Error(ResponseError::RouteDown {
+                next_hop: String::from_utf8_lossy(next_hop).into_owned(),
+            })
+        }
         Response::Unknown => Response::Unknown,
         Response::Bye => Response::Bye,
     };

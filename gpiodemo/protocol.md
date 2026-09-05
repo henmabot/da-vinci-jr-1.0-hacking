@@ -94,6 +94,8 @@ All successful and error responses keep the original request ID and name the res
 | `UMM <pin> UNSET <3` | An individual operation required an initialized pin. |
 | `UMM <pin> UNAVAILABLE <3` | An individual operation addressed an unavailable/reserved pin. |
 | `UMM NO_ROUTE <destination> <3` | This node has no configured path to the requested destination. |
+| `UMM ROUTE_BUSY <next-hop> <3` | The bounded queue for the selected next hop cannot accept another frame. |
+| `UMM ROUTE_DOWN <next-hop> <3` | The selected next-hop link reported a hard failure. |
 | `IDK <3` | The command name is unknown. |
 | `CYA <3` | Reply to `BYE`. |
 
@@ -184,3 +186,25 @@ Unknown route:
 ```
 
 The response source identifies the node that failed the route lookup. In this example, that node is `SAM`. The `NO_ROUTE` argument preserves the unresolved destination.
+
+## Routed forwarding
+
+A node can configure one or more downstream next hops. One next hop can serve several destination names. The router selects a next hop from the request destination and forwards the complete request frame without changing its ID, destination, or command body.
+
+Downstream responses and listener events travel upstream as complete frames. Intermediate nodes do not rewrite their IDs or source names.
+
+If a link temporarily cannot make progress, the router keeps accepted frames in a fixed-capacity queue. Temporary flow control does not mean that the route is down. When that queue is full, a new request fails locally:
+
+```text
+060 LPC HAI
+060 SAM UMM ROUTE_BUSY LPC <3
+```
+
+If the next-hop adapter reports a hard failure, the request fails with `ROUTE_DOWN` instead:
+
+```text
+061 LPC HAI
+061 SAM UMM ROUTE_DOWN LPC <3
+```
+
+The error argument names the failed next hop, while the response source names the node that detected the routing failure.

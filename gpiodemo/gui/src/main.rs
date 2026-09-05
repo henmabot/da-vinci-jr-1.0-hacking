@@ -1174,6 +1174,12 @@ impl App {
                     ResponseError::NoRoute { destination } => {
                         format!("No route to {destination}")
                     }
+                    ResponseError::RouteBusy { next_hop } => {
+                        format!("Route {next_hop} is busy")
+                    }
+                    ResponseError::RouteDown { next_hop } => {
+                        format!("Route {next_hop} is down")
+                    }
                 });
             }
             DeviceEvent::Unknown { request } => {
