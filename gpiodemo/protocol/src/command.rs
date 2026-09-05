@@ -47,6 +47,8 @@ impl fmt::Display for ParseTokenError {
 
 impl core::error::Error for ParseTokenError {}
 
+pub const PROTOCOL_VERSION: u16 = 1;
+
 fixed_wire_enum! {
     pub enum Command {
         Hello => b"HAI",
@@ -59,6 +61,8 @@ fixed_wire_enum! {
         Listen => b"LSN",
         Query => b"WYD",
         Bye => b"BYE",
+        Version => b"VER",
+        Help => b"HLP",
     }
 }
 
@@ -209,6 +213,8 @@ pub enum Request<T> {
     Listen { target: T, enabled: bool },
     Query { target: T, what: Query },
     Bye,
+    Version,
+    Help,
 }
 
 impl<T> Request<T> {
@@ -241,6 +247,8 @@ impl<T> Request<T> {
                 what,
             },
             Self::Bye => Request::Bye,
+            Self::Version => Request::Version,
+            Self::Help => Request::Help,
         }
     }
 
@@ -276,6 +284,8 @@ impl<T> Request<T> {
                 what,
             },
             Self::Bye => Request::Bye,
+            Self::Version => Request::Version,
+            Self::Help => Request::Help,
         })
     }
 }
@@ -320,6 +330,12 @@ pub enum Response<T, D> {
         target: T,
         what: Query,
         value: QueryValue,
+    },
+    Version {
+        version: u16,
+    },
+    Help {
+        command: Command,
     },
     Error(ResponseError<T, D>),
     Unknown,
@@ -370,6 +386,8 @@ impl<T, D> Response<T, D> {
                 what,
                 value,
             },
+            Self::Version { version } => Response::Version { version },
+            Self::Help { command } => Response::Help { command },
             Self::Error(ResponseError::BadPacket) => Response::Error(ResponseError::BadPacket),
             Self::Error(ResponseError::Target { target, reason }) => {
                 Response::Error(ResponseError::Target {

@@ -10,8 +10,8 @@ pub use codec::{
     encode_message, encode_request, encode_response,
 };
 pub use command::{
-    Command, DecodedRequest, DecodedResponse, Direction, Level, ParseTokenError, PinCapabilities,
-    Query, QueryValue, Request, Response, ResponseError, TargetError,
+    Command, DecodedRequest, DecodedResponse, Direction, Level, PROTOCOL_VERSION, ParseTokenError,
+    PinCapabilities, Query, QueryValue, Request, Response, ResponseError, TargetError,
 };
 pub use framing::{LineBuffer, LineError, MAX_PACKET_LEN};
 pub use message::{Message, Packet, RequestId};

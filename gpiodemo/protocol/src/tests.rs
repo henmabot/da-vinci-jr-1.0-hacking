@@ -234,6 +234,8 @@ fn request_wire_examples_use_symbolic_targets() {
             "001 SAM WYD ALL LSN\n",
         ),
         (Request::Bye, "001 SAM BYE\n"),
+        (Request::Version, "001 SAM VER\n"),
+        (Request::Help, "001 SAM HLP\n"),
     ];
 
     for (body, expected) in cases {
@@ -255,6 +257,8 @@ fn request_command_wire_vocabulary_round_trips_and_is_canonical() {
         (Command::Listen, b"LSN".as_slice()),
         (Command::Query, b"WYD".as_slice()),
         (Command::Bye, b"BYE".as_slice()),
+        (Command::Version, b"VER".as_slice()),
+        (Command::Help, b"HLP".as_slice()),
     ];
     let commands = expected.map(|(command, _)| command);
 
@@ -333,6 +337,18 @@ fn response_wire_examples_use_symbolic_pins() {
                 value: QueryValue::Unset,
             },
             "008 SAM HYG PA00 LSN UNSET <3\n",
+        ),
+        (
+            Response::Version {
+                version: PROTOCOL_VERSION,
+            },
+            "008 SAM VER 1 <3\n",
+        ),
+        (
+            Response::Help {
+                command: Command::Hello,
+            },
+            "008 SAM HLP HAI <3\n",
         ),
         (
             Response::Error(ResponseError::BadPacket),
@@ -530,4 +546,55 @@ fn response_terminator_follows_source_and_is_validated_on_decode() {
             })
         );
     }
+}
+
+#[test]
+fn version_and_help_wire_examples_are_typed_and_source_aware() {
+    assert_eq!(PROTOCOL_VERSION, 1);
+    assert_eq!(
+        decoded_request(b"041 SAM VER"),
+        Ok(Packet {
+            id: id(41),
+            body: Request::Version,
+        })
+    );
+    assert_eq!(
+        decoded_request(b"042 SAM HLP"),
+        Ok(Packet {
+            id: id(42),
+            body: Request::Help,
+        })
+    );
+    assert_eq!(
+        decoded_response(b"041 SAM VER 1 <3"),
+        Ok(Packet {
+            id: id(41),
+            body: Response::Version { version: 1 },
+        })
+    );
+    assert_eq!(
+        decoded_response(b"042 SAM HLP HAI <3"),
+        Ok(Packet {
+            id: id(42),
+            body: Response::Help {
+                command: Command::Hello,
+            },
+        })
+    );
+    assert_eq!(
+        decoded_response(b"043 LPC VER 1 :3"),
+        Ok(Packet {
+            id: id(43),
+            body: Response::Version { version: 1 },
+        })
+    );
+    assert_eq!(
+        decoded_response(b"044 LPC HLP HLP :3"),
+        Ok(Packet {
+            id: id(44),
+            body: Response::Help {
+                command: Command::Help,
+            },
+        })
+    );
 }

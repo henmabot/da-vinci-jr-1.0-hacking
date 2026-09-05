@@ -1,8 +1,9 @@
 use std::array;
 
 use da_vinci_protocol::{
-    DecodeError, Direction, Level, MAX_PACKET_LEN, Packet, PinCapabilities, Query, QueryValue,
-    Request as ProtocolRequest, RequestId, ResponseError as ProtocolResponseError, encode_request,
+    Command, DecodeError, Direction, Level, MAX_PACKET_LEN, Packet, PinCapabilities, Query,
+    QueryValue, Request as ProtocolRequest, RequestId, ResponseError as ProtocolResponseError,
+    encode_request,
 };
 
 use crate::io::{
@@ -83,6 +84,14 @@ pub(super) enum DeviceEvent {
     Status {
         route: RouteKey,
         identity: String,
+    },
+    Version {
+        route: RouteKey,
+        version: u16,
+    },
+    Help {
+        route: RouteKey,
+        command: Command,
     },
     MapReady {
         route: RouteKey,
@@ -888,6 +897,20 @@ impl DeviceSession {
                     identity,
                 })
             }
+            WireResponse::Version { version } => {
+                self.complete(id, false, false);
+                Ok(DeviceEvent::Version {
+                    route: pending.route,
+                    version,
+                })
+            }
+            WireResponse::Help { command } => {
+                self.complete(id, false, false);
+                Ok(DeviceEvent::Help {
+                    route: pending.route,
+                    command,
+                })
+            }
             WireResponse::MapBank { bank } => {
                 if let Err(error) = self.require_map(pending, id).and_then(|map| map.bank(bank)) {
                     self.retire(id);
@@ -1354,6 +1377,7 @@ fn target_contains(route: RouteKey, target: Target, pin_index: usize, bank: Bank
 fn request_lifetime(request: Request) -> RequestLifetime {
     match request {
         Request::Map
+        | Request::Help
         | Request::Get {
             target: Target::Bank(_) | Target::All,
         }
@@ -1571,6 +1595,58 @@ mod tests {
         let led = connection.pin_key(sam, "LED_A").unwrap();
         assert_eq!(connection.pin_info(led).unwrap().package_pin, Some(48));
         assert!(connection.pin_info(led).unwrap().capabilities.output());
+    }
+
+    #[test]
+    fn help_stream_stays_pending_until_ack_and_version_is_one_shot() {
+        let (mut connection, sam, _, _, _, _) = setup();
+
+        let (version_id, version_wire) = connection.prepare(sam, Request::Version).unwrap();
+        assert_eq!(version_wire, b"001 SAM VER\n");
+        assert_eq!(request_lifetime(Request::Version), RequestLifetime::OneShot);
+        assert_eq!(
+            connection
+                .received(incoming(
+                    "SAM",
+                    version_id,
+                    WireResponse::Version { version: 1 },
+                ))
+                .unwrap(),
+            DeviceEvent::Version {
+                route: sam,
+                version: 1,
+            }
+        );
+        assert!(connection.pending[version_id.slot()].is_none());
+
+        let (help_id, help_wire) = connection.prepare(sam, Request::Help).unwrap();
+        assert_eq!(help_wire, b"002 SAM HLP\n");
+        assert_eq!(
+            request_lifetime(Request::Help),
+            RequestLifetime::StreamUntilAck
+        );
+        for command in [Command::Hello, Command::Help] {
+            assert_eq!(
+                connection
+                    .received(incoming("SAM", help_id, WireResponse::Help { command }))
+                    .unwrap(),
+                DeviceEvent::Help {
+                    route: sam,
+                    command,
+                }
+            );
+            assert!(connection.pending[help_id.slot()].is_some());
+        }
+        assert_eq!(
+            connection
+                .received(incoming("SAM", help_id, WireResponse::Ack))
+                .unwrap(),
+            DeviceEvent::Ack {
+                route: sam,
+                sent: None,
+            }
+        );
+        assert!(connection.pending[help_id.slot()].is_none());
     }
 
     #[test]

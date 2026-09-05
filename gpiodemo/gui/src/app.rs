@@ -167,6 +167,8 @@ pub(super) enum Message {
     PinMap,
     Handshake,
     Status,
+    Version,
+    Help,
     Reboot,
     RebootConfirm,
     RebootCancel,
@@ -369,6 +371,8 @@ impl App {
             Message::PinMap => self.send_request(Request::Map),
             Message::Handshake => self.send_request(Request::Hello),
             Message::Status => self.send_request(Request::Status),
+            Message::Version => self.send_request(Request::Version),
+            Message::Help => self.send_request(Request::Help),
             Message::Reboot => self.confirm_reboot = true,
             Message::RebootConfirm => {
                 self.confirm_reboot = false;
@@ -698,6 +702,19 @@ impl App {
             DeviceEvent::Status { route, identity } => {
                 self.device_status = format!("{}: {identity}", self.session.route_name(route));
             }
+            DeviceEvent::Version { route, version } => {
+                self.device_status = format!(
+                    "{} protocol version {version}",
+                    self.session.route_name(route)
+                );
+            }
+            DeviceEvent::Help { route, command } => {
+                self.device_status = format!(
+                    "{} supports {}",
+                    self.session.route_name(route),
+                    String::from_utf8_lossy(command.as_ref())
+                );
+            }
             DeviceEvent::MapReady { route } => {
                 if route == self.selected_route_key() {
                     self.sync_route_ui();
@@ -885,6 +902,20 @@ mod tests {
             Some("MAP for LPC is already in progress")
         );
         assert_eq!(last_log(&app), "TX 002 LPC HAI");
+    }
+
+    #[test]
+    fn typed_protocol_diagnostics_use_selected_route() {
+        let mut app = App::with_routes(&ROUTES);
+        app.connected("test".into());
+        let lpc = route(&app, "LPC");
+        let _ = app.update(Message::RouteSelected(lpc));
+
+        let _ = app.update(Message::Version);
+        assert_eq!(last_log(&app), "TX 001 LPC VER");
+
+        let _ = app.update(Message::Help);
+        assert_eq!(last_log(&app), "TX 002 LPC HLP");
     }
 
     #[test]

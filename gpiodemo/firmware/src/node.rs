@@ -161,7 +161,7 @@ mod tests {
 
     use std::{cell::RefCell, collections::VecDeque, rc::Rc, vec::Vec};
 
-    use da_vinci_protocol::Level;
+    use da_vinci_protocol::{Command, Level};
 
     use super::*;
     use crate::{
@@ -259,6 +259,26 @@ mod tests {
             bytes.output,
             b"101 LPC HII :3\n102 LPC IAM LPC1115 GPIO :3\n103 LPC OKA :3\n104 LPC UMM NO_ROUTE XYZ :3\n"
         );
+    }
+
+    #[test]
+    fn protocol_diagnostics_work_through_lpc_node() {
+        let mut bytes = FakeBytes::new(b"301 LPC VER\n302 LPC HLP\n");
+        let mut gpio = FakeGpio { bank: 0 };
+        let mut node = Node::new(b"LPC1115 GPIO", b"LPC", []);
+
+        for _ in 0..64 {
+            node.poll(&mut bytes, &mut gpio).unwrap();
+        }
+
+        let mut expected = b"301 LPC VER 1 :3\n".to_vec();
+        for command in Command::ALL {
+            expected.extend_from_slice(b"302 LPC HLP ");
+            expected.extend_from_slice(command.as_ref());
+            expected.extend_from_slice(b" :3\n");
+        }
+        expected.extend_from_slice(b"302 LPC OKA :3\n");
+        assert_eq!(bytes.output, expected);
     }
 
     struct FakeFrameLink {

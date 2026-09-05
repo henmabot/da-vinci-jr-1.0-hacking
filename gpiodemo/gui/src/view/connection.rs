@@ -68,6 +68,8 @@ impl App {
             native_button("Pin map").on_press(Message::PinMap),
             native_button("Handshake").on_press(Message::Handshake),
             native_button("Status").on_press(Message::Status),
+            native_button("Version").on_press(Message::Version),
+            native_button("Help").on_press(Message::Help),
             danger_native_button("Reset device").on_press(Message::Reboot),
         ]
         .spacing(8)

@@ -1,6 +1,6 @@
 use da_vinci_protocol::{
-    DecodedRequest, Direction, Level, Packet, Query, QueryValue, RequestId, Response,
-    ResponseError, TargetError,
+    Command, DecodedRequest, Direction, Level, PROTOCOL_VERSION, Packet, Query, QueryValue,
+    RequestId, Response, ResponseError, TargetError,
 };
 
 use super::{
@@ -26,6 +26,7 @@ enum BulkKind {
     Values(Target),
     States(Target, Query),
     Map,
+    Help,
 }
 
 #[derive(Clone, Copy)]
@@ -64,6 +65,10 @@ impl Firmware {
                 identity: self.identity,
             },
             DecodedRequest::Map => return self.begin_bulk(packet.id, BulkKind::Map, gpio),
+            DecodedRequest::Version => Response::Version {
+                version: PROTOCOL_VERSION,
+            },
+            DecodedRequest::Help => return self.begin_bulk(packet.id, BulkKind::Help, gpio),
             DecodedRequest::Direction { target, direction } => {
                 self.resolve(map, target).map_or_else(
                     |error| error,
@@ -148,8 +153,25 @@ impl Firmware {
     }
 
     pub(crate) fn poll_bulk<G: GpioHal>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
-        let map = gpio.pin_map();
         let BulkResponse { id, mut next, kind } = self.bulk?;
+
+        if matches!(kind, BulkKind::Help) {
+            let Some(&command) = Command::ALL.get(next) else {
+                self.bulk = None;
+                return Some(Packet {
+                    id,
+                    body: Response::Ack,
+                });
+            };
+            next += 1;
+            self.bulk = Some(BulkResponse { id, next, kind });
+            return Some(Packet {
+                id,
+                body: Response::Help { command },
+            });
+        }
+
+        let map = gpio.pin_map();
 
         if matches!(kind, BulkKind::Map) {
             let body = if next < map.banks().len() {
@@ -178,7 +200,7 @@ impl Firmware {
 
         let target = match kind {
             BulkKind::Values(target) | BulkKind::States(target, _) => target,
-            BulkKind::Map => unreachable!(),
+            BulkKind::Map | BulkKind::Help => unreachable!(),
         };
 
         while next < map.pins().len() {
@@ -204,7 +226,7 @@ impl Firmware {
                     what,
                     value: self.query(pin, what),
                 },
-                BulkKind::Map => unreachable!(),
+                BulkKind::Map | BulkKind::Help => unreachable!(),
             };
             self.bulk = Some(BulkResponse { id, next, kind });
             return Some(Packet { id, body });
@@ -686,6 +708,43 @@ mod tests {
             );
         }
         assert_eq!(firmware.poll_bulk(&gpio).unwrap().body, Response::Ack);
+        assert!(firmware.poll_bulk(&gpio).is_none());
+    }
+
+    #[test]
+    fn help_streams_canonical_commands_then_terminal_ack() {
+        let mut firmware = firmware();
+        let mut gpio = FakeHal::new(&SYNTH_MAP);
+        let id = RequestId::new(12).unwrap();
+
+        assert_eq!(
+            firmware.handle(request(11, Request::Version), &mut gpio),
+            Packet {
+                id: RequestId::new(11).unwrap(),
+                body: Response::Version {
+                    version: PROTOCOL_VERSION,
+                },
+            }
+        );
+
+        let mut packet = Some(firmware.handle(request(12, Request::Help), &mut gpio));
+        for &command in Command::ALL {
+            assert_eq!(
+                packet,
+                Some(Packet {
+                    id,
+                    body: Response::Help { command },
+                })
+            );
+            packet = firmware.poll_bulk(&gpio);
+        }
+        assert_eq!(
+            packet,
+            Some(Packet {
+                id,
+                body: Response::Ack,
+            })
+        );
         assert!(firmware.poll_bulk(&gpio).is_none());
     }
 

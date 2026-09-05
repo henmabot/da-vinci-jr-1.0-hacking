@@ -86,6 +86,8 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
         Command::Status if tokens.next().is_none() => Request::Status,
         Command::Map if tokens.next().is_none() => Request::Map,
         Command::Bye if tokens.next().is_none() => Request::Bye,
+        Command::Version if tokens.next().is_none() => Request::Version,
+        Command::Help if tokens.next().is_none() => Request::Help,
         Command::Direction => {
             let target = next_target(&mut tokens, malformed())?;
             let direction: Direction = next_as(&mut tokens, malformed())?;
@@ -125,7 +127,12 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
             }
             Request::Query { target, what }
         }
-        Command::Hello | Command::Status | Command::Map | Command::Bye => return Err(malformed()),
+        Command::Hello
+        | Command::Status
+        | Command::Map
+        | Command::Bye
+        | Command::Version
+        | Command::Help => return Err(malformed()),
     };
 
     Ok(Packet { id, body })
@@ -262,6 +269,17 @@ pub fn decode_response(message: Message<'_>) -> Result<Packet<DecodedResponse<'_
                 }
             }
         }
+        b"VER" => {
+            let version = parse_u16(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
+            Response::Version { version }
+        }
+        b"HLP" => {
+            let command =
+                Command::try_from(tokens.next().ok_or_else(malformed)?).map_err(|_| malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
+            Response::Help { command }
+        }
         _ => {
             return Err(DecodeError {
                 id: Some(id),
@@ -289,7 +307,12 @@ fn encode_request_body<T: AsRef<[u8]>>(
 ) -> Result<(), EncodeError> {
     writer.bytes(request_command(&body).as_ref())?;
     match body {
-        Request::Hello | Request::Status | Request::Map | Request::Bye => {}
+        Request::Hello
+        | Request::Status
+        | Request::Map
+        | Request::Bye
+        | Request::Version
+        | Request::Help => {}
         Request::Direction { target, direction } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
@@ -346,6 +369,8 @@ fn request_command<T>(request: &Request<T>) -> Command {
         Request::Listen { .. } => Command::Listen,
         Request::Query { .. } => Command::Query,
         Request::Bye => Command::Bye,
+        Request::Version => Command::Version,
+        Request::Help => Command::Help,
     }
 }
 
@@ -428,6 +453,14 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
                 QueryValue::Enabled(true) => b"ON",
                 QueryValue::Enabled(false) => b"OFF",
             })?;
+        }
+        Response::Version { version } => {
+            writer.bytes(b"VER ")?;
+            writer.decimal(version)?;
+        }
+        Response::Help { command } => {
+            writer.bytes(b"HLP ")?;
+            writer.bytes(command.as_ref())?;
         }
         Response::Error(ResponseError::BadPacket) => writer.bytes(b"UMM BAD_PACKET")?,
         Response::Error(ResponseError::Target { target, reason }) => {
