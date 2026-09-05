@@ -171,6 +171,67 @@ wire_enum! {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinDescriptor<T, B> {
+    target: T,
+    package_pin: Option<u16>,
+    bank: B,
+    bit: u8,
+    capabilities: PinCapabilities,
+}
+
+impl<T, B> PinDescriptor<T, B> {
+    pub const fn new(
+        target: T,
+        package_pin: Option<u16>,
+        bank: B,
+        bit: u8,
+        capabilities: PinCapabilities,
+    ) -> Self {
+        Self {
+            target,
+            package_pin,
+            bank,
+            bit,
+            capabilities,
+        }
+    }
+
+    pub const fn target(&self) -> &T {
+        &self.target
+    }
+
+    pub const fn package_pin(&self) -> Option<u16> {
+        self.package_pin
+    }
+
+    pub const fn bank(&self) -> &B {
+        &self.bank
+    }
+
+    pub const fn bit(&self) -> u8 {
+        self.bit
+    }
+
+    pub const fn capabilities(&self) -> PinCapabilities {
+        self.capabilities
+    }
+
+    pub fn try_map<T2, B2, E>(
+        self,
+        map_target: impl FnOnce(T) -> Result<T2, E>,
+        map_bank: impl FnOnce(B) -> Result<B2, E>,
+    ) -> Result<PinDescriptor<T2, B2>, E> {
+        Ok(PinDescriptor::new(
+            map_target(self.target)?,
+            self.package_pin,
+            map_bank(self.bank)?,
+            self.bit,
+            self.capabilities,
+        ))
+    }
+}
+
 wire_enum! {
     pub enum Level {
         Low => b"LOW",

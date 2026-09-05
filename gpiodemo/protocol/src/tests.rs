@@ -32,6 +32,30 @@ fn response_error_maps_generic_fields_at_its_owner() {
     );
 }
 
+#[test]
+fn pin_descriptor_maps_only_identifier_domains() {
+    const PIN: PinDescriptor<&str, u8> =
+        PinDescriptor::new("PA00", Some(102), 2, 7, PinCapabilities::GPIO);
+
+    assert_eq!(PIN.target(), &"PA00");
+    assert_eq!(PIN.package_pin(), Some(102));
+    assert_eq!(PIN.bank(), &2);
+    assert_eq!(PIN.bit(), 7);
+    assert_eq!(PIN.capabilities(), PinCapabilities::GPIO);
+
+    let mapped = PIN
+        .try_map::<_, _, core::convert::Infallible>(
+            |target| Ok(target.as_bytes()),
+            |bank| Ok(usize::from(bank)),
+        )
+        .unwrap();
+    assert_eq!(mapped.target(), &b"PA00".as_slice());
+    assert_eq!(mapped.bank(), &2usize);
+    assert_eq!(mapped.package_pin(), PIN.package_pin());
+    assert_eq!(mapped.bit(), PIN.bit());
+    assert_eq!(mapped.capabilities(), PIN.capabilities());
+}
+
 fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> Frame {
     let frame = Frame::try_from(Message {
         route: b"SAM".as_slice(),
