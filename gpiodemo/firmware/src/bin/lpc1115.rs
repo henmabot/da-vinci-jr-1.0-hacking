@@ -11,7 +11,7 @@ mod board {
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
         BankId, GpioHal, Node, PinId,
-        lpc::{LPC_IDENTITY, LPC_PIN_MAP, LpcBank},
+        lpc::{LPC_IDENTITY, LPC_PIN_MAP, LpcBank, LpcPadKind, pin_hw},
         transport::{ByteError, NonBlockingBytes},
     };
     use da_vinci_protocol::Level;
@@ -19,11 +19,6 @@ mod board {
     use panic_halt as _;
 
     const LOCAL_ROUTE: &[u8] = b"LPC";
-    const IOCON_OFFSETS: [u8; 42] = [
-        0x0c, 0x10, 0x1c, 0x2c, 0x30, 0x34, 0x4c, 0x50, 0x60, 0x64, 0x68, 0x74, 0x78, 0x7c, 0x80,
-        0x90, 0x94, 0xa0, 0xa4, 0xa8, 0x14, 0x38, 0x6c, 0x98, 0x08, 0x28, 0x5c, 0x8c, 0x40, 0x44,
-        0x00, 0x20, 0x24, 0x54, 0x58, 0x70, 0x84, 0x88, 0x9c, 0xac, 0x3c, 0x48,
-    ];
 
     struct LpcGpio {
         _iocon: pac::IOCON,
@@ -34,8 +29,8 @@ mod board {
     }
 
     impl LpcGpio {
-        fn registers(&self, bank: BankId) -> &pac::gpio0::RegisterBlock {
-            match LpcBank::from_id(bank).expect("LPC pin map contains only GPIO0-3") {
+        fn registers(&self, bank: LpcBank) -> &pac::gpio0::RegisterBlock {
+            match bank {
                 LpcBank::Pio0 => &self.gpio0,
                 LpcBank::Pio1 => &self.gpio1,
                 LpcBank::Pio2 => &self.gpio2,
@@ -44,34 +39,30 @@ mod board {
         }
 
         fn configure(&self, pin: PinId, pull_up: bool) {
-            let info = LPC_PIN_MAP.pin(pin);
-            let bank = LpcBank::from_id(info.bank).expect("LPC pin map contains only GPIO0-3");
-            let function = match (bank, info.bit) {
-                (LpcBank::Pio0, 11) | (LpcBank::Pio1, 0..=2) => 1,
-                _ => 0,
-            };
-            let offset = IOCON_OFFSETS[pin.index()] as usize;
+            let hw = pin_hw(pin);
+            let offset = hw.iocon_offset() as usize;
             // SAFETY: LpcGpio owns IOCON for the lifetime of this adapter. Each PinId comes from
-            // LPC_PIN_MAP, whose index is the IOCON_OFFSETS index. Volatile access is required for
-            // the memory-mapped IOCON register and no other code mutates GPIO IOCON entries.
+            // LPC_PIN_MAP and therefore has matching LPC hardware metadata. The PAC exposes IOCON
+            // as individually named registers rather than an indexable array, so volatile pointer
+            // access is required here. No other code mutates GPIO IOCON entries.
             unsafe {
                 let register = (pac::IOCON::ptr() as *mut u8).add(offset).cast::<u32>();
                 let current = read_volatile(register);
-                let next = if bank == LpcBank::Pio0 && matches!(info.bit, 4 | 5) {
-                    // PIO0_4/PIO0_5 are dedicated open-drain I2C pads. In GPIO mode they need
-                    // Standard I/O mode and have no ordinary pull-up/pull-down MODE field.
-                    (current & !(0x07 | (0x03 << 8))) | (1 << 8)
-                } else {
-                    let mode = if pull_up { 2 } else { 0 };
-                    let mut bits =
-                        (current & !(0x07 | (0x03 << 3))) | function | ((mode as u32) << 3);
-                    if matches!(
-                        (bank, info.bit),
-                        (LpcBank::Pio0, 11) | (LpcBank::Pio1, 0..=4) | (LpcBank::Pio1, 10..=11)
-                    ) {
-                        bits |= 1 << 7;
+                let next = match hw.pad_kind() {
+                    LpcPadKind::I2cOpenDrain => {
+                        // Dedicated I2C pads use the I2C-mode field instead of ordinary MODE bits.
+                        (current & !(0x07 | (0x03 << 8))) | (1 << 8)
                     }
-                    bits
+                    LpcPadKind::Standard | LpcPadKind::Analog => {
+                        let mode = if pull_up { 2 } else { 0 };
+                        let mut bits = (current & !(0x07 | (0x03 << 3)))
+                            | u32::from(hw.gpio_function())
+                            | ((mode as u32) << 3);
+                        if hw.pad_kind() == LpcPadKind::Analog {
+                            bits |= 1 << 7;
+                        }
+                        bits
+                    }
                 };
                 write_volatile(register, next);
             }
@@ -85,9 +76,11 @@ mod board {
 
         fn input(&mut self, pin: PinId, pull_up: bool) {
             self.configure(pin, pull_up);
-            let info = LPC_PIN_MAP.pin(pin);
-            let mask = 1u32 << info.bit;
-            self.registers(info.bank)
+            let hw = pin_hw(pin);
+            let mask = 1u32 << hw.bit();
+            // The PAC models DIR as a whole-bank bitmap, so a raw masked update is the only
+            // available way to change one GPIO direction without disturbing its neighbours.
+            self.registers(hw.bank())
                 .dir
                 .modify(|r, w| unsafe { w.bits(r.bits() & !mask) });
         }
@@ -95,17 +88,18 @@ mod board {
         fn output(&mut self, pin: PinId, level: Level) {
             self.configure(pin, false);
             self.write(pin, level);
-            let info = LPC_PIN_MAP.pin(pin);
-            let mask = 1u32 << info.bit;
-            self.registers(info.bank)
+            let hw = pin_hw(pin);
+            let mask = 1u32 << hw.bit();
+            self.registers(hw.bank())
                 .dir
                 .modify(|r, w| unsafe { w.bits(r.bits() | mask) });
         }
 
         fn write(&mut self, pin: PinId, level: Level) {
-            let info = LPC_PIN_MAP.pin(pin);
-            let mask = 1u32 << info.bit;
-            self.registers(info.bank).data.modify(|r, w| unsafe {
+            let hw = pin_hw(pin);
+            let mask = 1u32 << hw.bit();
+            // DATA is also exposed as a whole-bank bitmap by this PAC.
+            self.registers(hw.bank()).data.modify(|r, w| unsafe {
                 w.bits(match level {
                     Level::Low => r.bits() & !mask,
                     Level::High => r.bits() | mask,
@@ -114,7 +108,10 @@ mod board {
         }
 
         fn read_bank(&self, bank: BankId) -> u32 {
-            self.registers(bank).data.read().bits()
+            self.registers(LpcBank::from_id(bank).expect("LPC pin map contains only GPIO0-3"))
+                .data
+                .read()
+                .bits()
         }
     }
 
@@ -180,12 +177,13 @@ mod board {
         iocon.iocon_rxd_loc.write(|w| w.rxdloc().pio1_6());
 
         // 12 MHz IRC / 16 / 4 / (1 + 5/8) = 115384.6 baud (0.16% high).
-        uart.lcr.write(|w| unsafe { w.bits(0x83) });
+        uart.lcr.write(|w| w.wls().eight().dlab().enable());
         uart.dll().write(|w| w.dllsb().bits(4));
         uart.dlm().write(|w| w.dlmsb().bits(0));
         uart.fdr.write(|w| w.divaddval().bits(5).mulval().bits(8));
-        uart.lcr.write(|w| unsafe { w.bits(0x03) });
-        uart.fcr().write(|w| unsafe { w.bits(0x07) });
+        uart.lcr.write(|w| w.wls().eight().dlab().disable());
+        uart.fcr()
+            .write(|w| w.fifoen().enable().rxfifores().clear().txfifores().clear());
         uart.ter.write(|w| w.txen().set_bit());
     }
 }
