@@ -35,6 +35,10 @@ impl PinKey {
     pub(super) const fn route(self) -> RouteKey {
         self.route
     }
+
+    pub(super) const fn index(self) -> usize {
+        self.index
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -364,6 +368,22 @@ impl Connection {
             .iter()
             .flat_map(|map| map.banks.iter().enumerate())
             .map(move |(index, bank)| (BankKey { route, index }, bank))
+    }
+
+    pub(super) fn target_pins(&self, route: RouteKey, target: Target) -> Vec<PinKey> {
+        let Some(map) = self
+            .routes
+            .get(route.0)
+            .and_then(|route| route.map.as_ref())
+        else {
+            return Vec::new();
+        };
+        map.pins
+            .iter()
+            .enumerate()
+            .filter(|(index, pin)| target_contains(route, target, *index, pin.info.bank))
+            .map(|(index, _)| PinKey { route, index })
+            .collect()
     }
 
     #[cfg(test)]

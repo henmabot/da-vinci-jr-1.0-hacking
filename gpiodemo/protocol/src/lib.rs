@@ -3,7 +3,6 @@
 mod codec;
 mod command;
 mod framing;
-mod legacy_sam;
 mod message;
 
 pub use codec::{
@@ -15,7 +14,6 @@ pub use command::{
     QueryValue, Request, Response, ResponseError, TargetError,
 };
 pub use framing::{LineBuffer, LineError, MAX_PACKET_LEN};
-pub use legacy_sam::{Pin, PinTable, PinTarget, Port, WIRE_PIN_COUNT};
 pub use message::{Message, Packet, RequestId};
 
 #[cfg(test)]

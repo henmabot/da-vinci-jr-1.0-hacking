@@ -1,6 +1,5 @@
 extern crate std;
 use super::*;
-use std::string::ToString;
 
 fn id(raw: u16) -> RequestId {
     RequestId::new(raw).unwrap()
@@ -28,10 +27,6 @@ fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeEr
         body: envelope.body,
     })
 }
-fn pin(index: u8) -> Pin {
-    Pin::from_wire_index(index).unwrap()
-}
-
 #[test]
 fn line_buffer_frames_and_recovers_after_overflow() {
     let mut buffer = LineBuffer::new();
@@ -472,38 +467,4 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
     let len = encode_response(status, b"LPC", &mut out).unwrap();
     assert_eq!(&out[..len], b"023 LPC IAM LPC1115 GPIO <3\n");
     assert_eq!(decoded_response(&out[..len]), Ok(status));
-}
-
-#[test]
-fn pin_mapping_has_physical_package_numbers() {
-    assert_eq!(pin(0).to_string(), "PA00");
-    assert_eq!(pin(44).to_string(), "PB12");
-    assert_eq!(pin(44).package_pin(), 87);
-    assert_eq!(pin(72).to_string(), "PC25");
-    assert_eq!(Pin::try_from((Port::E, 5)), Ok(pin(116)));
-}
-
-#[test]
-fn pin_targets_iterate_contiguous_scope_and_filter_reserved_pins() {
-    let single = PinTarget::Pin(pin(44));
-    assert_eq!(single.pins().collect::<std::vec::Vec<_>>(), [pin(44)]);
-
-    let bank = PinTarget::Bank(Port::B);
-    let bank_pins = bank.pins().collect::<std::vec::Vec<_>>();
-    assert_eq!(bank_pins.first(), Some(&pin(32)));
-    assert_eq!(bank_pins.last(), Some(&pin(46)));
-    assert_eq!(bank_pins.len(), 15);
-    assert_eq!(bank.available_pins().count(), 11);
-
-    assert_eq!(PinTarget::All.pins().count(), WIRE_PIN_COUNT as usize);
-    assert_eq!(PinTarget::All.available_pins().count(), 113);
-}
-
-#[test]
-fn pin_table_indexes_with_pin_values() {
-    let mut table = PinTable::filled(Level::Low);
-    let target = pin(72);
-    table[target] = Level::High;
-    assert_eq!(table[target], Level::High);
-    assert_eq!(table[pin(71)], Level::Low);
 }
