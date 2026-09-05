@@ -769,23 +769,7 @@ impl DeviceSession {
                     });
                 }
                 IoEvent::ListenerValues(values) => {
-                    let values: Vec<_> = values
-                        .into_iter()
-                        .filter_map(|value| {
-                            let pin = PinKey {
-                                route: RouteKey(value.key.route),
-                                index: value.key.pin,
-                            };
-                            self.listener_is_active(pin, value.id)
-                                .then(|| ListenerValue {
-                                    line: value.line.text(),
-                                    id: value.id,
-                                    pin,
-                                    level: value.level,
-                                    coalesced: value.coalesced,
-                                })
-                        })
-                        .collect();
+                    let values = self.accept_listener_values(values);
                     if !values.is_empty() {
                         return Some(Event::ListenerValues(values));
                     }
@@ -1229,6 +1213,32 @@ impl DeviceSession {
             .is_some_and(|pin| pin.listener_id == Some(id))
     }
 
+    fn accept_listener_values(
+        &mut self,
+        values: Vec<crate::io::ListenerValue>,
+    ) -> Vec<ListenerValue> {
+        values
+            .into_iter()
+            .filter_map(|value| {
+                let pin = PinKey {
+                    route: RouteKey(value.key.route),
+                    index: value.key.pin,
+                };
+                if !self.listener_is_active(pin, value.id) {
+                    return None;
+                }
+                self.route_pin_mut(pin)?.state.level = Some(value.level);
+                Some(ListenerValue {
+                    line: value.line.text(),
+                    id: value.id,
+                    pin,
+                    level: value.level,
+                    coalesced: value.coalesced,
+                })
+            })
+            .collect()
+    }
+
     fn listener_id_active(&self, id: RequestId) -> bool {
         self.routes.iter().any(|route| {
             route
@@ -1651,6 +1661,60 @@ mod tests {
         );
         assert!(connection.pending[map_id.slot()].is_some());
         assert!(connection.routes[sam.0].discovery.is_some());
+    }
+
+    #[test]
+    fn coalesced_listener_values_update_session_level_without_completing_read() {
+        let (mut connection, sam, _, pa00, _, _) = setup();
+        let listener_id = request_id(8);
+        let stale_id = request_id(9);
+        let pin = connection.route_pin_mut(pa00).unwrap();
+        pin.listener_id = Some(listener_id);
+        pin.state.listener = ListenerState::On;
+        pin.state.value_pending = true;
+
+        let values = connection.accept_listener_values(vec![
+            crate::io::ListenerValue {
+                line: crate::io::WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
+                id: listener_id,
+                key: ListenerKey {
+                    route: sam.0,
+                    pin: pa00.index,
+                },
+                level: Level::High,
+                coalesced: 3,
+            },
+            crate::io::ListenerValue {
+                line: crate::io::WireLine::new(b"009 SAM HYG PA00 LOW <3"),
+                id: stale_id,
+                key: ListenerKey {
+                    route: sam.0,
+                    pin: pa00.index,
+                },
+                level: Level::Low,
+                coalesced: 0,
+            },
+        ]);
+
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].level, Level::High);
+        assert_eq!(values[0].coalesced, 3);
+        assert_eq!(connection.pin_state(pa00).unwrap().level, Some(Level::High));
+        assert!(connection.pin_state(pa00).unwrap().value_pending);
+
+        let values = connection.accept_listener_values(vec![crate::io::ListenerValue {
+            line: crate::io::WireLine::new(b"008 SAM HYG PA00 LOW <3"),
+            id: listener_id,
+            key: ListenerKey {
+                route: sam.0,
+                pin: pa00.index,
+            },
+            level: Level::Low,
+            coalesced: 0,
+        }]);
+        assert_eq!(values.len(), 1);
+        assert_eq!(connection.pin_state(pa00).unwrap().level, Some(Level::Low));
+        assert!(connection.pin_state(pa00).unwrap().value_pending);
     }
 
     #[test]
