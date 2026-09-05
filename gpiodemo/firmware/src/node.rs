@@ -166,7 +166,7 @@ mod tests {
     use super::*;
     use crate::{
         BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap,
-        router::{FrameLink, LinkError},
+        router::{FrameError, FrameLink},
     };
 
     const BANK: BankId = BankId::new(0);
@@ -263,12 +263,12 @@ mod tests {
     }
 
     impl FrameLink for FakeFrameLink {
-        fn try_send(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+        fn try_send(&mut self, frame: &[u8]) -> Result<(), FrameError> {
             self.sent.borrow_mut().push(frame.to_vec());
             Ok(())
         }
 
-        fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, LinkError> {
+        fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError> {
             let Some(frame) = self.incoming.borrow_mut().pop_front() else {
                 return Ok(None);
             };

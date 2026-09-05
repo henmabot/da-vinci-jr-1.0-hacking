@@ -1,4 +1,4 @@
-use crate::router::{FrameLink, LinkError};
+use crate::router::{FrameError, FrameLink};
 use da_vinci_protocol::{LineBuffer, LineError, MAX_PACKET_LEN};
 
 const RX_CAPACITY: usize = MAX_PACKET_LEN * 4;
@@ -30,33 +30,45 @@ impl<B> FramedLink<B> {
 }
 
 impl<B: NonBlockingBytes> FrameLink for FramedLink<B> {
-    fn try_send(&mut self, frame: &[u8]) -> Result<(), LinkError> {
-        self.transport.poll(&mut self.bytes).map_err(link_error)?;
+    fn try_send(&mut self, frame: &[u8]) -> Result<(), FrameError> {
+        if frame.len() > MAX_PACKET_LEN {
+            return Err(FrameError::InvalidFrame);
+        }
+        self.transport
+            .poll(&mut self.bytes)
+            .map_err(FrameError::from)?;
         self.transport.enqueue(frame).map_err(|error| match error {
-            QueueError::Busy => LinkError::WouldBlock,
-            QueueError::TooLong => LinkError::Down,
+            QueueError::Busy => FrameError::WouldBlock,
+            QueueError::TooLong => FrameError::InvalidFrame,
         })?;
-        self.transport.poll(&mut self.bytes).map_err(link_error)
+        self.transport
+            .poll(&mut self.bytes)
+            .map_err(FrameError::from)
     }
 
-    fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, LinkError> {
-        self.transport.poll(&mut self.bytes).map_err(link_error)?;
+    fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError> {
+        self.transport
+            .poll(&mut self.bytes)
+            .map_err(FrameError::from)?;
         let len = match self.transport.next_frame(&mut self.frame) {
             Ok(Some(len)) => len,
-            Ok(None) | Err(_) => return Ok(None),
+            Ok(None) => return Ok(None),
+            Err(LineError::TooLong) => return Err(FrameError::InvalidFrame),
         };
         if len > out.len() {
-            return Err(LinkError::Down);
+            return Err(FrameError::InvalidFrame);
         }
         out[..len].copy_from_slice(&self.frame[..len]);
         Ok(Some(len))
     }
 }
 
-const fn link_error(error: ByteError) -> LinkError {
-    match error {
-        ByteError::WouldBlock => LinkError::WouldBlock,
-        ByteError::Down => LinkError::Down,
+impl From<ByteError> for FrameError {
+    fn from(error: ByteError) -> Self {
+        match error {
+            ByteError::WouldBlock => Self::WouldBlock,
+            ByteError::Down => Self::Down,
+        }
     }
 }
 
@@ -388,5 +400,22 @@ mod framed_link_tests {
 
         assert_eq!(link.bytes.writes, b"200 LPC HAI\n");
         assert_eq!(response, Some(b"200 LPC HII <3\n".to_vec()));
+    }
+
+    #[test]
+    fn framed_link_rejects_oversized_send_without_marking_bytes_down() {
+        let bytes = Bytes {
+            reads: VecDeque::new(),
+            writes: Vec::new(),
+            write_limit: usize::MAX,
+        };
+        let mut link = FramedLink::new(bytes);
+
+        assert_eq!(
+            link.try_send(&[b'x'; MAX_PACKET_LEN + 1]),
+            Err(FrameError::InvalidFrame)
+        );
+        assert_eq!(link.try_send(b"200 LPC HAI\n"), Ok(()));
+        assert_eq!(link.bytes.writes, b"200 LPC HAI\n");
     }
 }
