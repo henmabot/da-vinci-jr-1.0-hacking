@@ -1171,6 +1171,9 @@ impl App {
                     ResponseError::Pin { pin, reason } => {
                         format!("{}: {reason:?}", pin_display(pin))
                     }
+                    ResponseError::NoRoute { destination } => {
+                        format!("No route to {destination}")
+                    }
                 });
             }
             DeviceEvent::Unknown { request } => {

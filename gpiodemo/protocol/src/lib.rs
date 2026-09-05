@@ -442,13 +442,14 @@ pub enum PinError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResponseError {
+pub enum ResponseError<R = &'static [u8]> {
     BadPacket,
     Pin { pin: Pin, reason: PinError },
+    NoRoute { destination: R },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Response {
+pub enum Response<R = &'static [u8]> {
     Hello,
     Status,
     Ack,
@@ -461,7 +462,7 @@ pub enum Response {
         what: Query,
         value: QueryValue,
     },
-    Error(ResponseError),
+    Error(ResponseError<R>),
     Unknown,
     Bye,
 }
@@ -513,9 +514,9 @@ pub fn encode_response_envelope(
     encode_envelope(envelope.id, envelope.source, envelope.body, out)
 }
 
-pub fn decode_request(envelope: RequestEnvelope<'_>) -> Result<Packet<Request>, DecodeError> {
-    let id = envelope.id;
-    let mut tokens = envelope
+pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<Request>, DecodeError> {
+    let id = packet.id;
+    let mut tokens = packet
         .body
         .split(u8::is_ascii_whitespace)
         .filter(|token| !token.is_empty());
@@ -584,9 +585,9 @@ pub fn decode_request(envelope: RequestEnvelope<'_>) -> Result<Packet<Request>, 
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(envelope: ResponseEnvelope<'_>) -> Result<Packet<Response>, DecodeError> {
-    let id = envelope.id;
-    let mut tokens = envelope
+pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>, DecodeError> {
+    let id = packet.id;
+    let mut tokens = packet
         .body
         .split(u8::is_ascii_whitespace)
         .filter(|token| !token.is_empty());
@@ -626,6 +627,13 @@ pub fn decode_response(envelope: ResponseEnvelope<'_>) -> Result<Packet<Response
         b"UMM" => {
             let error = match tokens.next() {
                 Some(b"BAD_PACKET") => ResponseError::BadPacket,
+                Some(b"NO_ROUTE") => {
+                    let destination = tokens.next().ok_or_else(malformed)?;
+                    if !valid_route_token(destination) {
+                        return Err(malformed());
+                    }
+                    ResponseError::NoRoute { destination }
+                }
                 Some(pin) => {
                     let pin = Pin::try_from(pin).map_err(|_| malformed())?;
                     let reason = match tokens.next() {
@@ -734,8 +742,8 @@ pub fn encode_request(
     Ok(writer.len())
 }
 
-pub fn encode_response(
-    packet: Packet<Response>,
+pub fn encode_response<R: AsRef<[u8]>>(
+    packet: Packet<Response<R>>,
     source: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
@@ -781,6 +789,11 @@ pub fn encode_response(
                 PinError::Unset => b" UNSET <3\n",
                 PinError::Unavailable => b" UNAVAILABLE <3\n",
             })?;
+        }
+        Response::Error(ResponseError::NoRoute { destination }) => {
+            writer.bytes(b" UMM NO_ROUTE ")?;
+            writer.route(destination.as_ref())?;
+            writer.bytes(b" <3\n")?;
         }
         Response::Unknown => writer.bytes(b" IDK <3\n")?,
         Response::Bye => writer.bytes(b" CYA <3\n")?,
@@ -960,11 +973,19 @@ mod tests {
     }
 
     fn decoded_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
-        decode_request_envelope(line).and_then(decode_request)
+        let envelope = decode_request_envelope(line)?;
+        decode_request(Packet {
+            id: envelope.id,
+            body: envelope.body,
+        })
     }
 
-    fn decoded_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
-        decode_response_envelope(line).and_then(decode_response)
+    fn decoded_response(line: &[u8]) -> Result<Packet<Response<&[u8]>>, DecodeError> {
+        let envelope = decode_response_envelope(line)?;
+        decode_response(Packet {
+            id: envelope.id,
+            body: envelope.body,
+        })
     }
     fn pin(index: u8) -> Pin {
         Pin::from_wire_index(index).unwrap()
@@ -1230,6 +1251,12 @@ mod tests {
                     reason: PinError::Unset,
                 }),
                 "008 SAM UMM PA03 UNSET <3\n",
+            ),
+            (
+                Response::Error(ResponseError::NoRoute {
+                    destination: b"LPC".as_slice(),
+                }),
+                "008 SAM UMM NO_ROUTE LPC <3\n",
             ),
             (Response::Unknown, "008 SAM IDK <3\n"),
             (Response::Bye, "008 SAM CYA <3\n"),

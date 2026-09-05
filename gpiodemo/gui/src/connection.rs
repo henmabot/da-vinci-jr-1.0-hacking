@@ -41,7 +41,7 @@ impl ListenerValue {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DeviceEvent {
     Hello,
     Status,
@@ -57,7 +57,7 @@ pub(super) enum DeviceEvent {
     },
     DeviceError {
         request: Request,
-        error: ResponseError,
+        error: ResponseError<String>,
     },
     Unknown {
         request: Request,
@@ -209,7 +209,7 @@ impl Connection {
         Err("All 999 request IDs are still in use".into())
     }
 
-    fn received(&mut self, packet: Packet<Response>) -> DeviceEvent {
+    fn received(&mut self, packet: Packet<Response<String>>) -> DeviceEvent {
         if packet.body == Response::Bye {
             self.clear();
             return DeviceEvent::Bye;
@@ -356,7 +356,7 @@ enum IoEvent {
     Disconnected(Option<String>),
     Line {
         line: WireLine,
-        packet: Result<Packet<Response>, DecodeError>,
+        packet: Result<Packet<Response<String>>, DecodeError>,
     },
     ListenerValues(Vec<ListenerValue>),
     Error(String),
@@ -479,7 +479,7 @@ fn route_line(
     listener_updates: &mut PinTable<Option<ListenerValue>>,
 ) {
     let wire_line = WireLine::new(line);
-    match decode_response_envelope(line).and_then(decode_response) {
+    match decode_owned_response(line) {
         Ok(Packet {
             id,
             body: Response::Value { pin, level },
@@ -499,6 +499,36 @@ fn route_line(
             });
         }
     }
+}
+
+fn decode_owned_response(line: &[u8]) -> Result<Packet<Response<String>>, DecodeError> {
+    let envelope = decode_response_envelope(line)?;
+    let packet = decode_response(Packet {
+        id: envelope.id,
+        body: envelope.body,
+    })?;
+    let body = match packet.body {
+        Response::Hello => Response::Hello,
+        Response::Status => Response::Status,
+        Response::Ack => Response::Ack,
+        Response::Value { pin, level } => Response::Value { pin, level },
+        Response::State { pin, what, value } => Response::State { pin, what, value },
+        Response::Error(ResponseError::BadPacket) => Response::Error(ResponseError::BadPacket),
+        Response::Error(ResponseError::Pin { pin, reason }) => {
+            Response::Error(ResponseError::Pin { pin, reason })
+        }
+        Response::Error(ResponseError::NoRoute { destination }) => {
+            Response::Error(ResponseError::NoRoute {
+                destination: String::from_utf8_lossy(destination).into_owned(),
+            })
+        }
+        Response::Unknown => Response::Unknown,
+        Response::Bye => Response::Bye,
+    };
+    Ok(Packet {
+        id: packet.id,
+        body,
+    })
 }
 
 fn coalesce_listener_update(
@@ -591,7 +621,7 @@ mod tests {
         Pin::from_wire_index(index).unwrap()
     }
 
-    fn response(id: u16, body: Response) -> Packet<Response> {
+    fn response(id: u16, body: Response<String>) -> Packet<Response<String>> {
         Packet { id, body }
     }
 

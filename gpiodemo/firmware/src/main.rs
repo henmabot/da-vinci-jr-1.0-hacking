@@ -63,7 +63,7 @@ mod board {
         watchdog::{Watchdog, WatchdogDisable},
     };
     use cortex_m_rt::entry;
-    use da_vinci_firmware::{Firmware, Gpio};
+    use da_vinci_firmware::{Firmware, Gpio, router::Router};
     use da_vinci_protocol::{
         DecodeErrorKind, Level, LineBuffer, MAX_PACKET_LEN, Packet, Pin, Port, Response,
         ResponseError, decode_request, decode_request_envelope, encode_response,
@@ -165,14 +165,16 @@ mod board {
     }
 
     struct PendingTx {
+        source: &'static [u8],
         bytes: [u8; MAX_PACKET_LEN],
         len: usize,
         offset: usize,
     }
 
     impl PendingTx {
-        const fn new() -> Self {
+        const fn new(source: &'static [u8]) -> Self {
             Self {
+                source,
                 bytes: [0; MAX_PACKET_LEN],
                 len: 0,
                 offset: 0,
@@ -183,12 +185,12 @@ mod board {
             self.offset == self.len
         }
 
-        fn queue(&mut self, packet: Packet<Response>) {
+        fn queue<R: AsRef<[u8]>>(&mut self, packet: Packet<Response<R>>) {
             assert!(
                 self.is_empty(),
                 "response queued while USB TX is still pending"
             );
-            self.len = encode_response(packet, LOCAL_ROUTE, &mut self.bytes)
+            self.len = encode_response(packet, self.source, &mut self.bytes)
                 .expect("protocol response always fits fixed packet buffer");
             self.offset = 0;
         }
@@ -246,8 +248,9 @@ mod board {
 
         let mut firmware = Firmware::new();
         let mut gpio = SamGpio;
+        let router = Router::new(LOCAL_ROUTE);
         let mut reader = LineBuffer::new();
-        let mut tx = PendingTx::new();
+        let mut tx = PendingTx::new(router.local_route());
         let mut rx = RxBuffer::new();
         let mut usb_rx = [0u8; MAX_PACKET_LEN];
 
@@ -272,17 +275,22 @@ mod board {
                 while let Some(byte) = rx.pop() {
                     if let Ok(Some(line)) = reader.push(byte) {
                         match decode_request_envelope(line) {
-                            Ok(envelope) if envelope.destination == LOCAL_ROUTE => {
-                                match decode_request(envelope) {
-                                    Ok(packet) => tx.queue(firmware.handle(packet, &mut gpio)),
-                                    Err(error) => queue_decode_error(error, &mut tx),
+                            Ok(envelope) => {
+                                let response = router.dispatch(envelope, |body| {
+                                    decode_request(body)
+                                        .map(|packet| firmware.handle(packet, &mut gpio))
+                                        .unwrap_or_else(|error| {
+                                            decode_error_response(error)
+                                                .expect("local command decode errors keep their ID")
+                                        })
+                                });
+                                tx.queue(response);
+                            }
+                            Err(error) => {
+                                if let Some(response) = decode_error_response(error) {
+                                    tx.queue(response);
                                 }
                             }
-                            Ok(envelope) => tx.queue(Packet {
-                                id: envelope.id,
-                                body: Response::Error(ResponseError::BadPacket),
-                            }),
-                            Err(error) => queue_decode_error(error, &mut tx),
                         }
                         if !tx.is_empty() {
                             break;
@@ -300,14 +308,13 @@ mod board {
         }
     }
 
-    fn queue_decode_error(error: da_vinci_protocol::DecodeError, tx: &mut PendingTx) {
-        if let Some(id) = error.id {
-            let body = match error.kind {
-                DecodeErrorKind::Malformed => Response::Error(ResponseError::BadPacket),
-                DecodeErrorKind::UnknownCommand => Response::Unknown,
-            };
-            tx.queue(Packet { id, body });
-        }
+    fn decode_error_response(error: da_vinci_protocol::DecodeError) -> Option<Packet<Response>> {
+        let id = error.id?;
+        let body = match error.kind {
+            DecodeErrorKind::Malformed => Response::Error(ResponseError::BadPacket),
+            DecodeErrorKind::UnknownCommand => Response::Unknown,
+        };
+        Some(Packet { id, body })
     }
 }
 

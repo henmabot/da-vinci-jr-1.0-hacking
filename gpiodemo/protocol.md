@@ -93,6 +93,7 @@ All successful and error responses keep the original request ID and name the res
 | `UMM BAD_PACKET <3` | A known request form was malformed. |
 | `UMM <pin> UNSET <3` | An individual operation required an initialized pin. |
 | `UMM <pin> UNAVAILABLE <3` | An individual operation addressed an unavailable/reserved pin. |
+| `UMM NO_ROUTE <destination> <3` | This node has no configured path to the requested destination. |
 | `IDK <3` | The command name is unknown. |
 | `CYA <3` | Reply to `BYE`. |
 
@@ -174,3 +175,12 @@ Uninitialized individual read:
 053 SAM GET PA00 OK?
 053 SAM UMM PA00 UNSET <3
 ```
+
+Unknown route:
+
+```text
+054 LPC HAI
+054 SAM UMM NO_ROUTE LPC <3
+```
+
+The response source identifies the node that failed the route lookup. In this example, that node is `SAM`. The `NO_ROUTE` argument preserves the unresolved destination.
