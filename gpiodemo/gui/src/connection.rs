@@ -10,8 +10,8 @@ use std::{
 use da_vinci_protocol::{
     DecodeError, DecodeErrorKind, Direction, Level, LineBuffer, LineError, MAX_PACKET_LEN, Packet,
     PinCapabilities, Query, QueryValue, Request as ProtocolRequest, RequestId,
-    Response as ProtocolResponse, ResponseError as ProtocolResponseError, decode_response,
-    decode_response_envelope, encode_request,
+    Response as ProtocolResponse, ResponseError as ProtocolResponseError, decode_message,
+    decode_response, encode_request,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -1098,12 +1098,12 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
 }
 
 fn route_line(wire_line: WireLine, events: &SyncSender<IoEvent>, state: &mut IoState) {
-    let decoded = decode_response_envelope(wire_line.as_bytes()).and_then(|envelope| {
+    let decoded = decode_message(wire_line.as_bytes()).and_then(|envelope| {
         decode_response(Packet {
             id: envelope.id,
             body: envelope.body,
         })
-        .map(|packet| (envelope.source, packet))
+        .map(|packet| (envelope.route, packet))
     });
     match decoded {
         Ok((

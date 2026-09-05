@@ -1,6 +1,6 @@
 use da_vinci_protocol::{
-    DecodeError, DecodeErrorKind, MAX_PACKET_LEN, Packet, Response, ResponseError, decode_request,
-    decode_request_envelope, encode_response,
+    DecodeError, DecodeErrorKind, MAX_PACKET_LEN, Packet, Response, ResponseError, decode_message,
+    decode_request, encode_response,
 };
 
 use crate::{
@@ -100,7 +100,7 @@ impl<'route, const N: usize> Node<'route, N> {
             return false;
         };
         let frame = &self.frame[..len];
-        match decode_request_envelope(frame) {
+        match decode_message(frame) {
             Ok(envelope) => {
                 let firmware = &mut self.firmware;
                 let response = self.router.dispatch(frame, envelope, |body| {

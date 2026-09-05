@@ -151,16 +151,9 @@ pub struct Packet<T> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RequestEnvelope<'a> {
+pub struct Message<'a> {
     pub id: RequestId,
-    pub destination: &'a [u8],
-    pub body: &'a [u8],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ResponseEnvelope<'a> {
-    pub id: RequestId,
-    pub source: &'a [u8],
+    pub route: &'a [u8],
     pub body: &'a [u8],
 }
 
@@ -730,32 +723,34 @@ pub enum EncodeError {
     InvalidIdentity,
 }
 
-pub fn decode_request_envelope(line: &[u8]) -> Result<RequestEnvelope<'_>, DecodeError> {
-    let (id, destination, body) = decode_envelope(line)?;
-    Ok(RequestEnvelope {
-        id,
-        destination,
-        body,
+pub fn decode_message(line: &[u8]) -> Result<Message<'_>, DecodeError> {
+    let (id_token, rest) = next_token(line).ok_or(DecodeError {
+        id: None,
+        kind: DecodeErrorKind::Malformed,
+    })?;
+    let id = parse_packet_id(id_token).ok_or(DecodeError {
+        id: None,
+        kind: DecodeErrorKind::Malformed,
+    })?;
+    let malformed = || DecodeError {
+        id: Some(id),
+        kind: DecodeErrorKind::Malformed,
+    };
+    let (route, rest) = next_token(rest).ok_or_else(malformed)?;
+    if !valid_route_token(route) {
+        return Err(malformed());
+    }
+    let body = rest.trim_ascii();
+    if body.is_empty() {
+        return Err(malformed());
+    }
+    Ok(Message { id, route, body })
+}
+
+pub fn encode_message(message: Message<'_>, out: &mut [u8]) -> Result<usize, EncodeError> {
+    encode_message_with(message.id, message.route, out, |writer| {
+        writer.bytes(message.body)
     })
-}
-
-pub fn decode_response_envelope(line: &[u8]) -> Result<ResponseEnvelope<'_>, DecodeError> {
-    let (id, source, body) = decode_envelope(line)?;
-    Ok(ResponseEnvelope { id, source, body })
-}
-
-pub fn encode_request_envelope(
-    envelope: RequestEnvelope<'_>,
-    out: &mut [u8],
-) -> Result<usize, EncodeError> {
-    encode_envelope(envelope.id, envelope.destination, envelope.body, out)
-}
-
-pub fn encode_response_envelope(
-    envelope: ResponseEnvelope<'_>,
-    out: &mut [u8],
-) -> Result<usize, EncodeError> {
-    encode_envelope(envelope.id, envelope.source, envelope.body, out)
 }
 
 pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
@@ -975,58 +970,62 @@ pub fn encode_request<T: AsRef<[u8]>>(
     destination: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
-    let capacity = out.len().min(MAX_PACKET_LEN);
-    let mut writer = Writer::new(&mut out[..capacity]);
-    writer.id(packet.id)?;
-    writer.bytes(b" ")?;
-    writer.route(destination)?;
-    match packet.body {
-        Request::Hello => writer.bytes(b" HAI\n")?,
-        Request::Status => writer.bytes(b" HRU\n")?,
-        Request::Map => writer.bytes(b" MAP\n")?,
+    encode_message_with(packet.id, destination, out, |writer| {
+        encode_request_body(writer, packet.body)
+    })
+}
+
+fn encode_request_body<T: AsRef<[u8]>>(
+    writer: &mut Writer<'_>,
+    body: Request<T>,
+) -> Result<(), EncodeError> {
+    match body {
+        Request::Hello => writer.bytes(b"HAI")?,
+        Request::Status => writer.bytes(b"HRU")?,
+        Request::Map => writer.bytes(b"MAP")?,
         Request::Direction { target, direction } => {
-            writer.bytes(b" DIR ")?;
+            writer.bytes(b"DIR ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match direction {
-                Direction::Input => b" IN OK?\n",
-                Direction::Output => b" OUT OK?\n",
+                Direction::Input => b" IN OK?",
+                Direction::Output => b" OUT OK?",
             })?;
         }
         Request::Get { target } => {
-            writer.bytes(b" GET ")?;
+            writer.bytes(b"GET ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(b" OK?\n")?;
+            writer.bytes(b" OK?")?;
         }
         Request::Set { target, level } => {
-            writer.bytes(b" SET ")?;
+            writer.bytes(b"SET ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match level {
-                Level::Low => b" LOW OK?\n",
-                Level::High => b" HIGH OK?\n",
+                Level::Low => b" LOW OK?",
+                Level::High => b" HIGH OK?",
             })?;
         }
         Request::Pullup { target, enabled } => {
-            writer.bytes(b" PLL ")?;
+            writer.bytes(b"PLL ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
+            writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
         }
         Request::Listen { target, enabled } => {
-            writer.bytes(b" LSN ")?;
+            writer.bytes(b"LSN ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
+            writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
         }
         Request::Query { target, what } => {
-            writer.bytes(b" WYD ")?;
+            writer.bytes(b"WYD ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match what {
-                Query::Direction => b" DIR\n",
-                Query::Pullup => b" PLL\n",
-                Query::Listen => b" LSN\n",
+                Query::Direction => b" DIR",
+                Query::Pullup => b" PLL",
+                Query::Listen => b" LSN",
             })?;
         }
-        Request::Bye => writer.bytes(b" BYE\n")?,
+        Request::Bye => writer.bytes(b"BYE")?,
     }
-    Ok(writer.len())
+    Ok(())
 }
 
 pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
@@ -1034,25 +1033,29 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
     source: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
-    let capacity = out.len().min(MAX_PACKET_LEN);
-    let mut writer = Writer::new(&mut out[..capacity]);
-    writer.id(packet.id)?;
-    writer.bytes(b" ")?;
-    writer.route(source)?;
-    match packet.body {
-        Response::Hello => writer.bytes(b" HII <3\n")?,
+    encode_message_with(packet.id, source, out, |writer| {
+        encode_response_body(writer, packet.body)
+    })
+}
+
+fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
+    writer: &mut Writer<'_>,
+    body: Response<T, D>,
+) -> Result<(), EncodeError> {
+    match body {
+        Response::Hello => writer.bytes(b"HII <3")?,
         Response::Status { identity } => {
             if !valid_identity(identity.as_ref()) {
                 return Err(EncodeError::InvalidIdentity);
             }
-            writer.bytes(b" IAM ")?;
+            writer.bytes(b"IAM ")?;
             writer.bytes(identity.as_ref())?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
         Response::MapBank { bank } => {
-            writer.bytes(b" MAP BANK ")?;
+            writer.bytes(b"MAP BANK ")?;
             writer.target(bank.as_ref())?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
         Response::MapPin {
             target,
@@ -1061,7 +1064,7 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             bit,
             capabilities,
         } => {
-            writer.bytes(b" MAP PIN ")?;
+            writer.bytes(b"MAP PIN ")?;
             writer.target(target.as_ref())?;
             writer.bytes(b" ")?;
             if let Some(package_pin) = package_pin {
@@ -1075,15 +1078,15 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             writer.decimal(u16::from(bit))?;
             writer.bytes(b" ")?;
             writer.bytes(&[b'0' + capabilities.bits()])?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
-        Response::Ack => writer.bytes(b" OKA <3\n")?,
+        Response::Ack => writer.bytes(b"OKA <3")?,
         Response::Value { target, level } => {
-            writer.bytes(b" HYG ")?;
+            writer.bytes(b"HYG ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match level {
-                Level::Low => b" LOW <3\n",
-                Level::High => b" HIGH <3\n",
+                Level::Low => b" LOW <3",
+                Level::High => b" HIGH <3",
             })?;
         }
         Response::State {
@@ -1091,7 +1094,7 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             what,
             value,
         } => {
-            writer.bytes(b" HYG ")?;
+            writer.bytes(b"HYG ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match what {
                 Query::Direction => b" DIR ",
@@ -1105,36 +1108,36 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
                 QueryValue::Enabled(true) => b"ON",
                 QueryValue::Enabled(false) => b"OFF",
             })?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
-        Response::Error(ResponseError::BadPacket) => writer.bytes(b" UMM BAD_PACKET <3\n")?,
+        Response::Error(ResponseError::BadPacket) => writer.bytes(b"UMM BAD_PACKET <3")?,
         Response::Error(ResponseError::Target { target, reason }) => {
-            writer.bytes(b" UMM ")?;
+            writer.bytes(b"UMM ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match reason {
-                TargetError::Unset => b" UNSET <3\n",
-                TargetError::Unavailable => b" UNAVAILABLE <3\n",
+                TargetError::Unset => b" UNSET <3",
+                TargetError::Unavailable => b" UNAVAILABLE <3",
             })?;
         }
         Response::Error(ResponseError::NoRoute { destination }) => {
-            writer.bytes(b" UMM NO_ROUTE ")?;
+            writer.bytes(b"UMM NO_ROUTE ")?;
             writer.route(destination.as_ref())?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
         Response::Error(ResponseError::RouteBusy { next_hop }) => {
-            writer.bytes(b" UMM ROUTE_BUSY ")?;
+            writer.bytes(b"UMM ROUTE_BUSY ")?;
             writer.route(next_hop.as_ref())?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
         Response::Error(ResponseError::RouteDown { next_hop }) => {
-            writer.bytes(b" UMM ROUTE_DOWN ")?;
+            writer.bytes(b"UMM ROUTE_DOWN ")?;
             writer.route(next_hop.as_ref())?;
-            writer.bytes(b" <3\n")?;
+            writer.bytes(b" <3")?;
         }
-        Response::Unknown => writer.bytes(b" IDK <3\n")?,
-        Response::Bye => writer.bytes(b" CYA <3\n")?,
+        Response::Unknown => writer.bytes(b"IDK <3")?,
+        Response::Bye => writer.bytes(b"CYA <3")?,
     }
-    Ok(writer.len())
+    Ok(())
 }
 
 fn next_as<'a, T>(
@@ -1186,35 +1189,11 @@ fn parse_enabled(token: &[u8]) -> Option<bool> {
     }
 }
 
-fn decode_envelope(line: &[u8]) -> Result<(RequestId, &[u8], &[u8]), DecodeError> {
-    let (id_token, rest) = next_token(line).ok_or(DecodeError {
-        id: None,
-        kind: DecodeErrorKind::Malformed,
-    })?;
-    let id = parse_packet_id(id_token).ok_or(DecodeError {
-        id: None,
-        kind: DecodeErrorKind::Malformed,
-    })?;
-    let malformed = || DecodeError {
-        id: Some(id),
-        kind: DecodeErrorKind::Malformed,
-    };
-    let (route, rest) = next_token(rest).ok_or_else(malformed)?;
-    if !valid_route_token(route) {
-        return Err(malformed());
-    }
-    let body = rest.trim_ascii();
-    if body.is_empty() {
-        return Err(malformed());
-    }
-    Ok((id, route, body))
-}
-
-fn encode_envelope(
+fn encode_message_with(
     id: RequestId,
     route: &[u8],
-    body: &[u8],
     out: &mut [u8],
+    write_body: impl FnOnce(&mut Writer<'_>) -> Result<(), EncodeError>,
 ) -> Result<usize, EncodeError> {
     let capacity = out.len().min(MAX_PACKET_LEN);
     let mut writer = Writer::new(&mut out[..capacity]);
@@ -1222,7 +1201,7 @@ fn encode_envelope(
     writer.bytes(b" ")?;
     writer.route(route)?;
     writer.bytes(b" ")?;
-    writer.bytes(body)?;
+    write_body(&mut writer)?;
     writer.bytes(b"\n")?;
     Ok(writer.len())
 }
@@ -1348,7 +1327,7 @@ mod tests {
     }
 
     fn decoded_request(line: &[u8]) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
-        let envelope = decode_request_envelope(line)?;
+        let envelope = decode_message(line)?;
         decode_request(Packet {
             id: envelope.id,
             body: envelope.body,
@@ -1356,7 +1335,7 @@ mod tests {
     }
 
     fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
-        let envelope = decode_response_envelope(line)?;
+        let envelope = decode_message(line)?;
         decode_response(Packet {
             id: envelope.id,
             body: envelope.body,
@@ -1395,39 +1374,39 @@ mod tests {
     #[test]
     fn routed_envelopes_borrow_route_and_opaque_body() {
         let request = b"001 SAM HAI";
-        let envelope = decode_request_envelope(request).unwrap();
+        let envelope = decode_message(request).unwrap();
         assert_eq!(
             envelope,
-            RequestEnvelope {
+            Message {
                 id: id(1),
-                destination: b"SAM",
+                route: b"SAM",
                 body: b"HAI",
             }
         );
-        assert_eq!(envelope.destination.as_ptr(), request[4..].as_ptr());
+        assert_eq!(envelope.route.as_ptr(), request[4..].as_ptr());
         assert_eq!(envelope.body.as_ptr(), request[8..].as_ptr());
 
         assert_eq!(
-            decode_request_envelope(b"002 LPC GET PIO2_3 OK?"),
-            Ok(RequestEnvelope {
+            decode_message(b"002 LPC GET PIO2_3 OK?"),
+            Ok(Message {
                 id: id(2),
-                destination: b"LPC",
+                route: b"LPC",
                 body: b"GET PIO2_3 OK?",
             })
         );
         assert_eq!(
-            decode_request_envelope(b"003 ABC WAT opaque body"),
-            Ok(RequestEnvelope {
+            decode_message(b"003 ABC WAT opaque body"),
+            Ok(Message {
                 id: id(3),
-                destination: b"ABC",
+                route: b"ABC",
                 body: b"WAT opaque body",
             })
         );
         assert_eq!(
-            decode_response_envelope(b"002 LPC HYG PIO2_3 HIGH <3"),
-            Ok(ResponseEnvelope {
+            decode_message(b"002 LPC HYG PIO2_3 HIGH <3"),
+            Ok(Message {
                 id: id(2),
-                source: b"LPC",
+                route: b"LPC",
                 body: b"HYG PIO2_3 HIGH <3",
             })
         );
@@ -1436,30 +1415,30 @@ mod tests {
     #[test]
     fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
         let mut out = [0; MAX_PACKET_LEN];
-        let request = RequestEnvelope {
+        let request = Message {
             id: id(999),
-            destination: b"ABC",
+            route: b"ABC",
             body: b"HAI",
         };
-        let len = encode_request_envelope(request, &mut out).unwrap();
+        let len = encode_message(request, &mut out).unwrap();
         assert_eq!(&out[..len], b"999 ABC HAI\n");
-        assert_eq!(decode_request_envelope(&out[..len]), Ok(request));
+        assert_eq!(decode_message(&out[..len]), Ok(request));
 
-        let response = ResponseEnvelope {
+        let response = Message {
             id: id(7),
-            source: b"SAM",
+            route: b"SAM",
             body: b"HII <3",
         };
-        let len = encode_response_envelope(response, &mut out).unwrap();
+        let len = encode_message(response, &mut out).unwrap();
         assert_eq!(&out[..len], b"007 SAM HII <3\n");
-        assert_eq!(decode_response_envelope(&out[..len]), Ok(response));
+        assert_eq!(decode_message(&out[..len]), Ok(response));
 
         for route in [b"".as_slice(), b"BAD ROUTE", b"BAD\nROUTE", b"\x01"] {
             assert_eq!(
-                encode_request_envelope(
-                    RequestEnvelope {
+                encode_message(
+                    Message {
                         id: id(1),
-                        destination: route,
+                        route,
                         body: b"HAI",
                     },
                     &mut out,

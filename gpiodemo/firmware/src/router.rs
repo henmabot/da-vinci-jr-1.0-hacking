@@ -1,6 +1,4 @@
-use da_vinci_protocol::{
-    MAX_PACKET_LEN, Packet, RequestEnvelope, RequestId, Response, ResponseError,
-};
+use da_vinci_protocol::{MAX_PACKET_LEN, Message, Packet, RequestId, Response, ResponseError};
 
 const ROUTE_QUEUE_CAPACITY: usize = 2;
 
@@ -147,13 +145,13 @@ impl<'a, const N: usize> Router<'a, N> {
     pub fn dispatch<'frame, F, T>(
         &mut self,
         frame: &'frame [u8],
-        envelope: RequestEnvelope<'frame>,
+        envelope: Message<'frame>,
         local: F,
     ) -> Option<Packet<Response<T, &'frame [u8]>>>
     where
         F: FnOnce(Packet<&'frame [u8]>) -> Packet<Response<T, &'frame [u8]>>,
     {
-        if envelope.destination == self.local_route {
+        if envelope.route == self.local_route {
             return Some(local(Packet {
                 id: envelope.id,
                 body: envelope.body,
@@ -163,12 +161,12 @@ impl<'a, const N: usize> Router<'a, N> {
         let Some(route) = self
             .routes
             .iter_mut()
-            .find(|route| route.reaches(envelope.destination))
+            .find(|route| route.reaches(envelope.route))
         else {
             return Some(Packet {
                 id: envelope.id,
                 body: Response::Error(ResponseError::NoRoute {
-                    destination: envelope.destination,
+                    destination: envelope.route,
                 }),
             });
         };
@@ -293,7 +291,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use da_vinci_protocol::decode_request_envelope;
+    use da_vinci_protocol::decode_message;
     use std::{
         cell::{Cell, RefCell},
         collections::VecDeque,
@@ -364,8 +362,8 @@ mod tests {
         incoming: Rc<RefCell<VecDeque<Vec<u8>>>>,
     }
 
-    fn envelope(frame: &[u8]) -> RequestEnvelope<'_> {
-        decode_request_envelope(frame).unwrap()
+    fn envelope(frame: &[u8]) -> Message<'_> {
+        decode_message(frame).unwrap()
     }
 
     fn request_id(raw: u16) -> RequestId {
@@ -409,7 +407,7 @@ mod tests {
     fn missing_routes_return_local_no_route_errors() {
         let mut router = Router::new(b"SAM", []);
         for frame in [b"011 LPC HAI\n".as_slice(), b"012 ABC HAI\n"] {
-            let destination = envelope(frame).destination;
+            let destination = envelope(frame).route;
             assert_eq!(
                 dispatch(&mut router, frame),
                 Some(Packet {
