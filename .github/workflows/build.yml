@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  gui-macos:
+  gui:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -27,7 +27,7 @@ jobs:
           path: gpiodemo/target/release/da-vinci-gui
           if-no-files-found: error
 
-  build:
+  sam4:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,7 +35,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update && sudo apt-get install --yes --no-install-recommends gcc-arm-none-eabi just
-          rustup target add thumbv7em-none-eabi thumbv6m-none-eabi
+          rustup target add thumbv7em-none-eabi
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -44,9 +44,6 @@ jobs:
 
       - name: Build SAM4E8E firmware
         run: just build
-
-      - name: Build LPC1115 firmware
-        run: just build-lpc
 
       - name: Set artifact timestamp
         id: timestamp
@@ -68,6 +65,28 @@ jobs:
           name: sam4e8e-firmware-bin-${{ steps.timestamp.outputs.value }}
           path: build/firmware.bin
           if-no-files-found: error
+
+  lpc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends gcc-arm-none-eabi just
+          rustup target add thumbv6m-none-eabi
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: gpiodemo -> target
+
+      - name: Build LPC1115 firmware
+        run: just build-lpc
+
+      - name: Set artifact timestamp
+        id: timestamp
+        run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
 
       - name: Upload LPC1115 firmware bundle
         uses: actions/upload-artifact@v7
