@@ -164,6 +164,7 @@ pub(super) enum Message {
     BulkSet(Level),
     BulkSetConfirm,
     BulkSetCancel,
+    PinMap,
     Handshake,
     Status,
     Reboot,
@@ -365,6 +366,7 @@ impl App {
                 }
             }
             Message::BulkSetCancel => self.confirm_set = None,
+            Message::PinMap => self.send_request(Request::Map),
             Message::Handshake => self.send_request(Request::Hello),
             Message::Status => self.send_request(Request::Status),
             Message::Reboot => self.confirm_reboot = true,
@@ -599,11 +601,11 @@ impl App {
         }
     }
 
-    fn send_routed_request(&mut self, route: RouteKey, request: RoutedRequest) {
-        match self.session.send(route, request) {
-            Ok(line) => self.push_log(format!("TX {line}")),
-            Err(error) => self.error = Some(error),
-        }
+    fn connected(&mut self, port: String) {
+        self.connected_port = Some(port);
+        self.device_status = "Connected".into();
+        self.error = None;
+        self.sync_route_ui();
     }
 
     fn send_request(&mut self, request: Request) {
@@ -653,14 +655,7 @@ impl App {
             };
             match event {
                 ConnectionEvent::Connected(port) => {
-                    self.connected_port = Some(port.clone());
-                    self.device_status = "Connected; discovering pin maps".into();
-                    self.error = None;
-                    self.sync_route_ui();
-                    let routes: Vec<_> = self.routes.iter().map(|route| route.key).collect();
-                    for route in routes {
-                        self.send_routed_request(route, RoutedRequest::Map);
-                    }
+                    self.connected(port);
                 }
                 ConnectionEvent::Disconnected(reason) => {
                     self.connected_port = None;
@@ -857,6 +852,39 @@ mod tests {
 
     fn last_log(app: &App) -> &str {
         app.log.last_text().unwrap()
+    }
+
+    #[test]
+    fn connection_does_not_start_pin_map_discovery() {
+        let mut app = App::with_routes(&ROUTES);
+
+        app.connected("test".into());
+
+        assert_eq!(app.device_status, "Connected");
+        assert!(app.log.is_empty());
+        app.send_request(Request::Hello);
+        assert_eq!(last_log(&app), "TX 001 SAM HAI");
+    }
+
+    #[test]
+    fn manual_pin_map_uses_selected_route_and_does_not_block_handshake() {
+        let mut app = App::with_routes(&ROUTES);
+        app.connected("test".into());
+        let lpc = route(&app, "LPC");
+        let _ = app.update(Message::RouteSelected(lpc));
+
+        let _ = app.update(Message::PinMap);
+        assert_eq!(last_log(&app), "TX 001 LPC MAP");
+
+        let _ = app.update(Message::Handshake);
+        assert_eq!(last_log(&app), "TX 002 LPC HAI");
+
+        let _ = app.update(Message::PinMap);
+        assert_eq!(
+            app.error.as_deref(),
+            Some("MAP for LPC is already in progress")
+        );
+        assert_eq!(last_log(&app), "TX 002 LPC HAI");
     }
 
     #[test]

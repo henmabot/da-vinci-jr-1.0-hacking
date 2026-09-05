@@ -794,15 +794,11 @@ impl DeviceSession {
         if route.0 >= self.routes.len() {
             return Err("Unknown route key".into());
         }
-        if self.routes[route.0].discovery.is_some() {
-            return Err(if matches!(request, Request::Map) {
-                format!("MAP for {} is already in progress", self.route_name(route))
-            } else {
-                format!(
-                    "{} pin-map discovery is still in progress",
-                    self.route_name(route)
-                )
-            });
+        if matches!(request, Request::Map) && self.routes[route.0].discovery.is_some() {
+            return Err(format!(
+                "MAP for {} is already in progress",
+                self.route_name(route)
+            ));
         }
 
         let id = self.allocate_request_id()?;
@@ -1650,17 +1646,98 @@ mod tests {
     }
 
     #[test]
-    fn route_typed_requests_do_not_interrupt_map_discovery() {
+    fn map_discovery_only_blocks_a_second_map() {
         let (mut connection, sam, _, _, _, _) = setup();
         connection.routes[sam.0].map = None;
         let (map_id, _) = connection.prepare(sam, Request::Map).unwrap();
 
+        let (hello_id, hello) = connection.prepare(sam, Request::Hello).unwrap();
+        let (status_id, status) = connection.prepare(sam, Request::Status).unwrap();
+        assert_eq!(hello, b"002 SAM HAI\n");
+        assert_eq!(status, b"003 SAM HRU\n");
+        assert_ne!(map_id, hello_id);
+        assert_ne!(map_id, status_id);
         assert_eq!(
-            connection.prepare(sam, Request::Hello).unwrap_err(),
-            "SAM pin-map discovery is still in progress"
+            connection.prepare(sam, Request::Map).unwrap_err(),
+            "MAP for SAM is already in progress"
         );
         assert!(connection.pending[map_id.slot()].is_some());
         assert!(connection.routes[sam.0].discovery.is_some());
+    }
+
+    #[test]
+    fn map_refresh_keeps_installed_map_until_ack() {
+        let (mut connection, sam, _, pa00, _, _) = setup();
+        let (id, _) = connection.prepare(sam, Request::Map).unwrap();
+
+        connection
+            .received(incoming(
+                "SAM",
+                id,
+                WireResponse::MapBank {
+                    bank: "GPIOX".into(),
+                },
+            ))
+            .unwrap();
+        connection
+            .received(incoming(
+                "SAM",
+                id,
+                WireResponse::MapPin {
+                    target: "X0".into(),
+                    package_pin: Some(7),
+                    bank: "GPIOX".into(),
+                    bit: 0,
+                    capabilities: PinCapabilities::INPUT,
+                },
+            ))
+            .unwrap();
+
+        assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
+        assert_eq!(connection.pin_key(sam, "X0"), None);
+
+        assert_eq!(
+            connection
+                .received(incoming("SAM", id, WireResponse::Ack))
+                .unwrap(),
+            DeviceEvent::MapReady { route: sam }
+        );
+        assert_eq!(connection.pin_key(sam, "PA00"), None);
+        assert!(connection.pin_key(sam, "X0").is_some());
+    }
+
+    #[test]
+    fn failed_map_refresh_preserves_installed_map() {
+        let (mut connection, sam, _, pa00, _, _) = setup();
+        let (id, _) = connection.prepare(sam, Request::Map).unwrap();
+        connection
+            .received(incoming(
+                "SAM",
+                id,
+                WireResponse::MapBank {
+                    bank: "GPIOX".into(),
+                },
+            ))
+            .unwrap();
+
+        let error = connection
+            .received(incoming(
+                "SAM",
+                id,
+                WireResponse::MapPin {
+                    target: "X0".into(),
+                    package_pin: None,
+                    bank: "MISSING".into(),
+                    bit: 0,
+                    capabilities: PinCapabilities::INPUT,
+                },
+            ))
+            .unwrap_err();
+
+        assert!(error.contains("unknown bank MISSING"));
+        assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
+        assert!(connection.routes[sam.0].discovery.is_none());
+        assert!(connection.pending[id.slot()].is_none());
     }
 
     #[test]

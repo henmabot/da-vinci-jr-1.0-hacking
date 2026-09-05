@@ -65,6 +65,7 @@ impl App {
         .width(Length::Fill);
 
         let actions = row![
+            native_button("Pin map").on_press(Message::PinMap),
             native_button("Handshake").on_press(Message::Handshake),
             native_button("Status").on_press(Message::Status),
             danger_native_button("Reset device").on_press(Message::Reboot),
