@@ -11,7 +11,7 @@ mod board {
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
         BankId, GpioHal, Node, PinId,
-        lpc::{LPC_IDENTITY, LPC_PIN_MAP},
+        lpc::{LPC_IDENTITY, LPC_PIN_MAP, LpcBank},
         transport::{ByteError, NonBlockingBytes},
     };
     use da_vinci_protocol::Level;
@@ -35,19 +35,19 @@ mod board {
 
     impl LpcGpio {
         fn registers(&self, bank: BankId) -> &pac::gpio0::RegisterBlock {
-            match bank.index() {
-                0 => &self.gpio0,
-                1 => &self.gpio1,
-                2 => &self.gpio2,
-                3 => &self.gpio3,
-                _ => unreachable!("LPC pin map contains only GPIO0-3"),
+            match LpcBank::from_id(bank).expect("LPC pin map contains only GPIO0-3") {
+                LpcBank::Pio0 => &self.gpio0,
+                LpcBank::Pio1 => &self.gpio1,
+                LpcBank::Pio2 => &self.gpio2,
+                LpcBank::Pio3 => &self.gpio3,
             }
         }
 
         fn configure(&self, pin: PinId, pull_up: bool) {
             let info = LPC_PIN_MAP.pin(pin);
-            let function = match (info.bank.index(), info.bit) {
-                (0, 11) | (1, 0..=2) => 1,
+            let bank = LpcBank::from_id(info.bank).expect("LPC pin map contains only GPIO0-3");
+            let function = match (bank, info.bit) {
+                (LpcBank::Pio0, 11) | (LpcBank::Pio1, 0..=2) => 1,
                 _ => 0,
             };
             let offset = IOCON_OFFSETS[pin.index()] as usize;
@@ -57,7 +57,7 @@ mod board {
             unsafe {
                 let register = (pac::IOCON::ptr() as *mut u8).add(offset).cast::<u32>();
                 let current = read_volatile(register);
-                let next = if info.bank.index() == 0 && matches!(info.bit, 4 | 5) {
+                let next = if bank == LpcBank::Pio0 && matches!(info.bit, 4 | 5) {
                     // PIO0_4/PIO0_5 are dedicated open-drain I2C pads. In GPIO mode they need
                     // Standard I/O mode and have no ordinary pull-up/pull-down MODE field.
                     (current & !(0x07 | (0x03 << 8))) | (1 << 8)
@@ -66,8 +66,8 @@ mod board {
                     let mut bits =
                         (current & !(0x07 | (0x03 << 3))) | function | ((mode as u32) << 3);
                     if matches!(
-                        (info.bank.index(), info.bit),
-                        (0, 11) | (1, 0..=4) | (1, 10..=11)
+                        (bank, info.bit),
+                        (LpcBank::Pio0, 11) | (LpcBank::Pio1, 0..=4) | (LpcBank::Pio1, 10..=11)
                     ) {
                         bits |= 1 << 7;
                     }

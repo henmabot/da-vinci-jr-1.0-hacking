@@ -1,10 +1,42 @@
 use crate::gpio::{BankId, BankInfo, Capabilities, PinInfo, PinMap};
 
-pub const BANK_A: BankId = BankId::new(0);
-pub const BANK_B: BankId = BankId::new(1);
-pub const BANK_C: BankId = BankId::new(2);
-pub const BANK_D: BankId = BankId::new(3);
-pub const BANK_E: BankId = BankId::new(4);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SamBank {
+    A,
+    B,
+    C,
+    D,
+    E,
+}
+
+impl SamBank {
+    pub const fn id(self) -> BankId {
+        BankId::new(match self {
+            Self::A => 0,
+            Self::B => 1,
+            Self::C => 2,
+            Self::D => 3,
+            Self::E => 4,
+        })
+    }
+
+    pub fn from_id(id: BankId) -> Option<Self> {
+        match id.index() {
+            0 => Some(Self::A),
+            1 => Some(Self::B),
+            2 => Some(Self::C),
+            3 => Some(Self::D),
+            4 => Some(Self::E),
+            _ => None,
+        }
+    }
+}
+
+pub const BANK_A: BankId = SamBank::A.id();
+pub const BANK_B: BankId = SamBank::B.id();
+pub const BANK_C: BankId = SamBank::C.id();
+pub const BANK_D: BankId = SamBank::D.id();
+pub const BANK_E: BankId = SamBank::E.id();
 
 pub const SAM_IDENTITY: &[u8] = b"SAM4E8E GPIO";
 

@@ -19,7 +19,7 @@ mod board {
     use da_vinci_firmware::{
         BankId, GpioHal, Node, PinId,
         router::Route,
-        sam::{SAM_IDENTITY, SAM_PIN_MAP},
+        sam::{SAM_IDENTITY, SAM_PIN_MAP, SamBank},
         transport::{ByteError, FramedLink, NonBlockingBytes},
     };
     use da_vinci_protocol::Level;
@@ -40,28 +40,27 @@ mod board {
             // Reserved clock/USB pins never reach this adapter,
             // and the firmware loop is single-threaded, so these MMIO registers are not aliased.
             unsafe {
-                match info.bank.index() {
-                    0 => {
+                match SamBank::from_id(info.bank).expect("SAM pin map contains only PIOA-E") {
+                    SamBank::A => {
                         let $port = &*pac::PIOA::ptr();
                         $body
                     }
-                    1 => {
+                    SamBank::B => {
                         let $port = &*pac::PIOB::ptr();
                         $body
                     }
-                    2 => {
+                    SamBank::C => {
                         let $port = &*pac::PIOC::ptr();
                         $body
                     }
-                    3 => {
+                    SamBank::D => {
                         let $port = &*pac::PIOD::ptr();
                         $body
                     }
-                    4 => {
+                    SamBank::E => {
                         let $port = &*pac::PIOE::ptr();
                         $body
                     }
-                    _ => unreachable!("SAM pin map contains only PIOA-E"),
                 }
             }
         }};
@@ -115,13 +114,12 @@ mod board {
             // SAFETY: Firmware is the only SamGpio caller, the loop is single-threaded,
             // and reading PDSR does not mutate or alias the PIO registers.
             unsafe {
-                match bank.index() {
-                    0 => (&*pac::PIOA::ptr()).pdsr.read().bits(),
-                    1 => (&*pac::PIOB::ptr()).pdsr.read().bits(),
-                    2 => (&*pac::PIOC::ptr()).pdsr.read().bits(),
-                    3 => (&*pac::PIOD::ptr()).pdsr.read().bits(),
-                    4 => (&*pac::PIOE::ptr()).pdsr.read().bits(),
-                    _ => unreachable!("SAM pin map contains only PIOA-E"),
+                match SamBank::from_id(bank).expect("SAM pin map contains only PIOA-E") {
+                    SamBank::A => (&*pac::PIOA::ptr()).pdsr.read().bits(),
+                    SamBank::B => (&*pac::PIOB::ptr()).pdsr.read().bits(),
+                    SamBank::C => (&*pac::PIOC::ptr()).pdsr.read().bits(),
+                    SamBank::D => (&*pac::PIOD::ptr()).pdsr.read().bits(),
+                    SamBank::E => (&*pac::PIOE::ptr()).pdsr.read().bits(),
                 }
             }
         }

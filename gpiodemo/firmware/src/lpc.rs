@@ -1,9 +1,38 @@
 use crate::gpio::{BankId, BankInfo, Capabilities, PinInfo, PinMap};
 
-const BANK_0: BankId = BankId::new(0);
-const BANK_1: BankId = BankId::new(1);
-const BANK_2: BankId = BankId::new(2);
-const BANK_3: BankId = BankId::new(3);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LpcBank {
+    Pio0,
+    Pio1,
+    Pio2,
+    Pio3,
+}
+
+impl LpcBank {
+    pub const fn id(self) -> BankId {
+        BankId::new(match self {
+            Self::Pio0 => 0,
+            Self::Pio1 => 1,
+            Self::Pio2 => 2,
+            Self::Pio3 => 3,
+        })
+    }
+
+    pub fn from_id(id: BankId) -> Option<Self> {
+        match id.index() {
+            0 => Some(Self::Pio0),
+            1 => Some(Self::Pio1),
+            2 => Some(Self::Pio2),
+            3 => Some(Self::Pio3),
+            _ => None,
+        }
+    }
+}
+
+const BANK_0: BankId = LpcBank::Pio0.id();
+const BANK_1: BankId = LpcBank::Pio1.id();
+const BANK_2: BankId = LpcBank::Pio2.id();
+const BANK_3: BankId = LpcBank::Pio3.id();
 
 pub const LPC_IDENTITY: &[u8] = b"LPC1115 GPIO";
 
