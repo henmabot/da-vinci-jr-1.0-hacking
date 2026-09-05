@@ -906,10 +906,10 @@ impl DeviceSession {
             )
         );
         let expected = self.route_name(pending.route);
-        if !routing_error && incoming.source != expected {
+        if !routing_error && incoming.route != expected {
             return Err(format!(
                 "Response {id} came from {}, expected {expected}",
-                incoming.source
+                incoming.route
             ));
         }
 
@@ -1012,7 +1012,7 @@ impl DeviceSession {
                 self.retire(id);
                 Ok(DeviceEvent::DeviceError {
                     route: pending.route,
-                    source: incoming.source,
+                    source: incoming.route,
                     error,
                 })
             }
@@ -1476,7 +1476,7 @@ mod tests {
 
     fn incoming(source: &str, id: RequestId, body: WireResponse) -> OwnedResponse {
         OwnedResponse {
-            source: source.into(),
+            route: source.into(),
             packet: Packet { id, body },
         }
     }

@@ -1,4 +1,6 @@
-use da_vinci_protocol::{MAX_PACKET_LEN, Message, Packet, RequestId, Response, ResponseError};
+use da_vinci_protocol::{
+    MAX_PACKET_LEN, Message, Packet, RawMessage, RequestId, Response, ResponseError,
+};
 
 const ROUTE_QUEUE_CAPACITY: usize = 2;
 
@@ -145,7 +147,7 @@ impl<'a, const N: usize> Router<'a, N> {
     pub fn dispatch<'frame, F, T>(
         &mut self,
         frame: &'frame [u8],
-        envelope: Message<'frame>,
+        envelope: RawMessage<'frame>,
         local: F,
     ) -> Option<Packet<Response<T, &'frame [u8]>>>
     where
@@ -358,7 +360,7 @@ mod tests {
         incoming: Rc<RefCell<VecDeque<Vec<u8>>>>,
     }
 
-    fn envelope(frame: &[u8]) -> Message<'_> {
+    fn envelope(frame: &[u8]) -> RawMessage<'_> {
         decode_message(frame).unwrap()
     }
 

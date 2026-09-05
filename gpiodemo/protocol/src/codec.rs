@@ -4,7 +4,7 @@ use crate::{
         Response, ResponseError, TargetError, Toggle,
     },
     framing::MAX_PACKET_LEN,
-    message::{Message, Packet, RequestId, parse_packet_id, valid_route_token},
+    message::{Message, Packet, RawMessage, RequestId, parse_packet_id, valid_route_token},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub enum EncodeError {
     InvalidIdentity,
 }
 
-pub fn decode_message(line: &[u8]) -> Result<Message<'_>, DecodeError> {
+pub fn decode_message(line: &[u8]) -> Result<RawMessage<'_>, DecodeError> {
     let (id_token, rest) = next_token(line).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
@@ -54,7 +54,7 @@ pub fn decode_message(line: &[u8]) -> Result<Message<'_>, DecodeError> {
     })
 }
 
-pub fn encode_message(message: Message<'_>, out: &mut [u8]) -> Result<usize, EncodeError> {
+pub fn encode_message(message: RawMessage<'_>, out: &mut [u8]) -> Result<usize, EncodeError> {
     encode_message_with(message.packet.id, message.route, out, |writer| {
         writer.bytes(message.packet.body)
     })
@@ -136,7 +136,9 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(message: Message<'_>) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
+pub fn decode_response(
+    message: RawMessage<'_>,
+) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
     let suffix = response_suffix(message.route);
     let packet = message.packet;
     let id = packet.id;

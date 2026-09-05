@@ -45,10 +45,12 @@ pub struct Packet<T> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Message<'a> {
-    pub route: &'a [u8],
-    pub packet: Packet<&'a [u8]>,
+pub struct Message<R, B> {
+    pub route: R,
+    pub packet: Packet<B>,
 }
+
+pub type RawMessage<'a> = Message<&'a [u8], &'a [u8]>;
 
 pub(crate) fn valid_route_token(token: &[u8]) -> bool {
     !token.is_empty() && token.iter().all(u8::is_ascii_graphic)

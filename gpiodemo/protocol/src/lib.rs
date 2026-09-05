@@ -14,7 +14,7 @@ pub use command::{
     PinCapabilities, Query, QueryValue, Request, Response, ResponseError, TargetError, Toggle,
 };
 pub use framing::{LineBuffer, LineError, MAX_PACKET_LEN};
-pub use message::{Message, Packet, RequestId};
+pub use message::{Message, Packet, RawMessage, RequestId};
 
 #[cfg(test)]
 mod tests;

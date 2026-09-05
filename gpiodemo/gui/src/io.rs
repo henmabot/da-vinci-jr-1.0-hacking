@@ -7,13 +7,14 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    DecodeError, DecodeErrorKind, Level, LineBuffer, LineError, MAX_PACKET_LEN, Packet, RequestId,
-    Response as ProtocolResponse, decode_message, decode_response,
+    DecodeError, DecodeErrorKind, Level, LineBuffer, LineError, MAX_PACKET_LEN, Message, Packet,
+    RequestId, Response as ProtocolResponse, decode_message, decode_response,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
 
 pub(super) type WireResponse = ProtocolResponse<String, String>;
+pub(super) type OwnedResponse = Message<String, WireResponse>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ListenerKey {
@@ -141,11 +142,6 @@ enum IoCommand {
     Write(Vec<u8>),
     Listeners(Vec<ListenerRoute>),
     DrainListeners,
-}
-
-pub(super) struct OwnedResponse {
-    pub(super) source: String,
-    pub(super) packet: Packet<WireResponse>,
 }
 
 pub(super) enum IoEvent {
@@ -341,7 +337,7 @@ fn own_response(
         },
     )?;
     Ok(OwnedResponse {
-        source: String::from_utf8_lossy(source).into_owned(),
+        route: String::from_utf8_lossy(source).into_owned(),
         packet: Packet {
             id: packet.id,
             body,

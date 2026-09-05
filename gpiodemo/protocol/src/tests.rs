@@ -81,10 +81,10 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
     assert_eq!(
         envelope,
         Message {
-            route: b"SAM",
+            route: b"SAM".as_slice(),
             packet: Packet {
                 id: id(1),
-                body: b"HAI",
+                body: b"HAI".as_slice(),
             },
         }
     );
@@ -94,30 +94,30 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
     assert_eq!(
         decode_message(b"002 LPC GET PIO2_3 OK?"),
         Ok(Message {
-            route: b"LPC",
+            route: b"LPC".as_slice(),
             packet: Packet {
                 id: id(2),
-                body: b"GET PIO2_3 OK?",
+                body: b"GET PIO2_3 OK?".as_slice(),
             },
         })
     );
     assert_eq!(
         decode_message(b"003 ABC WAT opaque body"),
         Ok(Message {
-            route: b"ABC",
+            route: b"ABC".as_slice(),
             packet: Packet {
                 id: id(3),
-                body: b"WAT opaque body",
+                body: b"WAT opaque body".as_slice(),
             },
         })
     );
     assert_eq!(
         decode_message(b"002 LPC HYG PIO2_3 HIGH <3"),
         Ok(Message {
-            route: b"LPC",
+            route: b"LPC".as_slice(),
             packet: Packet {
                 id: id(2),
-                body: b"HYG PIO2_3 HIGH <3",
+                body: b"HYG PIO2_3 HIGH <3".as_slice(),
             },
         })
     );
@@ -127,10 +127,10 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
 fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
     let mut out = [0; MAX_PACKET_LEN];
     let request = Message {
-        route: b"ABC",
+        route: b"ABC".as_slice(),
         packet: Packet {
             id: id(999),
-            body: b"HAI",
+            body: b"HAI".as_slice(),
         },
     };
     let len = encode_message(request, &mut out).unwrap();
@@ -138,10 +138,10 @@ fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
     assert_eq!(decode_message(&out[..len]), Ok(request));
 
     let response = Message {
-        route: b"SAM",
+        route: b"SAM".as_slice(),
         packet: Packet {
             id: id(7),
-            body: b"HII <3",
+            body: b"HII <3".as_slice(),
         },
     };
     let len = encode_message(response, &mut out).unwrap();
@@ -155,7 +155,7 @@ fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
                     route,
                     packet: Packet {
                         id: id(1),
-                        body: b"HAI",
+                        body: b"HAI".as_slice(),
                     },
                 },
                 &mut out,
