@@ -119,6 +119,20 @@ pub struct Packet<T> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestEnvelope<'a> {
+    pub id: u16,
+    pub destination: &'a [u8],
+    pub body: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResponseEnvelope<'a> {
+    pub id: u16,
+    pub source: &'a [u8],
+    pub body: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     Input,
     Output,
@@ -468,6 +482,35 @@ pub struct DecodeError {
 pub enum EncodeError {
     OutputTooSmall,
     InvalidPacketId,
+    InvalidRouteToken,
+}
+
+pub fn decode_request_envelope(line: &[u8]) -> Result<RequestEnvelope<'_>, DecodeError> {
+    let (id, destination, body) = decode_envelope(line)?;
+    Ok(RequestEnvelope {
+        id,
+        destination,
+        body,
+    })
+}
+
+pub fn decode_response_envelope(line: &[u8]) -> Result<ResponseEnvelope<'_>, DecodeError> {
+    let (id, source, body) = decode_envelope(line)?;
+    Ok(ResponseEnvelope { id, source, body })
+}
+
+pub fn encode_request_envelope(
+    envelope: RequestEnvelope<'_>,
+    out: &mut [u8],
+) -> Result<usize, EncodeError> {
+    encode_envelope(envelope.id, envelope.destination, envelope.body, out)
+}
+
+pub fn encode_response_envelope(
+    envelope: ResponseEnvelope<'_>,
+    out: &mut [u8],
+) -> Result<usize, EncodeError> {
+    encode_envelope(envelope.id, envelope.source, envelope.body, out)
 }
 
 pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
@@ -763,6 +806,64 @@ fn parse_enabled(token: &[u8]) -> Option<bool> {
     }
 }
 
+fn decode_envelope(line: &[u8]) -> Result<(u16, &[u8], &[u8]), DecodeError> {
+    let (id_token, rest) = next_token(line).ok_or(DecodeError {
+        id: None,
+        kind: DecodeErrorKind::Malformed,
+    })?;
+    let id = parse_packet_id(id_token).ok_or(DecodeError {
+        id: None,
+        kind: DecodeErrorKind::Malformed,
+    })?;
+    let malformed = || DecodeError {
+        id: Some(id),
+        kind: DecodeErrorKind::Malformed,
+    };
+    let (route, rest) = next_token(rest).ok_or_else(malformed)?;
+    if !valid_route_token(route) {
+        return Err(malformed());
+    }
+    let body = rest.trim_ascii();
+    if body.is_empty() {
+        return Err(malformed());
+    }
+    Ok((id, route, body))
+}
+
+fn encode_envelope(
+    id: u16,
+    route: &[u8],
+    body: &[u8],
+    out: &mut [u8],
+) -> Result<usize, EncodeError> {
+    if !valid_route_token(route) {
+        return Err(EncodeError::InvalidRouteToken);
+    }
+    let capacity = out.len().min(MAX_PACKET_LEN);
+    let mut writer = Writer::new(&mut out[..capacity]);
+    writer.id(id)?;
+    writer.bytes(b" ")?;
+    writer.bytes(route)?;
+    writer.bytes(b" ")?;
+    writer.bytes(body)?;
+    writer.bytes(b"\n")?;
+    Ok(writer.len())
+}
+
+fn next_token(input: &[u8]) -> Option<(&[u8], &[u8])> {
+    let start = input.iter().position(|byte| !byte.is_ascii_whitespace())?;
+    let input = &input[start..];
+    let end = input
+        .iter()
+        .position(u8::is_ascii_whitespace)
+        .unwrap_or(input.len());
+    Some((&input[..end], &input[end..]))
+}
+
+fn valid_route_token(token: &[u8]) -> bool {
+    !token.is_empty() && token.iter().all(u8::is_ascii_graphic)
+}
+
 fn parse_packet_id(token: &[u8]) -> Option<u16> {
     if token.is_empty() || token.len() > 3 || !token.iter().all(u8::is_ascii_digit) {
         return None;
@@ -870,6 +971,83 @@ mod tests {
             if let Some(line) = buffer.push(byte).unwrap() {
                 assert_eq!(line, b"008 HII <3");
             }
+        }
+    }
+
+    #[test]
+    fn routed_envelopes_borrow_route_and_opaque_body() {
+        let request = b"001 SAM HAI";
+        let envelope = decode_request_envelope(request).unwrap();
+        assert_eq!(
+            envelope,
+            RequestEnvelope {
+                id: 1,
+                destination: b"SAM",
+                body: b"HAI",
+            }
+        );
+        assert_eq!(envelope.destination.as_ptr(), request[4..].as_ptr());
+        assert_eq!(envelope.body.as_ptr(), request[8..].as_ptr());
+
+        assert_eq!(
+            decode_request_envelope(b"002 LPC GET PIO2_3 OK?"),
+            Ok(RequestEnvelope {
+                id: 2,
+                destination: b"LPC",
+                body: b"GET PIO2_3 OK?",
+            })
+        );
+        assert_eq!(
+            decode_request_envelope(b"003 ABC WAT opaque body"),
+            Ok(RequestEnvelope {
+                id: 3,
+                destination: b"ABC",
+                body: b"WAT opaque body",
+            })
+        );
+        assert_eq!(
+            decode_response_envelope(b"002 LPC HYG PIO2_3 HIGH <3"),
+            Ok(ResponseEnvelope {
+                id: 2,
+                source: b"LPC",
+                body: b"HYG PIO2_3 HIGH <3",
+            })
+        );
+    }
+
+    #[test]
+    fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
+        let mut out = [0; MAX_PACKET_LEN];
+        let request = RequestEnvelope {
+            id: 999,
+            destination: b"ABC",
+            body: b"HAI",
+        };
+        let len = encode_request_envelope(request, &mut out).unwrap();
+        assert_eq!(&out[..len], b"999 ABC HAI\n");
+        assert_eq!(decode_request_envelope(&out[..len]), Ok(request));
+
+        let response = ResponseEnvelope {
+            id: 7,
+            source: b"SAM",
+            body: b"HII <3",
+        };
+        let len = encode_response_envelope(response, &mut out).unwrap();
+        assert_eq!(&out[..len], b"007 SAM HII <3\n");
+        assert_eq!(decode_response_envelope(&out[..len]), Ok(response));
+
+        for route in [b"".as_slice(), b"BAD ROUTE", b"BAD\nROUTE", b"\x01"] {
+            assert_eq!(
+                encode_request_envelope(
+                    RequestEnvelope {
+                        id: 1,
+                        destination: route,
+                        body: b"HAI",
+                    },
+                    &mut out,
+                ),
+                Err(EncodeError::InvalidRouteToken)
+            );
         }
     }
 
