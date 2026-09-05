@@ -1,5 +1,5 @@
 use crate::router::{FrameError, FrameLink};
-use da_vinci_protocol::{LineBuffer, LineError, MAX_PACKET_LEN};
+use da_vinci_protocol::{Frame, LineBuffer, LineError, MAX_PACKET_LEN};
 
 const RX_CAPACITY: usize = MAX_PACKET_LEN * 4;
 
@@ -16,7 +16,6 @@ pub trait NonBlockingBytes {
 pub struct FramedLink<B> {
     bytes: B,
     transport: FramedTransport,
-    frame: [u8; MAX_PACKET_LEN],
 }
 
 impl<B> FramedLink<B> {
@@ -24,7 +23,6 @@ impl<B> FramedLink<B> {
         Self {
             bytes,
             transport: FramedTransport::new(),
-            frame: [0; MAX_PACKET_LEN],
         }
     }
 }
@@ -46,20 +44,13 @@ impl<B: NonBlockingBytes> FrameLink for FramedLink<B> {
             .map_err(FrameError::from)
     }
 
-    fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError> {
+    fn try_receive(&mut self) -> Result<Option<Frame>, FrameError> {
         self.transport
             .poll(&mut self.bytes)
             .map_err(FrameError::from)?;
-        let len = match self.transport.next_frame(&mut self.frame) {
-            Ok(Some(len)) => len,
-            Ok(None) => return Ok(None),
-            Err(LineError::TooLong) => return Err(FrameError::InvalidFrame),
-        };
-        if len > out.len() {
-            return Err(FrameError::InvalidFrame);
-        }
-        out[..len].copy_from_slice(&self.frame[..len]);
-        Ok(Some(len))
+        self.transport
+            .next_frame()
+            .map_err(|LineError::TooLong| FrameError::InvalidFrame)
     }
 }
 
@@ -125,16 +116,17 @@ impl FramedTransport {
         Ok(())
     }
 
-    pub fn next_frame(
-        &mut self,
-        out: &mut [u8; MAX_PACKET_LEN],
-    ) -> Result<Option<usize>, LineError> {
+    pub fn next_frame(&mut self) -> Result<Option<Frame>, LineError> {
         while let Some(byte) = self.rx.pop() {
             match self.line.push(byte) {
                 Ok(Some(line)) => {
-                    out[..line.len()].copy_from_slice(line);
-                    out[line.len()] = b'\n';
-                    return Ok(Some(line.len() + 1));
+                    let mut bytes = [0; MAX_PACKET_LEN];
+                    bytes[..line.len()].copy_from_slice(line);
+                    bytes[line.len()] = b'\n';
+                    return Ok(Some(
+                        Frame::try_from(&bytes[..line.len() + 1])
+                            .expect("line buffer enforces protocol frame capacity"),
+                    ));
                 }
                 Ok(None) => {}
                 Err(error) => return Err(error),
@@ -269,10 +261,9 @@ mod tests {
     }
 
     fn frame(transport: &mut FramedTransport) -> Result<Option<Vec<u8>>, LineError> {
-        let mut out = [0; MAX_PACKET_LEN];
         transport
-            .next_frame(&mut out)
-            .map(|len| len.map(|len| out[..len].to_vec()))
+            .next_frame()
+            .map(|frame| frame.map(|frame| frame.as_ref().to_vec()))
     }
 
     #[test]
@@ -390,11 +381,10 @@ mod framed_link_tests {
 
         assert_eq!(link.try_send(b"200 LPC HAI\n"), Ok(()));
 
-        let mut received = [0; MAX_PACKET_LEN];
         let mut response = None;
         for _ in 0..8 {
-            if let Some(len) = link.try_receive(&mut received).unwrap() {
-                response = Some(received[..len].to_vec());
+            if let Some(frame) = link.try_receive().unwrap() {
+                response = Some(frame.as_ref().to_vec());
             }
         }
 

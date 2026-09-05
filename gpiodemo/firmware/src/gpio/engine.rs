@@ -752,7 +752,7 @@ mod tests {
 
     #[test]
     fn real_sam_map_stream_records_all_metadata_within_frame_limit() {
-        use da_vinci_protocol::{MAX_PACKET_LEN, encode_response};
+        use da_vinci_protocol::{Frame, Message};
 
         let mut firmware = Firmware::new(SAM_IDENTITY);
         let mut gpio = FakeHal::new(&SAM_PIN_MAP);
@@ -762,8 +762,11 @@ mod tests {
         let mut unavailable = 0;
 
         while let Some(current) = packet {
-            let mut frame = [0; MAX_PACKET_LEN];
-            encode_response(current, b"SAM", &mut frame).expect("every SAM MAP record must fit");
+            Frame::try_from(Message {
+                route: b"SAM".as_slice(),
+                packet: current,
+            })
+            .expect("every SAM MAP record must fit");
             match current.body {
                 Response::MapBank { .. } => banks += 1,
                 Response::MapPin { capabilities, .. } => {

@@ -1,6 +1,6 @@
 use da_vinci_protocol::{
-    DecodeError, DecodeErrorKind, MAX_PACKET_LEN, Packet, Response, ResponseError, decode_message,
-    decode_request, encode_response,
+    DecodeError, DecodeErrorKind, DecodedRequest, Frame, Message, Packet, RawMessage, Response,
+    ResponseError,
 };
 
 use crate::{
@@ -20,7 +20,6 @@ pub struct Node<'route, const N: usize> {
     firmware: Firmware,
     router: Router<'route, N>,
     upstream: FramedTransport,
-    frame: [u8; MAX_PACKET_LEN],
     source_cursor: usize,
 }
 
@@ -34,7 +33,6 @@ impl<'route, const N: usize> Node<'route, N> {
             firmware: Firmware::new(identity),
             router: Router::new(local_route, routes),
             upstream: FramedTransport::new(),
-            frame: [0; MAX_PACKET_LEN],
             source_cursor: REQUEST,
         }
     }
@@ -70,11 +68,11 @@ impl<'route, const N: usize> Node<'route, N> {
     }
 
     fn route_input(&mut self) -> bool {
-        let Some(len) = self.router.poll_upstream(&mut self.frame) else {
+        let Some(frame) = self.router.poll_upstream() else {
             return false;
         };
         self.upstream
-            .enqueue(&self.frame[..len])
+            .enqueue(frame.as_ref())
             .expect("routed frame fits idle upstream transport");
         true
     }
@@ -96,16 +94,15 @@ impl<'route, const N: usize> Node<'route, N> {
     }
 
     fn request<G: GpioHal>(&mut self, gpio: &mut G) -> bool {
-        let Ok(Some(len)) = self.upstream.next_frame(&mut self.frame) else {
+        let Ok(Some(frame)) = self.upstream.next_frame() else {
             return false;
         };
-        let frame = &self.frame[..len];
-        match decode_message(frame) {
+        match RawMessage::try_from(&frame) {
             Ok(envelope) => {
                 let firmware = &mut self.firmware;
-                let response = self.router.dispatch(frame, envelope, |body| {
-                    decode_request(body)
-                        .map(|packet| firmware.handle(packet, gpio))
+                let response = self.router.dispatch(frame.as_ref(), envelope, |raw| {
+                    Message::<&[u8], DecodedRequest<'_>>::try_from(raw)
+                        .map(|message| firmware.handle(message.packet, gpio))
                         .unwrap_or_else(|error| {
                             decode_error_response::<&[u8]>(error)
                                 .expect("local command decode errors keep their ID")
@@ -138,11 +135,13 @@ fn queue_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
     source: &[u8],
     packet: Packet<Response<T, D>>,
 ) {
-    let mut frame = [0; MAX_PACKET_LEN];
-    let len = encode_response(packet, source, &mut frame)
-        .expect("protocol response always fits fixed packet buffer");
+    let frame = Frame::try_from(Message {
+        route: source,
+        packet,
+    })
+    .expect("protocol response always fits fixed packet buffer");
     transport
-        .enqueue(&frame[..len])
+        .enqueue(frame.as_ref())
         .expect("response queued only while upstream transport is idle");
 }
 
@@ -292,12 +291,11 @@ mod tests {
             Ok(())
         }
 
-        fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError> {
-            let Some(frame) = self.incoming.borrow_mut().pop_front() else {
+        fn try_receive(&mut self) -> Result<Option<Frame>, FrameError> {
+            let Some(bytes) = self.incoming.borrow_mut().pop_front() else {
                 return Ok(None);
             };
-            out[..frame.len()].copy_from_slice(&frame);
-            Ok(Some(frame.len()))
+            Ok(Some(Frame::try_from(bytes.as_slice()).unwrap()))
         }
     }
 

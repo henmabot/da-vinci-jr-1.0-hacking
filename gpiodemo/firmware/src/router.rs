@@ -1,5 +1,5 @@
 use da_vinci_protocol::{
-    MAX_PACKET_LEN, Message, Packet, RawMessage, RequestId, Response, ResponseError,
+    Frame, MAX_PACKET_LEN, Message, Packet, RawMessage, RequestId, Response, ResponseError,
 };
 
 const ROUTE_QUEUE_CAPACITY: usize = 2;
@@ -13,7 +13,7 @@ pub enum FrameError {
 
 pub trait FrameLink {
     fn try_send(&mut self, frame: &[u8]) -> Result<(), FrameError>;
-    fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError>;
+    fn try_receive(&mut self) -> Result<Option<Frame>, FrameError>;
 }
 
 pub struct Route<'a> {
@@ -101,12 +101,12 @@ impl<'a> Route<'a> {
         }
     }
 
-    fn poll_receive(&mut self, out: &mut [u8]) -> Option<usize> {
+    fn poll_receive(&mut self) -> Option<Frame> {
         if self.down {
             return None;
         }
-        match self.link.try_receive(out) {
-            Ok(Some(len)) => Some(len),
+        match self.link.try_receive() {
+            Ok(Some(frame)) => Some(frame),
             Ok(None) | Err(FrameError::WouldBlock | FrameError::InvalidFrame) => None,
             Err(FrameError::Down) => {
                 self.down = true;
@@ -151,12 +151,12 @@ impl<'a, const N: usize> Router<'a, N> {
         local: F,
     ) -> Option<Packet<Response<T, &'frame [u8]>>>
     where
-        F: FnOnce(Packet<&'frame [u8]>) -> Packet<Response<T, &'frame [u8]>>,
+        F: FnOnce(RawMessage<'frame>) -> Packet<Response<T, &'frame [u8]>>,
     {
-        let Message { route, packet } = envelope;
-        if route == self.local_route {
-            return Some(local(packet));
+        if envelope.route == self.local_route {
+            return Some(local(envelope));
         }
+        let Message { route, packet } = envelope;
 
         let Some(route_link) = self
             .routes
@@ -205,16 +205,15 @@ impl<'a, const N: usize> Router<'a, N> {
         None
     }
 
-    pub fn poll_upstream(&mut self, out: &mut [u8; MAX_PACKET_LEN]) -> Option<usize> {
+    pub fn poll_upstream(&mut self) -> Option<Frame> {
         if N == 0 {
             return None;
         }
         for _ in 0..N {
             let index = self.receive_cursor;
             self.receive_cursor = (self.receive_cursor + 1) % N;
-            if let Some(len) = self.routes[index].poll_receive(out) {
-                debug_assert!(len <= out.len());
-                return Some(len);
+            if let Some(frame) = self.routes[index].poll_receive() {
+                return Some(frame);
             }
         }
         None
@@ -224,24 +223,17 @@ impl<'a, const N: usize> Router<'a, N> {
 #[derive(Clone, Copy)]
 struct QueuedFrame {
     id: RequestId,
-    bytes: [u8; MAX_PACKET_LEN],
-    len: usize,
+    frame: Frame,
 }
 
 impl QueuedFrame {
-    const EMPTY: Self = Self {
-        id: RequestId::FIRST,
-        bytes: [0; MAX_PACKET_LEN],
-        len: 0,
-    };
-
     fn frame(&self) -> &[u8] {
-        &self.bytes[..self.len]
+        self.frame.as_ref()
     }
 }
 
 struct FrameQueue {
-    frames: [QueuedFrame; ROUTE_QUEUE_CAPACITY],
+    frames: [Option<QueuedFrame>; ROUTE_QUEUE_CAPACITY],
     head: usize,
     len: usize,
 }
@@ -249,7 +241,7 @@ struct FrameQueue {
 impl FrameQueue {
     const fn new() -> Self {
         Self {
-            frames: [QueuedFrame::EMPTY; ROUTE_QUEUE_CAPACITY],
+            frames: [None; ROUTE_QUEUE_CAPACITY],
             head: 0,
             len: 0,
         }
@@ -263,22 +255,22 @@ impl FrameQueue {
         if self.len == ROUTE_QUEUE_CAPACITY {
             return Err(());
         }
-        debug_assert!(frame.len() <= MAX_PACKET_LEN);
         let index = (self.head + self.len) % ROUTE_QUEUE_CAPACITY;
-        self.frames[index].id = id;
-        self.frames[index].bytes[..frame.len()].copy_from_slice(frame);
-        self.frames[index].len = frame.len();
+        self.frames[index] = Some(QueuedFrame {
+            id,
+            frame: Frame::try_from(frame).map_err(|_| ())?,
+        });
         self.len += 1;
         Ok(())
     }
 
     fn front(&self) -> Option<&QueuedFrame> {
-        (self.len != 0).then(|| &self.frames[self.head])
+        self.frames[self.head].as_ref()
     }
 
     fn pop(&mut self) {
         debug_assert!(self.len != 0);
-        self.frames[self.head] = QueuedFrame::EMPTY;
+        self.frames[self.head] = None;
         self.head = (self.head + 1) % ROUTE_QUEUE_CAPACITY;
         self.len -= 1;
     }
@@ -289,7 +281,6 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use da_vinci_protocol::decode_message;
     use std::{
         cell::{Cell, RefCell},
         collections::VecDeque,
@@ -344,13 +335,11 @@ mod tests {
             }
         }
 
-        fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, FrameError> {
-            let Some(frame) = self.incoming.borrow_mut().pop_front() else {
+        fn try_receive(&mut self) -> Result<Option<Frame>, FrameError> {
+            let Some(bytes) = self.incoming.borrow_mut().pop_front() else {
                 return Ok(None);
             };
-            let len = frame.len();
-            out[..len].copy_from_slice(&frame);
-            Ok(Some(len))
+            Ok(Some(Frame::try_from(bytes.as_slice()).unwrap()))
         }
     }
 
@@ -361,7 +350,7 @@ mod tests {
     }
 
     fn envelope(frame: &[u8]) -> RawMessage<'_> {
-        decode_message(frame).unwrap()
+        RawMessage::try_from(frame).unwrap()
     }
 
     fn request_id(raw: u16) -> RequestId {
@@ -372,8 +361,8 @@ mod tests {
         router: &mut Router<'_, N>,
         frame: &'a [u8],
     ) -> Option<Packet<Response<&'a [u8], &'a [u8]>>> {
-        router.dispatch(frame, envelope(frame), |packet| Packet {
-            id: packet.id,
+        router.dispatch(frame, envelope(frame), |message| Packet {
+            id: message.packet.id,
             body: Response::Hello,
         })
     }
@@ -383,11 +372,11 @@ mod tests {
         let mut router = Router::new(b"SAM", []);
         let frame = b"010 SAM HAI\n";
         let response = router
-            .dispatch(frame, envelope(frame), |packet| {
-                assert_eq!(packet.id, request_id(10));
-                assert_eq!(packet.body, b"HAI");
+            .dispatch(frame, envelope(frame), |message| {
+                assert_eq!(message.packet.id, request_id(10));
+                assert_eq!(message.packet.body, b"HAI");
                 Packet {
-                    id: packet.id,
+                    id: message.packet.id,
                     body: Response::<&[u8], &[u8]>::Hello,
                 }
             })
@@ -529,11 +518,8 @@ mod tests {
             .incoming
             .borrow_mut()
             .extend([response.clone(), event.clone()]);
-        let mut out = [0; MAX_PACKET_LEN];
-        let len = router.poll_upstream(&mut out).unwrap();
-        assert_eq!(&out[..len], response);
-        let len = router.poll_upstream(&mut out).unwrap();
-        assert_eq!(&out[..len], event);
+        assert_eq!(router.poll_upstream().unwrap().as_ref(), response);
+        assert_eq!(router.poll_upstream().unwrap().as_ref(), event);
     }
 
     #[test]
@@ -561,12 +547,10 @@ mod tests {
             .incoming
             .borrow_mut()
             .push_back(response.clone());
-        let mut out = [0; MAX_PACKET_LEN];
         let mut sam = Router::new(
             b"SAM",
             [Route::new(b"LPC", &[b"LPC", b"ABC"], &mut sam_to_lpc)],
         );
-        let len = sam.poll_upstream(&mut out).unwrap();
-        assert_eq!(&out[..len], response);
+        assert_eq!(sam.poll_upstream().unwrap().as_ref(), response);
     }
 }
