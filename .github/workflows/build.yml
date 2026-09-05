@@ -1,8 +1,6 @@
 name: Build
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -23,7 +21,6 @@ jobs:
         run: just verify
 
   gui-macos:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +36,6 @@ jobs:
           if-no-files-found: error
 
   build:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
