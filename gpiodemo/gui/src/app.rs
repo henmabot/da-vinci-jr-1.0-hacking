@@ -490,10 +490,9 @@ impl App {
 
     pub(super) fn bulk_modes(&self) -> &'static [Mode] {
         let route = self.selected_route_key();
-        let pins = self.session.target_pins(route, self.bulk_scope.target);
         Mode::available_for_any(
-            pins.into_iter()
-                .filter_map(|pin| self.session.pin_info(pin).map(|info| info.capabilities())),
+            self.session
+                .target_capabilities(route, self.bulk_scope.target),
         )
     }
 

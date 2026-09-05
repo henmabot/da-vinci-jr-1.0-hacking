@@ -276,6 +276,106 @@ struct RouteMap {
     banks: Vec<String>,
     pins: Vec<RoutePin>,
 }
+impl RouteMap {
+    fn pin_key(&self, route: RouteKey, token: &[u8]) -> Option<PinKey> {
+        self.pins
+            .iter()
+            .position(|pin| pin.info.target().as_bytes() == token)
+            .map(|index| PinKey { route, index })
+    }
+
+    #[cfg(test)]
+    fn bank_key(&self, route: RouteKey, token: &str) -> Option<BankKey> {
+        self.banks
+            .iter()
+            .position(|bank| bank == token)
+            .map(|index| BankKey { route, index })
+    }
+
+    fn pin(&self, key: PinKey) -> Option<&RoutePin> {
+        self.pins.get(key.index)
+    }
+
+    fn pin_mut(&mut self, key: PinKey) -> Option<&mut RoutePin> {
+        self.pins.get_mut(key.index)
+    }
+
+    fn bank_token(&self, key: BankKey) -> Option<&str> {
+        self.banks.get(key.index).map(String::as_str)
+    }
+
+    fn pins(&self, route: RouteKey) -> impl Iterator<Item = (PinKey, &RoutePin)> {
+        self.pins
+            .iter()
+            .enumerate()
+            .map(move |(index, pin)| (PinKey { route, index }, pin))
+    }
+
+    fn banks(&self, route: RouteKey) -> impl Iterator<Item = (BankKey, &str)> {
+        self.banks
+            .iter()
+            .enumerate()
+            .map(move |(index, bank)| (BankKey { route, index }, bank.as_str()))
+    }
+
+    fn contains_target(route: RouteKey, target: Target, index: usize, bank: BankKey) -> bool {
+        match target {
+            Target::Pin(pin) => pin.route == route && pin.index == index,
+            Target::Bank(target_bank) => target_bank == bank,
+            Target::All => true,
+        }
+    }
+
+    fn pins_for(
+        &self,
+        route: RouteKey,
+        target: Target,
+    ) -> impl Iterator<Item = (PinKey, &RoutePin)> {
+        self.pins(route).filter(move |(key, pin)| {
+            Self::contains_target(route, target, key.index, *pin.info.bank())
+        })
+    }
+
+    fn for_target_mut(
+        &mut self,
+        route: RouteKey,
+        target: Target,
+        mut apply: impl FnMut(PinKey, &mut RoutePin),
+    ) {
+        for (index, pin) in self.pins.iter_mut().enumerate() {
+            if Self::contains_target(route, target, index, *pin.info.bank()) {
+                apply(PinKey { route, index }, pin);
+            }
+        }
+    }
+
+    fn target_has_pending(&self, route: RouteKey, target: Target) -> bool {
+        self.pins_for(route, target)
+            .any(|(_, pin)| pin.state.target_mode.is_some() || pin.state.listener.is_pending())
+    }
+
+    fn target_has_listener(&self, route: RouteKey, target: Target) -> bool {
+        self.pins_for(route, target)
+            .any(|(_, pin)| pin.state.listener.stream_id().is_some())
+    }
+
+    fn pending_mode(&self, route: RouteKey, target: Target) -> Option<Mode> {
+        self.pins_for(route, target)
+            .find_map(|(_, pin)| pin.state.target_mode)
+    }
+
+    fn uses_listener_id(&self, id: RequestId) -> bool {
+        self.pins
+            .iter()
+            .any(|pin| pin.state.listener.stream_id() == Some(id))
+    }
+
+    fn reset_pin_states(&mut self) {
+        for pin in &mut self.pins {
+            pin.state = PinState::UNSET;
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct MapBuilder {
@@ -412,10 +512,7 @@ impl DeviceSession {
             .get(route.0)?
             .map
             .as_ref()?
-            .pins
-            .iter()
-            .position(|pin| pin.info.target() == token)
-            .map(|index| PinKey { route, index })
+            .pin_key(route, token.as_bytes())
     }
 
     #[cfg(test)]
@@ -424,10 +521,7 @@ impl DeviceSession {
             .get(route.0)?
             .map
             .as_ref()?
-            .banks
-            .iter()
-            .position(|bank| bank == token)
-            .map(|index| BankKey { route, index })
+            .bank_key(route, token)
     }
 
     pub(super) fn pin_info(&self, pin: PinKey) -> Option<&PinInfo> {
@@ -435,8 +529,7 @@ impl DeviceSession {
             .get(pin.route.0)?
             .map
             .as_ref()?
-            .pins
-            .get(pin.index)
+            .pin(pin)
             .map(|pin| &pin.info)
     }
 
@@ -445,41 +538,34 @@ impl DeviceSession {
             .get(bank.route.0)?
             .map
             .as_ref()?
-            .banks
-            .get(bank.index)
-            .map(String::as_str)
+            .bank_token(bank)
     }
 
     pub(super) fn pins(&self, route: RouteKey) -> impl Iterator<Item = (PinKey, &PinInfo)> {
         self.routes[route.0]
             .map
             .iter()
-            .flat_map(|map| map.pins.iter().enumerate())
-            .map(move |(index, pin)| (PinKey { route, index }, &pin.info))
+            .flat_map(move |map| map.pins(route))
+            .map(|(key, pin)| (key, &pin.info))
     }
 
     pub(super) fn banks(&self, route: RouteKey) -> impl Iterator<Item = (BankKey, &str)> {
         self.routes[route.0]
             .map
             .iter()
-            .flat_map(|map| map.banks.iter().enumerate())
-            .map(move |(index, bank)| (BankKey { route, index }, bank.as_str()))
+            .flat_map(move |map| map.banks(route))
     }
 
-    pub(super) fn target_pins(&self, route: RouteKey, target: Target) -> Vec<PinKey> {
-        let Some(map) = self
-            .routes
-            .get(route.0)
-            .and_then(|route| route.map.as_ref())
-        else {
-            return Vec::new();
-        };
-        map.pins
+    pub(super) fn target_capabilities(
+        &self,
+        route: RouteKey,
+        target: Target,
+    ) -> impl Iterator<Item = PinCapabilities> {
+        self.routes[route.0]
+            .map
             .iter()
-            .enumerate()
-            .filter(|(index, pin)| target_contains(route, target, *index, *pin.info.bank()))
-            .map(|(index, _)| PinKey { route, index })
-            .collect()
+            .flat_map(move |map| map.pins_for(route, target))
+            .map(|(_, pin)| pin.info.capabilities())
     }
 
     pub(super) fn pin_state(&self, pin: PinKey) -> Option<PinState> {
@@ -487,13 +573,17 @@ impl DeviceSession {
             .get(pin.route.0)?
             .map
             .as_ref()?
-            .pins
-            .get(pin.index)
+            .pin(pin)
             .map(|pin| pin.state)
     }
 
     pub(super) fn change_mode(&mut self, pin: PinKey, mode: Mode) -> Result<Vec<String>, String> {
-        let Some(route_pin) = self.route_pin(pin) else {
+        let Some(route_pin) = self
+            .routes
+            .get(pin.route.0)
+            .and_then(|route| route.map.as_ref())
+            .and_then(|map| map.pin(pin))
+        else {
             return Err("Unknown pin key".into());
         };
         if !mode.supported_by(route_pin.info.capabilities())
@@ -555,14 +645,30 @@ impl DeviceSession {
         overwrite: bool,
     ) -> Result<Vec<String>, String> {
         if overwrite {
-            if self.target_has_pending(route, target) {
+            if self.routes[route.0]
+                .map
+                .as_ref()
+                .is_some_and(|map| map.target_has_pending(route, target))
+            {
                 return Ok(Vec::new());
             }
             let mut sent = Vec::with_capacity(2);
-            if mode == Mode::Output && self.target_has_listener(route, target) {
+            if mode == Mode::Output
+                && self.routes[route.0]
+                    .map
+                    .as_ref()
+                    .is_some_and(|map| map.target_has_listener(route, target))
+            {
                 sent.extend(self.set_listener_scope(route, target, false)?);
             }
-            self.mark_mode_pending(route, target, mode);
+            if let Some(map) = self.routes[route.0].map.as_mut() {
+                map.for_target_mut(route, target, |_, pin| {
+                    if pin.info.capabilities().available() {
+                        pin.state.target_mode = Some(mode);
+                        pin.state.level = None;
+                    }
+                });
+            }
             let request = Request::Direction {
                 target,
                 direction: mode.direction(),
@@ -571,20 +677,21 @@ impl DeviceSession {
             return Ok(sent);
         }
 
-        let mut sent = Vec::new();
-        for pin in self.target_pins(route, target) {
-            let Some(route_pin) = self.route_pin(pin) else {
-                continue;
-            };
-            if !route_pin.info.capabilities().available()
-                || route_pin.state.mode.is_some()
-                || route_pin.state.target_mode.is_some()
-            {
-                continue;
-            }
-            let state = &mut self.route_pin_mut(pin).unwrap().state;
-            state.target_mode = Some(mode);
-            state.level = None;
+        let mut pins = Vec::new();
+        if let Some(map) = self.routes[route.0].map.as_mut() {
+            map.for_target_mut(route, target, |key, pin| {
+                if pin.info.capabilities().available()
+                    && pin.state.mode.is_none()
+                    && pin.state.target_mode.is_none()
+                {
+                    pin.state.target_mode = Some(mode);
+                    pin.state.level = None;
+                    pins.push(key);
+                }
+            });
+        }
+        let mut sent = Vec::with_capacity(pins.len());
+        for pin in pins {
             let request = Request::Direction {
                 target: Target::Pin(pin),
                 direction: mode.direction(),
@@ -599,12 +706,12 @@ impl DeviceSession {
         route: RouteKey,
         target: Target,
     ) -> Result<Vec<String>, String> {
-        for pin in self.target_pins(route, target) {
-            if let Some(route_pin) = self.route_pin_mut(pin)
-                && route_pin.state.mode.is_some()
-            {
-                route_pin.state.value_pending = true;
-            }
+        if let Some(map) = self.routes[route.0].map.as_mut() {
+            map.for_target_mut(route, target, |_, pin| {
+                if pin.state.mode.is_some() {
+                    pin.state.value_pending = true;
+                }
+            });
         }
         let request = Request::Get { target };
         self.send(route, request).map(|line| vec![line])
@@ -621,23 +728,25 @@ impl DeviceSession {
             state: enabled.into(),
         };
         let (id, line) = self.send_tracked(route, request)?;
-        self.for_target_pins_mut(route, target, |pin| {
-            if !pin.state.mode.is_some_and(Mode::is_input) {
-                return;
-            }
-            pin.state.listener = if enabled {
-                ListenerState::Enabling { request_id: id }
-            } else {
-                match pin.state.listener {
-                    ListenerState::On { stream_id }
-                    | ListenerState::Disabling { stream_id, .. } => ListenerState::Disabling {
-                        request_id: id,
-                        stream_id,
-                    },
-                    state => state,
+        if let Some(map) = self.routes[route.0].map.as_mut() {
+            map.for_target_mut(route, target, |_, pin| {
+                if !pin.state.mode.is_some_and(Mode::is_input) {
+                    return;
                 }
-            };
-        });
+                pin.state.listener = if enabled {
+                    ListenerState::Enabling { request_id: id }
+                } else {
+                    match pin.state.listener {
+                        ListenerState::On { stream_id }
+                        | ListenerState::Disabling { stream_id, .. } => ListenerState::Disabling {
+                            request_id: id,
+                            stream_id,
+                        },
+                        state => state,
+                    }
+                };
+            });
+        }
         Ok(vec![line])
     }
 
@@ -647,95 +756,53 @@ impl DeviceSession {
         target: Target,
         level: Level,
     ) -> Result<Vec<String>, String> {
-        for pin in self.target_pins(route, target) {
-            if let Some(route_pin) = self.route_pin_mut(pin)
-                && route_pin.state.mode == Some(Mode::Output)
-            {
-                route_pin.state.value_pending = true;
-            }
+        if let Some(map) = self.routes[route.0].map.as_mut() {
+            map.for_target_mut(route, target, |_, pin| {
+                if pin.state.mode == Some(Mode::Output) {
+                    pin.state.value_pending = true;
+                }
+            });
         }
         let request = Request::Set { target, level };
         self.send(route, request).map(|line| vec![line])
     }
 
-    fn route_pin(&self, pin: PinKey) -> Option<&RoutePin> {
-        self.routes
-            .get(pin.route.0)?
-            .map
-            .as_ref()?
-            .pins
-            .get(pin.index)
-    }
-
-    fn route_pin_mut(&mut self, pin: PinKey) -> Option<&mut RoutePin> {
-        self.routes
-            .get_mut(pin.route.0)?
-            .map
-            .as_mut()?
-            .pins
-            .get_mut(pin.index)
-    }
-
-    fn target_has_pending(&self, route: RouteKey, target: Target) -> bool {
-        self.target_pins(route, target).into_iter().any(|pin| {
-            self.pin_state(pin)
-                .is_some_and(|state| state.target_mode.is_some() || state.listener.is_pending())
-        })
-    }
-
-    fn target_has_listener(&self, route: RouteKey, target: Target) -> bool {
-        self.target_pins(route, target).into_iter().any(|pin| {
-            self.pin_state(pin)
-                .is_some_and(|state| state.listener.stream_id().is_some())
-        })
-    }
-
-    fn mark_mode_pending(&mut self, route: RouteKey, target: Target, mode: Mode) {
-        for pin in self.target_pins(route, target) {
-            let available = self
-                .route_pin(pin)
-                .is_some_and(|pin| pin.info.capabilities().available());
-            if available && let Some(pin) = self.route_pin_mut(pin) {
-                pin.state.target_mode = Some(mode);
-                pin.state.level = None;
-            }
-        }
-    }
-
     fn fail_request_state(&mut self, id: RequestId, route: RouteKey, request: Request) {
         match request {
             Request::Direction { target, .. } | Request::Pullup { target, .. } => {
-                for pin in self.target_pins(route, target) {
-                    if let Some(pin) = self.route_pin_mut(pin) {
+                if let Some(map) = self.routes[route.0].map.as_mut() {
+                    map.for_target_mut(route, target, |_, pin| {
                         pin.state.target_mode = None;
-                    }
+                    });
                 }
             }
             Request::Get { target } | Request::Set { target, .. } => {
-                for pin in self.target_pins(route, target) {
-                    if let Some(pin) = self.route_pin_mut(pin) {
+                if let Some(map) = self.routes[route.0].map.as_mut() {
+                    map.for_target_mut(route, target, |_, pin| {
                         pin.state.value_pending = false;
-                    }
+                    });
                 }
             }
             Request::Listen { target, state } => {
-                self.for_target_pins_mut(route, target, |pin| {
-                    pin.state.listener = match (state, pin.state.listener) {
-                        (Toggle::On, ListenerState::Enabling { request_id })
-                            if request_id == id =>
-                        {
-                            ListenerState::Off
-                        }
-                        (
-                            Toggle::Off,
-                            ListenerState::Disabling {
-                                request_id,
-                                stream_id,
-                            },
-                        ) if request_id == id => ListenerState::On { stream_id },
-                        (_, listener) => listener,
-                    };
-                });
+                if let Some(map) = self.routes[route.0].map.as_mut() {
+                    map.for_target_mut(route, target, |_, pin| {
+                        pin.state.listener = match (state, pin.state.listener) {
+                            (Toggle::On, ListenerState::Enabling { request_id })
+                                if request_id == id =>
+                            {
+                                ListenerState::Off
+                            }
+                            (
+                                Toggle::Off,
+                                ListenerState::Disabling {
+                                    request_id,
+                                    stream_id,
+                                },
+                            ) if request_id == id => ListenerState::On { stream_id },
+                            (_, listener) => listener,
+                        };
+                    });
+                }
             }
             _ => {}
         }
@@ -762,6 +829,11 @@ impl DeviceSession {
             })
             .collect();
         self.routes[route.0].map = Some(RouteMap { banks, pins });
+    }
+
+    #[cfg(test)]
+    fn route_pin_mut(&mut self, pin: PinKey) -> Option<&mut RoutePin> {
+        self.routes.get_mut(pin.route.0)?.map.as_mut()?.pin_mut(pin)
     }
 
     pub(super) fn available_ports() -> Result<Vec<PortInfo>, String> {
@@ -915,11 +987,10 @@ impl DeviceSession {
     fn request_id_in_use(&self, id: RequestId) -> bool {
         self.pending[id.slot()].is_some()
             || self.routes.iter().any(|route| {
-                route.map.as_ref().is_some_and(|map| {
-                    map.pins
-                        .iter()
-                        .any(|pin| pin.state.listener.stream_id() == Some(id))
-                })
+                route
+                    .map
+                    .as_ref()
+                    .is_some_and(|map| map.uses_listener_id(id))
             })
     }
 
@@ -1006,7 +1077,11 @@ impl DeviceSession {
                         return Err(error);
                     }
                 };
-                if let Some(route_pin) = self.route_pin_mut(pin) {
+                if let Some(route_pin) = self.routes[pending.route.0]
+                    .map
+                    .as_mut()
+                    .and_then(|map| map.pin_mut(pin))
+                {
                     route_pin.state.level = Some(level);
                     route_pin.state.value_pending = false;
                 }
@@ -1077,13 +1152,8 @@ impl DeviceSession {
         let pin = self
             .routes
             .get(route.0)
-            .and_then(|route| route.map.as_ref())
-            .and_then(|map| {
-                map.pins
-                    .iter()
-                    .position(|pin| pin.info.target().as_bytes() == token)
-            })
-            .map(|index| PinKey { route, index });
+            .and_then(|route_state| route_state.map.as_ref())
+            .and_then(|map| map.pin_key(route, token));
         pin.ok_or_else(|| {
             format!(
                 "{} response referenced undiscovered pin {}",
@@ -1115,8 +1185,8 @@ impl DeviceSession {
                         state: (mode == Mode::InputPullup).into(),
                     };
                     follow_up = Some(request);
-                } else {
-                    self.for_target_pins_mut(pending.route, target, |pin| {
+                } else if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                    map.for_target_mut(pending.route, target, |_, pin| {
                         if pin.info.capabilities().supports_direction(direction) {
                             pin.state.mode = Some(if direction == Direction::Input {
                                 Mode::Input
@@ -1131,46 +1201,52 @@ impl DeviceSession {
             }
             Request::Pullup { target, .. } => {
                 let mut read = false;
-                self.for_target_pins_mut(pending.route, target, |pin| {
-                    if let Some(mode) = pin.state.target_mode.take() {
-                        pin.state.mode = Some(mode);
-                        if mode.is_input() {
-                            pin.state.value_pending = true;
-                            read = true;
-                        } else {
-                            pin.state.level = Some(Level::Low);
-                            pin.state.value_pending = false;
+                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                    map.for_target_mut(pending.route, target, |_, pin| {
+                        if let Some(mode) = pin.state.target_mode.take() {
+                            pin.state.mode = Some(mode);
+                            if mode.is_input() {
+                                pin.state.value_pending = true;
+                                read = true;
+                            } else {
+                                pin.state.level = Some(Level::Low);
+                                pin.state.value_pending = false;
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 if read {
                     follow_up = Some(Request::Get { target });
                 }
             }
             Request::Set { target, level } => {
-                self.for_target_pins_mut(pending.route, target, |pin| {
-                    if pin.state.mode == Some(Mode::Output) {
-                        pin.state.level = Some(level);
-                        pin.state.value_pending = false;
-                    }
-                });
+                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                    map.for_target_mut(pending.route, target, |_, pin| {
+                        if pin.state.mode == Some(Mode::Output) {
+                            pin.state.level = Some(level);
+                            pin.state.value_pending = false;
+                        }
+                    });
+                }
             }
             Request::Listen { target, state } => {
-                self.for_target_pins_mut(pending.route, target, |pin| {
-                    pin.state.listener = match (state, pin.state.listener) {
-                        (Toggle::On, ListenerState::Enabling { request_id })
-                            if request_id == id =>
-                        {
-                            ListenerState::On { stream_id: id }
-                        }
-                        (Toggle::Off, ListenerState::Disabling { request_id, .. })
-                            if request_id == id =>
-                        {
-                            ListenerState::Off
-                        }
-                        (_, listener) => listener,
-                    };
-                });
+                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                    map.for_target_mut(pending.route, target, |_, pin| {
+                        pin.state.listener = match (state, pin.state.listener) {
+                            (Toggle::On, ListenerState::Enabling { request_id })
+                                if request_id == id =>
+                            {
+                                ListenerState::On { stream_id: id }
+                            }
+                            (Toggle::Off, ListenerState::Disabling { request_id, .. })
+                                if request_id == id =>
+                            {
+                                ListenerState::Off
+                            }
+                            (_, listener) => listener,
+                        };
+                    });
+                }
                 self.sync_listeners();
             }
             _ => {}
@@ -1187,13 +1263,18 @@ impl DeviceSession {
     }
 
     fn pending_mode(&self, route: RouteKey, target: Target) -> Option<Mode> {
-        self.target_pins(route, target)
-            .into_iter()
-            .find_map(|pin| self.pin_state(pin).and_then(|state| state.target_mode))
+        self.routes[route.0]
+            .map
+            .as_ref()
+            .and_then(|map| map.pending_mode(route, target))
     }
 
     fn apply_query_state(&mut self, pin: PinKey, what: Query, value: QueryValue) {
-        let Some(route_pin) = self.route_pin_mut(pin) else {
+        let Some(route_pin) = self.routes[pin.route.0]
+            .map
+            .as_mut()
+            .and_then(|map| map.pin_mut(pin))
+        else {
             return;
         };
         match (what, value) {
@@ -1232,27 +1313,11 @@ impl DeviceSession {
         }
     }
 
-    fn for_target_pins_mut(
-        &mut self,
-        route: RouteKey,
-        target: Target,
-        mut apply: impl FnMut(&mut RoutePin),
-    ) {
-        let Some(map) = self.routes[route.0].map.as_mut() else {
-            return;
-        };
-        for (index, pin) in map.pins.iter_mut().enumerate() {
-            if target_contains(route, target, index, *pin.info.bank()) {
-                apply(pin);
-            }
-        }
-    }
-
     fn listener_is_active(&self, pin: PinKey, id: RequestId) -> bool {
         self.routes
             .get(pin.route.0)
             .and_then(|route| route.map.as_ref())
-            .and_then(|map| map.pins.get(pin.index))
+            .and_then(|map| map.pin(pin))
             .is_some_and(|pin| pin.state.listener.stream_id() == Some(id))
     }
 
@@ -1267,7 +1332,13 @@ impl DeviceSession {
                 if !self.listener_is_active(pin, value.id) {
                     return None;
                 }
-                self.route_pin_mut(pin)?.state.level = Some(value.level);
+                self.routes
+                    .get_mut(pin.route.0)?
+                    .map
+                    .as_mut()?
+                    .pin_mut(pin)?
+                    .state
+                    .level = Some(value.level);
                 Some(ListenerValue {
                     line: frame_text(&value.line),
                     id: value.id,
@@ -1305,9 +1376,7 @@ impl DeviceSession {
 
     fn reset_route(&mut self, route: RouteKey) {
         if let Some(map) = self.routes[route.0].map.as_mut() {
-            for pin in &mut map.pins {
-                pin.state = PinState::UNSET;
-            }
+            map.reset_pin_states();
         }
         self.routes[route.0].discovery = None;
         for pending in &mut self.pending {
@@ -1333,18 +1402,16 @@ impl DeviceSession {
             .iter()
             .enumerate()
             .map(|(route_index, route)| {
-                let pin_count = route.map.as_ref().map_or(0, |map| map.pins.len());
+                let route_key = RouteKey(route_index);
+                let pin_count = route
+                    .map
+                    .as_ref()
+                    .map_or(0, |map| map.pins(route_key).count());
                 let pins = route.map.as_ref().map_or_else(Vec::new, |map| {
-                    map.pins
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, pin)| {
+                    map.pins(route_key)
+                        .filter_map(|(key, pin)| {
                             pin.state.listener.stream_id().map(|id| ListenerPin {
-                                key: PinKey {
-                                    route: RouteKey(route_index),
-                                    index,
-                                }
-                                .into(),
+                                key: key.into(),
                                 token: pin.info.target().as_bytes().into(),
                                 id,
                             })
@@ -1359,14 +1426,6 @@ impl DeviceSession {
             })
             .collect();
         self.io.set_listeners(routes);
-    }
-}
-
-fn target_contains(route: RouteKey, target: Target, pin_index: usize, bank: BankKey) -> bool {
-    match target {
-        Target::Pin(pin) => pin.route == route && pin.index == pin_index,
-        Target::Bank(target) => target == bank,
-        Target::All => true,
     }
 }
 
