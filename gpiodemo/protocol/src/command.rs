@@ -1,18 +1,33 @@
 use core::fmt;
 
-macro_rules! fixed_wire_enum {
+macro_rules! wire_enum {
     (
         $vis:vis enum $name:ident {
+            $($variant:ident => $wire:literal),+ $(,)?
+        }
+        ; all
+    ) => {
+        wire_enum!(@define $vis enum $name { $($variant => $wire),+ });
+
+        impl $name {
+            $vis const ALL: &'static [Self] = &[$(Self::$variant),+];
+        }
+    };
+    (
+        $vis:vis enum $name:ident {
+            $($variant:ident => $wire:literal),+ $(,)?
+        }
+    ) => {
+        wire_enum!(@define $vis enum $name { $($variant => $wire),+ });
+    };
+    (
+        @define $vis:vis enum $name:ident {
             $($variant:ident => $wire:literal),+ $(,)?
         }
     ) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         $vis enum $name {
             $($variant),+
-        }
-
-        impl $name {
-            $vis const ALL: &'static [Self] = &[$(Self::$variant),+];
         }
 
         impl AsRef<[u8]> for $name {
@@ -49,7 +64,7 @@ impl core::error::Error for ParseTokenError {}
 
 pub const PROTOCOL_VERSION: u16 = 1;
 
-fixed_wire_enum! {
+wire_enum! {
     pub enum Command {
         Hello => b"HAI",
         Status => b"HRU",
@@ -64,23 +79,13 @@ fixed_wire_enum! {
         Version => b"VER",
         Help => b"HLP",
     }
+    ; all
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
-    Input,
-    Output,
-}
-
-impl TryFrom<&[u8]> for Direction {
-    type Error = ParseTokenError;
-
-    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
-        match token {
-            b"IN" => Ok(Self::Input),
-            b"OUT" => Ok(Self::Output),
-            _ => Err(ParseTokenError),
-        }
+wire_enum! {
+    pub enum Direction {
+        Input => b"IN",
+        Output => b"OUT",
     }
 }
 
@@ -156,41 +161,38 @@ impl TryFrom<&[u8]> for PinCapabilities {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Query {
-    Direction,
-    Pullup,
-    Listen,
-}
-
-impl TryFrom<&[u8]> for Query {
-    type Error = ParseTokenError;
-
-    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
-        match token {
-            b"DIR" => Ok(Self::Direction),
-            b"PLL" => Ok(Self::Pullup),
-            b"LSN" => Ok(Self::Listen),
-            _ => Err(ParseTokenError),
-        }
+wire_enum! {
+    pub enum Query {
+        Direction => b"DIR",
+        Pullup => b"PLL",
+        Listen => b"LSN",
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Level {
-    Low,
-    High,
+wire_enum! {
+    pub enum Level {
+        Low => b"LOW",
+        High => b"HIGH",
+    }
 }
 
-impl TryFrom<&[u8]> for Level {
-    type Error = ParseTokenError;
+wire_enum! {
+    pub enum Toggle {
+        Off => b"OFF",
+        On => b"ON",
+    }
+}
 
-    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
-        match token {
-            b"LOW" => Ok(Self::Low),
-            b"HIGH" => Ok(Self::High),
-            _ => Err(ParseTokenError),
-        }
+impl From<bool> for Toggle {
+    fn from(enabled: bool) -> Self {
+        if enabled { Self::On } else { Self::Off }
+    }
+}
+
+wire_enum! {
+    pub enum TargetError {
+        Unset => b"UNSET",
+        Unavailable => b"UNAVAILABLE",
     }
 }
 
@@ -198,7 +200,7 @@ impl TryFrom<&[u8]> for Level {
 pub enum QueryValue {
     Unset,
     Direction(Direction),
-    Enabled(bool),
+    Toggle(Toggle),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,8 +211,8 @@ pub enum Request<T> {
     Direction { target: T, direction: Direction },
     Get { target: T },
     Set { target: T, level: Level },
-    Pullup { target: T, enabled: bool },
-    Listen { target: T, enabled: bool },
+    Pullup { target: T, state: Toggle },
+    Listen { target: T, state: Toggle },
     Query { target: T, what: Query },
     Bye,
     Version,
@@ -234,13 +236,13 @@ impl<T> Request<T> {
                 target: map(target),
                 level,
             },
-            Self::Pullup { target, enabled } => Request::Pullup {
+            Self::Pullup { target, state } => Request::Pullup {
                 target: map(target),
-                enabled,
+                state,
             },
-            Self::Listen { target, enabled } => Request::Listen {
+            Self::Listen { target, state } => Request::Listen {
                 target: map(target),
-                enabled,
+                state,
             },
             Self::Query { target, what } => Request::Query {
                 target: map(target),
@@ -271,13 +273,13 @@ impl<T> Request<T> {
                 target: map(target)?,
                 level,
             },
-            Self::Pullup { target, enabled } => Request::Pullup {
+            Self::Pullup { target, state } => Request::Pullup {
                 target: map(target)?,
-                enabled,
+                state,
             },
-            Self::Listen { target, enabled } => Request::Listen {
+            Self::Listen { target, state } => Request::Listen {
                 target: map(target)?,
-                enabled,
+                state,
             },
             Self::Query { target, what } => Request::Query {
                 target: map(target)?,
@@ -288,12 +290,6 @@ impl<T> Request<T> {
             Self::Help => Request::Help,
         })
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TargetError {
-    Unset,
-    Unavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

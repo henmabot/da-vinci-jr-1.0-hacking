@@ -3,7 +3,7 @@ use std::{array, fmt};
 use da_vinci_protocol::{
     Command, DecodeError, Direction, Level, MAX_PACKET_LEN, Packet, PinCapabilities, Query,
     QueryValue, Request as ProtocolRequest, RequestId, ResponseError as ProtocolResponseError,
-    encode_request,
+    Toggle, encode_request,
 };
 
 use crate::io::{
@@ -465,7 +465,7 @@ impl DeviceSession {
             self.route_pin_mut(pin).unwrap().state.listener = ListenerState::Disabling;
             let request = Request::Listen {
                 target: Target::Pin(pin),
-                enabled: false,
+                state: Toggle::Off,
             };
             sent.push(self.send(route, request)?);
         }
@@ -533,7 +533,7 @@ impl DeviceSession {
         self.route_pin_mut(pin).unwrap().state.listener = pending;
         let request = Request::Listen {
             target: Target::Pin(pin),
-            enabled,
+            state: enabled.into(),
         };
         self.send(route, request).map(|line| vec![line])
     }
@@ -554,7 +554,7 @@ impl DeviceSession {
                 self.mark_listener_pending(route, target, false);
                 let request = Request::Listen {
                     target,
-                    enabled: false,
+                    state: Toggle::Off,
                 };
                 sent.push(self.send(route, request)?);
             }
@@ -613,7 +613,10 @@ impl DeviceSession {
         enabled: bool,
     ) -> Result<Vec<String>, String> {
         self.mark_listener_pending(route, target, enabled);
-        let request = Request::Listen { target, enabled };
+        let request = Request::Listen {
+            target,
+            state: enabled.into(),
+        };
         self.send(route, request).map(|line| vec![line])
     }
 
@@ -708,12 +711,12 @@ impl DeviceSession {
                     }
                 }
             }
-            Request::Listen { target, enabled } => {
+            Request::Listen { target, state } => {
                 for pin in self.target_pins(route, target) {
                     if let Some(pin) = self.route_pin_mut(pin)
                         && pin.state.mode.is_some()
                     {
-                        pin.state.listener = if enabled {
+                        pin.state.listener = if state == Toggle::On {
                             ListenerState::Off
                         } else {
                             ListenerState::On
@@ -1075,7 +1078,7 @@ impl DeviceSession {
                 if let Some(mode) = self.pending_mode(pending.route, target) {
                     let request = Request::Pullup {
                         target,
-                        enabled: mode == Mode::InputPullup,
+                        state: (mode == Mode::InputPullup).into(),
                     };
                     follow_up = Some(request);
                 } else {
@@ -1118,9 +1121,9 @@ impl DeviceSession {
                     }
                 });
             }
-            Request::Listen { target, enabled } => {
+            Request::Listen { target, state } => {
                 let previous = self.listener_ids(pending.route, target);
-                if enabled {
+                if state == Toggle::On {
                     self.for_target_pins_mut(pending.route, target, |pin| {
                         if pin.state.mode.is_some_and(Mode::is_input)
                             && pin.info.capabilities.input()
@@ -1174,12 +1177,12 @@ impl DeviceSession {
             (Query::Direction, QueryValue::Direction(Direction::Output)) => {
                 route_pin.state.mode = Some(Mode::Output);
             }
-            (Query::Pullup, QueryValue::Enabled(true))
+            (Query::Pullup, QueryValue::Toggle(Toggle::On))
                 if route_pin.state.mode.is_some_and(Mode::is_input) =>
             {
                 route_pin.state.mode = Some(Mode::InputPullup);
             }
-            (Query::Pullup, QueryValue::Enabled(false))
+            (Query::Pullup, QueryValue::Toggle(Toggle::Off))
                 if route_pin.state.mode.is_some_and(Mode::is_input) =>
             {
                 route_pin.state.mode = Some(Mode::Input);
@@ -1389,7 +1392,9 @@ fn request_lifetime(request: Request) -> RequestLifetime {
             target: Target::Bank(_) | Target::All,
             ..
         } => RequestLifetime::StreamUntilAck,
-        Request::Listen { enabled: true, .. } => RequestLifetime::PersistentListener,
+        Request::Listen {
+            state: Toggle::On, ..
+        } => RequestLifetime::PersistentListener,
         _ => RequestLifetime::OneShot,
     }
 }
@@ -2063,7 +2068,7 @@ mod tests {
 
         let listen = Request::Listen {
             target: Target::Pin(pa00),
-            enabled: true,
+            state: Toggle::On,
         };
         let (listen_id, _) = connection.prepare(sam, listen).unwrap();
         connection
@@ -2124,7 +2129,7 @@ mod tests {
                 sam,
                 Request::Listen {
                     target: Target::Pin(pa00),
-                    enabled: true,
+                    state: Toggle::On,
                 },
             )
             .unwrap();

@@ -1,7 +1,7 @@
 use crate::{
     command::{
         Command, DecodedRequest, DecodedResponse, Direction, Level, Query, QueryValue, Request,
-        Response, ResponseError, TargetError,
+        Response, ResponseError, TargetError, Toggle,
     },
     framing::MAX_PACKET_LEN,
     message::{Message, Packet, RequestId, parse_packet_id, valid_route_token},
@@ -107,17 +107,15 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
         }
         Command::Pullup => {
             let target = next_target(&mut tokens, malformed())?;
-            let enabled =
-                parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
+            let state: Toggle = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Pullup { target, enabled }
+            Request::Pullup { target, state }
         }
         Command::Listen => {
             let target = next_target(&mut tokens, malformed())?;
-            let enabled =
-                parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
+            let state: Toggle = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
-            Request::Listen { target, enabled }
+            Request::Listen { target, state }
         }
         Command::Query => {
             let target = next_target(&mut tokens, malformed())?;
@@ -227,11 +225,7 @@ pub fn decode_response(message: Message<'_>) -> Result<Packet<DecodedResponse<'_
                     ResponseError::RouteDown { next_hop }
                 }
                 Some(target) if valid_target_token(target) => {
-                    let reason = match tokens.next() {
-                        Some(b"UNSET") => TargetError::Unset,
-                        Some(b"UNAVAILABLE") => TargetError::Unavailable,
-                        _ => return Err(malformed()),
-                    };
+                    let reason: TargetError = next_as(&mut tokens, malformed())?;
                     ResponseError::Target { target, reason }
                 }
                 Some(_) => return Err(malformed()),
@@ -254,12 +248,10 @@ pub fn decode_response(message: Message<'_>) -> Result<Packet<DecodedResponse<'_
                     Query::Direction => QueryValue::Direction(
                         Direction::try_from(value_token).map_err(|_| malformed())?,
                     ),
-                    Query::Pullup | Query::Listen => match value_token {
-                        b"UNSET" => QueryValue::Unset,
-                        b"ON" => QueryValue::Enabled(true),
-                        b"OFF" => QueryValue::Enabled(false),
-                        _ => return Err(malformed()),
-                    },
+                    Query::Pullup | Query::Listen if value_token == b"UNSET" => QueryValue::Unset,
+                    Query::Pullup | Query::Listen => {
+                        QueryValue::Toggle(Toggle::try_from(value_token).map_err(|_| malformed())?)
+                    }
                 };
                 expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::State {
@@ -316,10 +308,9 @@ fn encode_request_body<T: AsRef<[u8]>>(
         Request::Direction { target, direction } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match direction {
-                Direction::Input => b" IN OK?",
-                Direction::Output => b" OUT OK?",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(direction.as_ref())?;
+            writer.bytes(b" OK?")?;
         }
         Request::Get { target } => {
             writer.bytes(b" ")?;
@@ -329,29 +320,29 @@ fn encode_request_body<T: AsRef<[u8]>>(
         Request::Set { target, level } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match level {
-                Level::Low => b" LOW OK?",
-                Level::High => b" HIGH OK?",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(level.as_ref())?;
+            writer.bytes(b" OK?")?;
         }
-        Request::Pullup { target, enabled } => {
+        Request::Pullup { target, state } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
+            writer.bytes(b" ")?;
+            writer.bytes(state.as_ref())?;
+            writer.bytes(b" OK?")?;
         }
-        Request::Listen { target, enabled } => {
+        Request::Listen { target, state } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
+            writer.bytes(b" ")?;
+            writer.bytes(state.as_ref())?;
+            writer.bytes(b" OK?")?;
         }
         Request::Query { target, what } => {
             writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match what {
-                Query::Direction => b" DIR",
-                Query::Pullup => b" PLL",
-                Query::Listen => b" LSN",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(what.as_ref())?;
         }
     }
     Ok(())
@@ -429,10 +420,8 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
         Response::Value { target, level } => {
             writer.bytes(b"HYG ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match level {
-                Level::Low => b" LOW",
-                Level::High => b" HIGH",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(level.as_ref())?;
         }
         Response::State {
             target,
@@ -441,18 +430,14 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
         } => {
             writer.bytes(b"HYG ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match what {
-                Query::Direction => b" DIR ",
-                Query::Pullup => b" PLL ",
-                Query::Listen => b" LSN ",
-            })?;
-            writer.bytes(match value {
-                QueryValue::Unset => b"UNSET",
-                QueryValue::Direction(Direction::Input) => b"IN",
-                QueryValue::Direction(Direction::Output) => b"OUT",
-                QueryValue::Enabled(true) => b"ON",
-                QueryValue::Enabled(false) => b"OFF",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(what.as_ref())?;
+            writer.bytes(b" ")?;
+            match value {
+                QueryValue::Unset => writer.bytes(b"UNSET")?,
+                QueryValue::Direction(direction) => writer.bytes(direction.as_ref())?,
+                QueryValue::Toggle(state) => writer.bytes(state.as_ref())?,
+            }
         }
         Response::Version { version } => {
             writer.bytes(b"VER ")?;
@@ -466,10 +451,8 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
         Response::Error(ResponseError::Target { target, reason }) => {
             writer.bytes(b"UMM ")?;
             writer.target(target.as_ref())?;
-            writer.bytes(match reason {
-                TargetError::Unset => b" UNSET",
-                TargetError::Unavailable => b" UNAVAILABLE",
-            })?;
+            writer.bytes(b" ")?;
+            writer.bytes(reason.as_ref())?;
         }
         Response::Error(ResponseError::NoRoute { destination }) => {
             writer.bytes(b"UMM NO_ROUTE ")?;
@@ -528,14 +511,6 @@ fn parse_u16(token: &[u8]) -> Option<u16> {
     token.iter().try_fold(0u16, |value, digit| {
         value.checked_mul(10)?.checked_add(u16::from(*digit - b'0'))
     })
-}
-
-fn parse_enabled(token: &[u8]) -> Option<bool> {
-    match token {
-        b"ON" => Some(true),
-        b"OFF" => Some(false),
-        _ => None,
-    }
 }
 
 fn encode_message_with(

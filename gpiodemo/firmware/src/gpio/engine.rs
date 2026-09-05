@@ -1,6 +1,6 @@
 use da_vinci_protocol::{
     Command, DecodedRequest, Direction, Level, PROTOCOL_VERSION, Packet, Query, QueryValue,
-    RequestId, Response, ResponseError, TargetError,
+    RequestId, Response, ResponseError, TargetError, Toggle,
 };
 
 use super::{
@@ -98,13 +98,13 @@ impl Firmware {
                 |error| error,
                 |target| self.set_level(map, target, level, gpio),
             ),
-            DecodedRequest::Pullup { target, enabled } => self.resolve(map, target).map_or_else(
+            DecodedRequest::Pullup { target, state } => self.resolve(map, target).map_or_else(
                 |error| error,
-                |target| self.set_pull_up(map, target, enabled, gpio),
+                |target| self.set_pull_up(map, target, state == Toggle::On, gpio),
             ),
-            DecodedRequest::Listen { target, enabled } => self.resolve(map, target).map_or_else(
+            DecodedRequest::Listen { target, state } => self.resolve(map, target).map_or_else(
                 |error| error,
-                |target| self.set_listening(map, target, enabled, packet.id, gpio),
+                |target| self.set_listening(map, target, state == Toggle::On, packet.id, gpio),
             ),
             DecodedRequest::Query { target, what } => {
                 let Ok(target) = self.resolve(map, target) else {
@@ -482,9 +482,11 @@ impl Firmware {
             (PinState::Configured { direction, .. }, Query::Direction) => {
                 QueryValue::Direction(direction)
             }
-            (PinState::Configured { pull_up, .. }, Query::Pullup) => QueryValue::Enabled(pull_up),
+            (PinState::Configured { pull_up, .. }, Query::Pullup) => {
+                QueryValue::Toggle(pull_up.into())
+            }
             (PinState::Configured { listener, .. }, Query::Listen) => {
-                QueryValue::Enabled(listener.is_some())
+                QueryValue::Toggle(listener.is_some().into())
             }
         }
     }
@@ -812,7 +814,7 @@ mod tests {
                 4,
                 Request::Pullup {
                     target: b"PIO0_0",
-                    enabled: true,
+                    state: Toggle::On,
                 },
             ),
             &mut gpio,
@@ -852,7 +854,7 @@ mod tests {
                 2,
                 Request::Pullup {
                     target: b"PIO0_0",
-                    enabled: true,
+                    state: Toggle::On,
                 },
             ),
             &mut gpio,
@@ -861,7 +863,7 @@ mod tests {
         assert!(!gpio.pull_ups[0]);
         assert_eq!(
             firmware.query(PinId::new(0), Query::Pullup),
-            QueryValue::Enabled(false)
+            QueryValue::Toggle(Toggle::Off)
         );
     }
 
@@ -1039,7 +1041,7 @@ mod tests {
                     id + 100,
                     Request::Listen {
                         target,
-                        enabled: true,
+                        state: Toggle::On,
                     },
                 ),
                 &mut gpio,
@@ -1096,7 +1098,7 @@ mod tests {
                 2,
                 Request::Listen {
                     target: b"PIO0_0",
-                    enabled: true,
+                    state: Toggle::On,
                 },
             ),
             &mut gpio,

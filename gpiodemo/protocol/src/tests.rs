@@ -201,14 +201,14 @@ fn request_wire_examples_use_symbolic_targets() {
         (
             Request::Pullup {
                 target: b"PIOB".as_slice(),
-                enabled: false,
+                state: Toggle::Off,
             },
             "001 SAM PLL PIOB OFF OK?\n",
         ),
         (
             Request::Listen {
                 target: b"PIOE".as_slice(),
-                enabled: true,
+                state: Toggle::On,
             },
             "001 SAM LSN PIOE ON OK?\n",
         ),
@@ -242,14 +242,14 @@ fn request_wire_examples_use_symbolic_targets() {
         (
             Request::Pullup {
                 target: b"ALL".as_slice(),
-                enabled: true,
+                state: Toggle::On,
             },
             "001 SAM PLL ALL ON OK?\n",
         ),
         (
             Request::Listen {
                 target: b"ALL".as_slice(),
-                enabled: true,
+                state: Toggle::On,
             },
             "001 SAM LSN ALL ON OK?\n",
         ),
@@ -295,6 +295,46 @@ fn request_command_wire_vocabulary_round_trips_and_is_canonical() {
         assert_eq!(Command::try_from(token), Ok(command));
     }
     assert_eq!(Command::try_from(b"NOPE".as_slice()), Err(ParseTokenError));
+}
+
+#[test]
+fn fixed_wire_values_round_trip_from_one_mapping() {
+    for (value, token) in [
+        (Direction::Input, b"IN".as_slice()),
+        (Direction::Output, b"OUT".as_slice()),
+    ] {
+        assert_eq!(value.as_ref(), token);
+        assert_eq!(Direction::try_from(token), Ok(value));
+    }
+    for (value, token) in [
+        (Level::Low, b"LOW".as_slice()),
+        (Level::High, b"HIGH".as_slice()),
+    ] {
+        assert_eq!(value.as_ref(), token);
+        assert_eq!(Level::try_from(token), Ok(value));
+    }
+    for (value, token) in [
+        (Query::Direction, b"DIR".as_slice()),
+        (Query::Pullup, b"PLL".as_slice()),
+        (Query::Listen, b"LSN".as_slice()),
+    ] {
+        assert_eq!(value.as_ref(), token);
+        assert_eq!(Query::try_from(token), Ok(value));
+    }
+    for (value, token) in [
+        (Toggle::Off, b"OFF".as_slice()),
+        (Toggle::On, b"ON".as_slice()),
+    ] {
+        assert_eq!(value.as_ref(), token);
+        assert_eq!(Toggle::try_from(token), Ok(value));
+    }
+    for (value, token) in [
+        (TargetError::Unset, b"UNSET".as_slice()),
+        (TargetError::Unavailable, b"UNAVAILABLE".as_slice()),
+    ] {
+        assert_eq!(value.as_ref(), token);
+        assert_eq!(TargetError::try_from(token), Ok(value));
+    }
 }
 
 #[test]
@@ -353,7 +393,7 @@ fn response_wire_examples_use_symbolic_pins() {
             Response::State {
                 target: b"PA00".as_slice(),
                 what: Query::Pullup,
-                value: QueryValue::Enabled(true),
+                value: QueryValue::Toggle(Toggle::On),
             },
             "008 SAM HYG PA00 PLL ON <3\n",
         ),
