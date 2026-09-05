@@ -113,11 +113,6 @@ impl SerialLog {
     pub(super) fn last_text(&self) -> Option<&str> {
         self.entries.back().map(|entry| entry.text.as_str())
     }
-
-    #[cfg(test)]
-    pub(super) fn iter(&self) -> impl Iterator<Item = &str> {
-        self.entries.iter().map(|entry| entry.text.as_str())
-    }
 }
 
 fn cursor_after_trim(cursor: Cursor, removed: usize) -> Cursor {

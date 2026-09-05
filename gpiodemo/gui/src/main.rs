@@ -4,10 +4,10 @@ mod serial_log;
 use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
 use connection::{
-    Connection, DeviceEvent, Event as ConnectionEvent, PinKey, Request as RoutedRequest,
-    ResponseError, RouteKey, Target as RoutedTarget,
+    DeviceEvent, DeviceSession, Event as ConnectionEvent, ListenerState, Mode, PinKey, PinState,
+    Request as RoutedRequest, ResponseError, RouteKey, Target as RoutedTarget,
 };
-use da_vinci_protocol::{Direction, Level};
+use da_vinci_protocol::Level;
 use iced::{
     Background, Border, Color, Element, Length, Size, Subscription, Task, Theme,
     alignment::{Horizontal, Vertical},
@@ -77,13 +77,6 @@ fn app_theme() -> Theme {
     )
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode {
-    Input,
-    InputPullup,
-    Output,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ScopeChoice {
     target: RoutedTarget,
@@ -125,20 +118,6 @@ impl PortChoice {
 impl fmt::Display for PortChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.label)
-    }
-}
-
-impl Mode {
-    fn is_input(self) -> bool {
-        matches!(self, Self::Input | Self::InputPullup)
-    }
-
-    fn direction(self) -> Direction {
-        if self == Self::Output {
-            Direction::Output
-        } else {
-            Direction::Input
-        }
     }
 }
 
@@ -186,39 +165,6 @@ enum HistoryDirection {
     Next,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ListenerState {
-    Off,
-    Enabling,
-    On,
-    Disabling,
-}
-
-impl ListenerState {
-    fn is_pending(self) -> bool {
-        matches!(self, Self::Enabling | Self::Disabling)
-    }
-}
-
-#[derive(Clone, Copy)]
-struct PinState {
-    mode: Option<Mode>,
-    target_mode: Option<Mode>,
-    level: Option<Level>,
-    listener: ListenerState,
-    value_pending: bool,
-}
-
-impl PinState {
-    const UNSET: Self = Self {
-        mode: None,
-        target_mode: None,
-        level: None,
-        listener: ListenerState::Off,
-        value_pending: false,
-    };
-}
-
 #[derive(Clone, Debug)]
 enum Message {
     Tick,
@@ -263,7 +209,6 @@ enum Message {
 }
 
 struct App {
-    pins: Vec<PinState>,
     bank_tab: BankTab,
     bulk_scope: ScopeChoice,
     bulk_scopes: Vec<ScopeChoice>,
@@ -274,7 +219,7 @@ struct App {
     ports: Vec<PortChoice>,
     selected_port: Option<PortChoice>,
     connected_port: Option<String>,
-    connection: Connection,
+    session: DeviceSession,
     sam_route: RouteKey,
     lpc_route: RouteKey,
     log: SerialLog,
@@ -296,17 +241,12 @@ impl App {
             .split(pane_grid::Axis::Vertical, pins_pane, PaneKind::Log)
             .expect("initial GPIO/log split must succeed");
         panes.resize(split, 0.76);
-        let connection = Connection::spawn(&ROUTES);
-        let sam_route = connection
-            .route_key("SAM")
-            .expect("SAM route is configured");
-        let lpc_route = connection
-            .route_key("LPC")
-            .expect("LPC route is configured");
+        let session = DeviceSession::spawn(&ROUTES);
+        let sam_route = session.route_key("SAM").expect("SAM route is configured");
+        let lpc_route = session.route_key("LPC").expect("LPC route is configured");
 
         (
             Self {
-                pins: Vec::new(),
                 bank_tab: BankTab::A,
                 bulk_scope: ScopeChoice::all(),
                 bulk_scopes: vec![ScopeChoice::all()],
@@ -317,7 +257,7 @@ impl App {
                 ports: Vec::new(),
                 selected_port: None,
                 connected_port: None,
-                connection,
+                session,
                 sam_route,
                 lpc_route,
                 log: SerialLog::new(),
@@ -381,10 +321,10 @@ impl App {
             Message::PortSelected(port) => self.selected_port = Some(port),
             Message::Connect => {
                 if let Some(port) = &self.selected_port {
-                    self.error = self.connection.connect(port.path.clone()).err();
+                    self.error = self.session.connect(port.path.clone()).err();
                 }
             }
-            Message::Disconnect => self.error = self.connection.disconnect().err(),
+            Message::Disconnect => self.error = self.session.disconnect().err(),
             Message::PreviousTab => {
                 let index = self.bank_tab.index();
                 if index > 0 {
@@ -705,11 +645,11 @@ impl App {
             column = column.push(text(bank_token.to_owned()).size(14));
         }
         column = column.push(pin_header());
-        let Some(bank) = self.connection.bank_key(self.sam_route, bank_token) else {
+        let Some(bank) = self.session.bank_key(self.sam_route, bank_token) else {
             return column;
         };
         let end = start_bit.saturating_add(count);
-        for (pin, info) in self.connection.pins(self.sam_route) {
+        for (pin, info) in self.session.pins(self.sam_route) {
             if info.bank != bank || info.bit < start_bit || info.bit >= end {
                 continue;
             }
@@ -719,7 +659,7 @@ impl App {
     }
 
     fn pin_row(&self, pin: PinKey) -> Element<'_, Message> {
-        let Some(info) = self.connection.pin_info(pin) else {
+        let Some(info) = self.session.pin_info(pin) else {
             return text("Unknown pin").into();
         };
         let name = pin_cell(text(pin_display(info)).size(12), PIN_NAME_SHARE);
@@ -738,11 +678,7 @@ impl App {
             .into();
         }
 
-        let state = self
-            .pins
-            .get(pin.index())
-            .copied()
-            .unwrap_or(PinState::UNSET);
+        let state = self.session.pin_state(pin).unwrap_or(PinState::UNSET);
         let mode: Element<'_, Message> = if state.target_mode.is_some() {
             container(
                 text(
@@ -866,147 +802,49 @@ impl App {
     }
 
     fn change_mode(&mut self, pin: PinKey, mode: Mode) {
-        if !self.require_connection()
-            || self
-                .connection
-                .pin_info(pin)
-                .is_none_or(|info| !info.capabilities.available())
-        {
+        if !self.require_connection() {
             return;
         }
-        let Some(state) = self.pins.get(pin.index()).copied() else {
-            return;
-        };
-        if state.target_mode.is_some() || state.listener.is_pending() {
-            return;
-        }
-
-        if mode == Mode::Output && state.listener == ListenerState::On {
-            self.pins[pin.index()].listener = ListenerState::Disabling;
-            self.send_request(Request::Listen {
-                target: RoutedTarget::Pin(pin),
-                enabled: false,
-            });
-        }
-
-        let state = &mut self.pins[pin.index()];
-        state.target_mode = Some(mode);
-        state.level = None;
-        self.send_request(Request::Direction {
-            target: RoutedTarget::Pin(pin),
-            direction: mode.direction(),
-        });
+        let result = self.session.change_mode(pin, mode);
+        self.record_session_action(result);
     }
 
     fn read_pin(&mut self, pin: PinKey) {
         if !self.require_connection() {
             return;
         }
-        let Some(state) = self.pins.get_mut(pin.index()) else {
-            return;
-        };
-        if state.mode.is_none() || state.value_pending {
-            return;
-        }
-        state.value_pending = true;
-        self.send_request(Request::Get {
-            target: RoutedTarget::Pin(pin),
-        });
+        let result = self.session.read_pin(pin);
+        self.record_session_action(result);
     }
 
     fn write_pin(&mut self, pin: PinKey) {
         if !self.require_connection() {
             return;
         }
-        let Some(state) = self.pins.get_mut(pin.index()) else {
-            return;
-        };
-        if state.mode != Some(Mode::Output) || state.value_pending {
-            return;
-        }
-        state.value_pending = true;
-        let level = if state.level == Some(Level::High) {
-            Level::Low
-        } else {
-            Level::High
-        };
-        self.send_request(Request::Set {
-            target: RoutedTarget::Pin(pin),
-            level,
-        });
+        let result = self.session.write_pin(pin);
+        self.record_session_action(result);
     }
 
     fn toggle_listener(&mut self, pin: PinKey) {
         if !self.require_connection() {
             return;
         }
-        let Some(state) = self.pins.get_mut(pin.index()) else {
-            return;
-        };
-        if !state.mode.is_some_and(Mode::is_input) {
-            return;
-        }
-        let (enabled, pending) = match state.listener {
-            ListenerState::Off => (true, ListenerState::Enabling),
-            ListenerState::On => (false, ListenerState::Disabling),
-            ListenerState::Enabling | ListenerState::Disabling => return,
-        };
-        state.listener = pending;
-        self.send_request(Request::Listen {
-            target: RoutedTarget::Pin(pin),
-            enabled,
-        });
+        let result = self.session.toggle_listener(pin);
+        self.record_session_action(result);
     }
 
     fn apply_bulk_mode(&mut self) {
         if !self.require_connection() {
             return;
         }
-        let target = self.bulk_scope.target;
-        let mode = self.bulk_mode;
-
-        if self.overwrite {
-            if self.target_has_pending(target) {
-                return;
-            }
-            if mode == Mode::Output && self.target_has_listener(target) {
-                self.mark_listener_pending(target, false);
-                self.send_request(Request::Listen {
-                    target,
-                    enabled: false,
-                });
-            }
-            self.mark_mode_pending(target, mode);
-            self.send_request(Request::Direction {
-                target,
-                direction: mode.direction(),
-            });
-            return;
-        }
-
-        let mut sent = false;
-        for pin in self.connection.target_pins(self.sam_route, target) {
-            let available = self
-                .connection
-                .pin_info(pin)
-                .is_some_and(|info| info.capabilities.available());
-            let state = self
-                .pins
-                .get(pin.index())
-                .copied()
-                .unwrap_or(PinState::UNSET);
-            if available && state.mode.is_none() && state.target_mode.is_none() {
-                self.pins[pin.index()].target_mode = Some(mode);
-                self.pins[pin.index()].level = None;
-                self.send_request(Request::Direction {
-                    target: RoutedTarget::Pin(pin),
-                    direction: mode.direction(),
-                });
-                sent = true;
-            }
-        }
-        if !sent {
-            self.device_status = "No UNSET pins in selected scope".into();
+        let result = self.session.apply_mode(
+            self.sam_route,
+            self.bulk_scope.target,
+            self.bulk_mode,
+            self.overwrite,
+        );
+        if self.record_session_action(result) == 0 {
+            self.device_status = "No eligible pins in selected scope".into();
         }
     }
 
@@ -1014,94 +852,34 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        for pin in self.connection.target_pins(self.sam_route, target) {
-            if let Some(state) = self.pins.get_mut(pin.index())
-                && state.mode.is_some()
-            {
-                state.value_pending = true;
-            }
-        }
-        self.send_request(Request::Get { target });
+        let result = self.session.read_scope(self.sam_route, target);
+        self.record_session_action(result);
     }
 
     fn set_listener_scope(&mut self, target: RoutedTarget, enabled: bool) {
         if !self.require_connection() {
             return;
         }
-        self.mark_listener_pending(target, enabled);
-        self.send_request(Request::Listen { target, enabled });
+        let result = self
+            .session
+            .set_listener_scope(self.sam_route, target, enabled);
+        self.record_session_action(result);
     }
 
     fn set_scope_level(&mut self, target: RoutedTarget, level: Level) {
         if !self.require_connection() {
             return;
         }
-        for pin in self.connection.target_pins(self.sam_route, target) {
-            if let Some(state) = self.pins.get_mut(pin.index())
-                && state.mode == Some(Mode::Output)
-            {
-                state.value_pending = true;
-            }
-        }
-        self.send_request(Request::Set { target, level });
-    }
-
-    fn target_has_pending(&self, target: RoutedTarget) -> bool {
-        self.connection
-            .target_pins(self.sam_route, target)
-            .into_iter()
-            .any(|pin| {
-                self.pins
-                    .get(pin.index())
-                    .is_some_and(|state| state.target_mode.is_some() || state.listener.is_pending())
-            })
-    }
-
-    fn target_has_listener(&self, target: RoutedTarget) -> bool {
-        self.connection
-            .target_pins(self.sam_route, target)
-            .into_iter()
-            .any(|pin| {
-                self.pins
-                    .get(pin.index())
-                    .is_some_and(|state| state.listener == ListenerState::On)
-            })
-    }
-
-    fn mark_mode_pending(&mut self, target: RoutedTarget, mode: Mode) {
-        for pin in self.connection.target_pins(self.sam_route, target) {
-            let available = self
-                .connection
-                .pin_info(pin)
-                .is_some_and(|info| info.capabilities.available());
-            if available && let Some(state) = self.pins.get_mut(pin.index()) {
-                state.target_mode = Some(mode);
-                state.level = None;
-            }
-        }
-    }
-
-    fn mark_listener_pending(&mut self, target: RoutedTarget, enabled: bool) {
-        for pin in self.connection.target_pins(self.sam_route, target) {
-            if let Some(state) = self.pins.get_mut(pin.index())
-                && state.mode.is_some_and(Mode::is_input)
-            {
-                state.listener = if enabled {
-                    ListenerState::Enabling
-                } else {
-                    ListenerState::Disabling
-                };
-            }
-        }
+        let result = self.session.set_scope_level(self.sam_route, target, level);
+        self.record_session_action(result);
     }
 
     fn sync_sam_state(&mut self) {
-        self.pins = vec![PinState::UNSET; self.connection.pins(self.sam_route).count()];
         self.bulk_scopes.clear();
         self.bulk_scopes.push(ScopeChoice::all());
         self.bulk_scopes
             .extend(
-                self.connection
+                self.session
                     .banks(self.sam_route)
                     .map(|(bank, info)| ScopeChoice {
                         target: RoutedTarget::Bank(bank),
@@ -1112,8 +890,24 @@ impl App {
         self.confirm_set = None;
     }
 
+    fn record_session_action(&mut self, result: Result<Vec<String>, String>) -> usize {
+        match result {
+            Ok(lines) => {
+                let count = lines.len();
+                for line in lines {
+                    self.push_log(format!("TX {line}"));
+                }
+                count
+            }
+            Err(error) => {
+                self.error = Some(error);
+                0
+            }
+        }
+    }
+
     fn send_routed_request(&mut self, route: RouteKey, request: RoutedRequest) {
-        match self.connection.send(route, request) {
+        match self.session.send(route, request) {
             Ok(line) => self.push_log(format!("TX {line}")),
             Err(error) => self.error = Some(error),
         }
@@ -1123,12 +917,9 @@ impl App {
         if !self.require_connection() {
             return;
         }
-        match self.connection.send(self.sam_route, request) {
+        match self.session.send(self.sam_route, request) {
             Ok(line) => self.push_log(format!("TX {line}")),
-            Err(error) => {
-                self.fail_request(request);
-                self.error = Some(error);
-            }
+            Err(error) => self.error = Some(error),
         }
     }
 
@@ -1146,7 +937,7 @@ impl App {
             self.command_history.pop_front();
         }
         self.history_index = None;
-        match self.connection.send_raw(&line) {
+        match self.session.send_raw(&line) {
             Ok(()) => self.push_log(format!("TX {line}")),
             Err(error) => self.error = Some(error),
         }
@@ -1162,9 +953,9 @@ impl App {
     }
 
     fn drain_io(&mut self) {
-        self.connection.poll_listener_updates();
+        self.session.poll_listener_updates();
         for _ in 0..MAX_IO_EVENTS_PER_TICK {
-            let Some(event) = self.connection.next_event() else {
+            let Some(event) = self.session.next_event() else {
                 break;
             };
             match event {
@@ -1172,14 +963,17 @@ impl App {
                     self.connected_port = Some(port.clone());
                     self.device_status = "Connected; discovering pin maps".into();
                     self.error = None;
-                    self.reset_pins();
+                    self.bulk_scopes = vec![ScopeChoice::all()];
+                    self.bulk_scope = ScopeChoice::all();
                     self.send_routed_request(self.sam_route, RoutedRequest::Map);
                     self.send_routed_request(self.lpc_route, RoutedRequest::Map);
                 }
                 ConnectionEvent::Disconnected(reason) => {
                     self.connected_port = None;
                     self.device_status = "Disconnected".into();
-                    self.reset_pending();
+                    self.bulk_scopes = vec![ScopeChoice::all()];
+                    self.bulk_scope = ScopeChoice::all();
+                    self.confirm_set = None;
                     self.error = reason;
                 }
                 ConnectionEvent::Received { line, event } => {
@@ -1212,10 +1006,10 @@ impl App {
     fn handle_device_event(&mut self, event: DeviceEvent) {
         match event {
             DeviceEvent::Hello { route } => {
-                self.device_status = format!("{} replied HII", self.connection.route_name(route));
+                self.device_status = format!("{} replied HII", self.session.route_name(route));
             }
             DeviceEvent::Status { route, identity } => {
-                self.device_status = format!("{}: {identity}", self.connection.route_name(route));
+                self.device_status = format!("{}: {identity}", self.session.route_name(route));
             }
             DeviceEvent::MapReady { route } => {
                 if route == self.sam_route {
@@ -1223,96 +1017,26 @@ impl App {
                 }
                 self.device_status = format!(
                     "{} map: {} banks, {} pins",
-                    self.connection.route_name(route),
-                    self.connection.banks(route).count(),
-                    self.connection.pins(route).count()
+                    self.session.route_name(route),
+                    self.session.banks(route).count(),
+                    self.session.pins(route).count()
                 );
             }
-            DeviceEvent::Ack { route, request } => {
-                if route != self.sam_route {
-                    return;
-                }
-                match request {
-                    Request::Direction { target, .. } => {
-                        let Some(mode) = self.pending_mode(target) else {
-                            return;
-                        };
-                        self.send_request(Request::Pullup {
-                            target,
-                            enabled: mode == Mode::InputPullup,
-                        });
-                    }
-                    Request::Pullup { target, .. } => {
-                        let mut read = false;
-                        for pin in self.connection.target_pins(self.sam_route, target) {
-                            let Some(state) = self.pins.get_mut(pin.index()) else {
-                                continue;
-                            };
-                            if let Some(mode) = state.target_mode.take() {
-                                state.mode = Some(mode);
-                                if mode.is_input() {
-                                    read = true;
-                                } else {
-                                    state.level = Some(Level::Low);
-                                }
-                            }
-                        }
-                        if read {
-                            match target {
-                                RoutedTarget::Pin(pin) => self.read_pin(pin),
-                                RoutedTarget::Bank(_) | RoutedTarget::All => {
-                                    self.read_scope(target)
-                                }
-                            }
-                        }
-                    }
-                    Request::Set { target, level } => {
-                        for pin in self.connection.target_pins(self.sam_route, target) {
-                            if let Some(state) = self.pins.get_mut(pin.index())
-                                && state.mode == Some(Mode::Output)
-                            {
-                                state.level = Some(level);
-                                state.value_pending = false;
-                            }
-                        }
-                    }
-                    Request::Listen { target, enabled } => {
-                        for pin in self.connection.target_pins(self.sam_route, target) {
-                            if let Some(state) = self.pins.get_mut(pin.index())
-                                && state.mode.is_some_and(Mode::is_input)
-                            {
-                                state.listener = if enabled {
-                                    ListenerState::On
-                                } else {
-                                    ListenerState::Off
-                                };
-                            }
-                        }
-                    }
-                    _ => {}
+            DeviceEvent::Ack { route: _, sent } => {
+                if let Some(line) = sent {
+                    self.push_log(format!("TX {line}"));
                 }
             }
-            DeviceEvent::PinValue { pin, level } => {
-                if pin.route() == self.sam_route
-                    && let Some(state) = self.pins.get_mut(pin.index())
-                {
-                    state.level = Some(level);
-                    state.value_pending = false;
-                }
-            }
+            DeviceEvent::PinValue { .. } => {}
             DeviceEvent::PinState { pin, what, value } => {
                 self.device_status =
                     format!("{} {what:?}: {value:?}", self.routed_pin_display(pin));
             }
             DeviceEvent::DeviceError {
-                route,
+                route: _,
                 source,
-                request,
                 error,
             } => {
-                if route == self.sam_route {
-                    self.fail_request(request);
-                }
                 self.error = Some(match error {
                     ResponseError::BadPacket => {
                         format!("{source} rejected a malformed packet")
@@ -1332,86 +1056,21 @@ impl App {
                     }
                 });
             }
-            DeviceEvent::Unknown { route, request } => {
-                if route == self.sam_route {
-                    self.fail_request(request);
-                }
-                self.error = Some(format!(
-                    "{} returned IDK",
-                    self.connection.route_name(route)
-                ));
+            DeviceEvent::Unknown { route } => {
+                self.error = Some(format!("{} returned IDK", self.session.route_name(route)));
             }
             DeviceEvent::Bye { route } => {
-                if route == self.sam_route {
-                    self.reset_pins();
-                }
                 self.device_status =
-                    format!("{} reset acknowledged", self.connection.route_name(route));
+                    format!("{} reset acknowledged", self.session.route_name(route));
             }
             DeviceEvent::Untracked => {}
         }
     }
 
     fn routed_pin_display(&self, pin: PinKey) -> String {
-        self.connection
+        self.session
             .pin_info(pin)
             .map_or_else(|| "unknown pin".into(), pin_display)
-    }
-
-    fn pending_mode(&self, target: RoutedTarget) -> Option<Mode> {
-        self.connection
-            .target_pins(self.sam_route, target)
-            .into_iter()
-            .find_map(|pin| {
-                self.pins
-                    .get(pin.index())
-                    .and_then(|state| state.target_mode)
-            })
-    }
-
-    fn fail_request(&mut self, request: Request) {
-        match request {
-            Request::Direction { target, .. } | Request::Pullup { target, .. } => {
-                for pin in self.connection.target_pins(self.sam_route, target) {
-                    if let Some(state) = self.pins.get_mut(pin.index()) {
-                        state.target_mode = None;
-                    }
-                }
-            }
-            Request::Get { target } | Request::Set { target, .. } => {
-                for pin in self.connection.target_pins(self.sam_route, target) {
-                    if let Some(state) = self.pins.get_mut(pin.index()) {
-                        state.value_pending = false;
-                    }
-                }
-            }
-            Request::Listen { target, enabled } => {
-                for pin in self.connection.target_pins(self.sam_route, target) {
-                    if let Some(state) = self.pins.get_mut(pin.index())
-                        && state.mode.is_some()
-                    {
-                        state.listener = if enabled {
-                            ListenerState::Off
-                        } else {
-                            ListenerState::On
-                        };
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn reset_pins(&mut self) {
-        self.pins.fill(PinState::UNSET);
-    }
-
-    fn reset_pending(&mut self) {
-        for pin in &mut self.pins {
-            pin.value_pending = false;
-            pin.target_mode = None;
-            pin.listener = ListenerState::Off;
-        }
     }
 
     fn push_log(&mut self, text: String) {
@@ -1625,7 +1284,7 @@ fn danger_button(theme: &Theme, status: button::Status) -> button::Style {
 
 fn load_ports() -> Task<Message> {
     Task::perform(
-        async { Connection::available_ports() },
+        async { DeviceSession::available_ports() },
         Message::PortsLoaded,
     )
 }
@@ -1641,21 +1300,14 @@ mod tests {
         let mut pins = Vec::new();
         pins.extend((0..32).map(|bit| (format!("PA{bit:02}"), 0, bit, PinCapabilities::GPIO)));
         pins.extend((0..32).map(|bit| (format!("PC{bit:02}"), 1, bit, PinCapabilities::GPIO)));
-        app.connection.install_map_for_test(
-            app.sam_route,
-            vec!["PIOA".into(), "PIOC".into()],
-            pins,
-        );
+        app.session
+            .install_map_for_test(app.sam_route, vec!["PIOA".into(), "PIOC".into()], pins);
         app.sync_sam_state();
         app
     }
 
-    fn pin(app: &App, token: &str) -> PinKey {
-        app.connection.pin_key(app.sam_route, token).unwrap()
-    }
-
     fn bank(app: &App, token: &str) -> RoutedTarget {
-        RoutedTarget::Bank(app.connection.bank_key(app.sam_route, token).unwrap())
+        RoutedTarget::Bank(app.session.bank_key(app.sam_route, token).unwrap())
     }
 
     fn scope(app: &App, token: &str) -> ScopeChoice {
@@ -1664,13 +1316,6 @@ mod tests {
             .find(|scope| scope.label == token)
             .unwrap()
             .clone()
-    }
-
-    fn ack(app: &mut App, request: Request) {
-        app.handle_device_event(DeviceEvent::Ack {
-            route: app.sam_route,
-            request,
-        });
     }
 
     fn last_log(app: &App) -> &str {
@@ -1688,46 +1333,11 @@ mod tests {
         app.apply_bulk_mode();
         assert_eq!(last_log(&app), "TX 001 SAM DIR PIOC IN OK?");
 
-        ack(
-            &mut app,
-            Request::Direction {
-                target: port_c,
-                direction: Direction::Input,
-            },
-        );
-        assert_eq!(last_log(&app), "TX 002 SAM PLL PIOC ON OK?");
-
-        ack(
-            &mut app,
-            Request::Pullup {
-                target: port_c,
-                enabled: true,
-            },
-        );
-        assert_eq!(last_log(&app), "TX 003 SAM GET PIOC OK?");
-
         app.set_listener_scope(port_c, true);
-        assert_eq!(last_log(&app), "TX 004 SAM LSN PIOC ON OK?");
+        assert_eq!(last_log(&app), "TX 002 SAM LSN PIOC ON OK?");
 
         app.read_scope(port_c);
-        assert_eq!(last_log(&app), "TX 005 SAM GET PIOC OK?");
-    }
-
-    #[test]
-    fn output_mode_stops_listener_before_changing_direction() {
-        let mut app = connected_app();
-        let pin = pin(&app, "PA00");
-        let state = &mut app.pins[pin.index()];
-        state.mode = Some(Mode::Input);
-        state.listener = ListenerState::On;
-
-        app.change_mode(pin, Mode::Output);
-
-        let commands: Vec<_> = app.log.iter().collect();
-        assert_eq!(
-            commands,
-            ["TX 001 SAM LSN PA00 OFF OK?", "TX 002 SAM DIR PA00 OUT OK?"]
-        );
+        assert_eq!(last_log(&app), "TX 003 SAM GET PIOC OK?");
     }
 
     #[test]
@@ -1757,21 +1367,5 @@ mod tests {
 
         assert_eq!(app.bank_tab, BankTab::D);
         assert_eq!(app.bulk_scope, selected);
-    }
-
-    #[test]
-    fn overwrite_off_only_targets_unset_pins_individually() {
-        let mut app = connected_app();
-        let configured = pin(&app, "PA00");
-        app.pins[configured.index()].mode = Some(Mode::Input);
-        app.bulk_scope = scope(&app, "PIOA");
-        app.bulk_mode = Mode::Output;
-        app.overwrite = false;
-
-        app.apply_bulk_mode();
-
-        assert!(!app.log.iter().any(|entry| entry.contains("DIR PA00")));
-        assert!(app.log.iter().all(|entry| !entry.contains("DIR PIOA")));
-        assert!(app.log.iter().any(|entry| entry.contains("DIR PA01 OUT")));
     }
 }
