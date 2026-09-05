@@ -32,21 +32,24 @@ fn response_error_maps_generic_fields_at_its_owner() {
     );
 }
 
-fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> [u8; MAX_PACKET_LEN] {
-    let mut out = [0u8; MAX_PACKET_LEN];
-    let len = encode_request(Packet { id, body }, b"SAM", &mut out).unwrap();
-    assert_eq!(decoded_request(&out[..len]), Ok(Packet { id, body }));
-    out
+fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> Frame {
+    let frame = Frame::try_from(Message {
+        route: b"SAM".as_slice(),
+        packet: Packet { id, body },
+    })
+    .unwrap();
+    assert_eq!(decoded_request(frame.as_ref()), Ok(Packet { id, body }));
+    frame
 }
 
 fn decoded_request(line: &[u8]) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
-    let envelope = decode_message(line)?;
-    decode_request(envelope.packet)
+    let raw = RawMessage::try_from(line)?;
+    Ok(Message::<&[u8], DecodedRequest<'_>>::try_from(raw)?.packet)
 }
 
 fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
-    let envelope = decode_message(line)?;
-    decode_response(envelope)
+    let raw = RawMessage::try_from(line)?;
+    Ok(Message::<&[u8], DecodedResponse<'_>>::try_from(raw)?.packet)
 }
 #[test]
 fn line_buffer_frames_and_recovers_after_overflow() {
@@ -89,7 +92,7 @@ fn frame_owns_exact_bounded_bytes() {
 #[test]
 fn routed_envelopes_borrow_route_and_opaque_body() {
     let request = b"001 SAM HAI";
-    let envelope = decode_message(request).unwrap();
+    let envelope = RawMessage::try_from(request.as_slice()).unwrap();
     assert_eq!(
         envelope,
         Message {
@@ -104,7 +107,7 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
     assert_eq!(envelope.packet.body.as_ptr(), request[8..].as_ptr());
 
     assert_eq!(
-        decode_message(b"002 LPC GET PIO2_3 OK?"),
+        RawMessage::try_from(b"002 LPC GET PIO2_3 OK?".as_slice()),
         Ok(Message {
             route: b"LPC".as_slice(),
             packet: Packet {
@@ -114,7 +117,7 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
         })
     );
     assert_eq!(
-        decode_message(b"003 ABC WAT opaque body"),
+        RawMessage::try_from(b"003 ABC WAT opaque body".as_slice()),
         Ok(Message {
             route: b"ABC".as_slice(),
             packet: Packet {
@@ -124,7 +127,7 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
         })
     );
     assert_eq!(
-        decode_message(b"002 LPC HYG PIO2_3 HIGH <3"),
+        RawMessage::try_from(b"002 LPC HYG PIO2_3 HIGH <3".as_slice()),
         Ok(Message {
             route: b"LPC".as_slice(),
             packet: Packet {
@@ -137,7 +140,6 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
 
 #[test]
 fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
-    let mut out = [0; MAX_PACKET_LEN];
     let request = Message {
         route: b"ABC".as_slice(),
         packet: Packet {
@@ -145,9 +147,9 @@ fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
             body: b"HAI".as_slice(),
         },
     };
-    let len = encode_message(request, &mut out).unwrap();
-    assert_eq!(&out[..len], b"999 ABC HAI\n");
-    assert_eq!(decode_message(&out[..len]), Ok(request));
+    let frame = Frame::try_from(request).unwrap();
+    assert_eq!(frame.as_ref(), b"999 ABC HAI\n");
+    assert_eq!(RawMessage::try_from(&frame), Ok(request));
 
     let response = Message {
         route: b"SAM".as_slice(),
@@ -156,22 +158,19 @@ fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
             body: b"HII <3".as_slice(),
         },
     };
-    let len = encode_message(response, &mut out).unwrap();
-    assert_eq!(&out[..len], b"007 SAM HII <3\n");
-    assert_eq!(decode_message(&out[..len]), Ok(response));
+    let frame = Frame::try_from(response).unwrap();
+    assert_eq!(frame.as_ref(), b"007 SAM HII <3\n");
+    assert_eq!(RawMessage::try_from(&frame), Ok(response));
 
     for route in [b"".as_slice(), b"BAD ROUTE", b"BAD\nROUTE", b"\x01"] {
         assert_eq!(
-            encode_message(
-                Message {
-                    route,
-                    packet: Packet {
-                        id: id(1),
-                        body: b"HAI".as_slice(),
-                    },
+            Frame::try_from(Message {
+                route,
+                packet: Packet {
+                    id: id(1),
+                    body: b"HAI".as_slice(),
                 },
-                &mut out,
-            ),
+            }),
             Err(EncodeError::InvalidRouteToken)
         );
     }
@@ -323,8 +322,8 @@ fn request_wire_examples_use_symbolic_targets() {
     ];
 
     for (body, expected) in cases {
-        let out = encoded_request(id(1), body);
-        assert_eq!(&out[..expected.len()], expected.as_bytes());
+        let frame = encoded_request(id(1), body);
+        assert_eq!(frame.as_ref(), expected.as_bytes());
     }
 }
 
@@ -516,14 +515,21 @@ fn response_wire_examples_use_symbolic_pins() {
 
     for (body, expected) in cases {
         let packet = Packet { id: id(8), body };
-        let mut out = [0u8; MAX_PACKET_LEN];
-        let len = encode_response(packet, b"SAM", &mut out).unwrap();
-        assert_eq!(&out[..len], expected.as_bytes());
-        assert_eq!(decoded_response(&out[..len]), Ok(packet));
+        let sam = Frame::try_from(Message {
+            route: b"SAM".as_slice(),
+            packet,
+        })
+        .unwrap();
+        assert_eq!(sam.as_ref(), expected.as_bytes());
+        assert_eq!(decoded_response(sam.as_ref()), Ok(packet));
 
-        let len = encode_response(packet, b"LPC", &mut out).unwrap();
-        assert!(out[..len].ends_with(b" :3\n"));
-        assert_eq!(decoded_response(&out[..len]), Ok(packet));
+        let lpc = Frame::try_from(Message {
+            route: b"LPC".as_slice(),
+            packet,
+        })
+        .unwrap();
+        assert!(lpc.as_ref().ends_with(b" :3\n"));
+        assert_eq!(decoded_response(lpc.as_ref()), Ok(packet));
     }
 }
 
@@ -618,10 +624,13 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
             level: Level::High,
         },
     };
-    let mut out = [0; MAX_PACKET_LEN];
-    let len = encode_request(request, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"021 LPC SET PIO2_3 HIGH OK?\n");
-    assert_eq!(decoded_request(&out[..len]), Ok(request));
+    let frame = Frame::try_from(Message {
+        route: b"LPC".as_slice(),
+        packet: request,
+    })
+    .unwrap();
+    assert_eq!(frame.as_ref(), b"021 LPC SET PIO2_3 HIGH OK?\n");
+    assert_eq!(decoded_request(frame.as_ref()), Ok(request));
 
     let response = Packet {
         id: id(22),
@@ -630,9 +639,13 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
             level: Level::Low,
         },
     };
-    let len = encode_response(response, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"022 LPC HYG PIO2_3 LOW :3\n");
-    assert_eq!(decoded_response(&out[..len]), Ok(response));
+    let frame = Frame::try_from(Message {
+        route: b"LPC".as_slice(),
+        packet: response,
+    })
+    .unwrap();
+    assert_eq!(frame.as_ref(), b"022 LPC HYG PIO2_3 LOW :3\n");
+    assert_eq!(decoded_response(frame.as_ref()), Ok(response));
 
     let status = Packet {
         id: id(23),
@@ -640,9 +653,13 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
             identity: b"LPC1115 GPIO",
         },
     };
-    let len = encode_response(status, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"023 LPC IAM LPC1115 GPIO :3\n");
-    assert_eq!(decoded_response(&out[..len]), Ok(status));
+    let frame = Frame::try_from(Message {
+        route: b"LPC".as_slice(),
+        packet: status,
+    })
+    .unwrap();
+    assert_eq!(frame.as_ref(), b"023 LPC IAM LPC1115 GPIO :3\n");
+    assert_eq!(decoded_response(frame.as_ref()), Ok(status));
 }
 
 #[test]
@@ -651,15 +668,21 @@ fn response_terminator_follows_source_and_is_validated_on_decode() {
         id: id(31),
         body: Response::<&[u8], &[u8]>::Hello,
     };
-    let mut out = [0; MAX_PACKET_LEN];
+    let sam = Frame::try_from(Message {
+        route: b"SAM".as_slice(),
+        packet,
+    })
+    .unwrap();
+    assert_eq!(sam.as_ref(), b"031 SAM HII <3\n");
+    assert_eq!(decoded_response(sam.as_ref()), Ok(packet));
 
-    let len = encode_response(packet, b"SAM", &mut out).unwrap();
-    assert_eq!(&out[..len], b"031 SAM HII <3\n");
-    assert_eq!(decoded_response(&out[..len]), Ok(packet));
-
-    let len = encode_response(packet, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"031 LPC HII :3\n");
-    assert_eq!(decoded_response(&out[..len]), Ok(packet));
+    let lpc = Frame::try_from(Message {
+        route: b"LPC".as_slice(),
+        packet,
+    })
+    .unwrap();
+    assert_eq!(lpc.as_ref(), b"031 LPC HII :3\n");
+    assert_eq!(decoded_response(lpc.as_ref()), Ok(packet));
 
     for line in [b"031 SAM HII :3".as_slice(), b"031 LPC HII <3"] {
         assert_eq!(
@@ -728,10 +751,13 @@ fn version_and_help_wire_examples_are_typed_and_source_aware() {
                 id: id(45),
                 body: Response::<&[u8], &[u8]>::Help { command },
             };
-            let mut out = [0; MAX_PACKET_LEN];
-            let len = encode_response(packet, source, &mut out).unwrap();
-            assert!(len <= MAX_PACKET_LEN);
-            assert_eq!(decoded_response(&out[..len]), Ok(packet));
+            let frame = Frame::try_from(Message {
+                route: source,
+                packet,
+            })
+            .unwrap();
+            assert!(frame.as_ref().len() <= MAX_PACKET_LEN);
+            assert_eq!(decoded_response(frame.as_ref()), Ok(packet));
         }
     }
 }

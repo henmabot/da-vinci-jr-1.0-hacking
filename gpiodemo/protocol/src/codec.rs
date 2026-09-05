@@ -113,7 +113,7 @@ pub enum EncodeError {
     InvalidIdentity,
 }
 
-pub fn decode_message(line: &[u8]) -> Result<RawMessage<'_>, DecodeError> {
+fn decode_message(line: &[u8]) -> Result<RawMessage<'_>, DecodeError> {
     let (id_token, rest) = next_token(line).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
@@ -140,13 +140,7 @@ pub fn decode_message(line: &[u8]) -> Result<RawMessage<'_>, DecodeError> {
     })
 }
 
-pub fn encode_message(message: RawMessage<'_>, out: &mut [u8]) -> Result<usize, EncodeError> {
-    encode_message_with(message.packet.id, message.route, out, |writer| {
-        writer.bytes(message.packet.body)
-    })
-}
-
-pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
+fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
     let id = packet.id;
     let mut tokens = packet
         .body
@@ -222,9 +216,7 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(
-    message: RawMessage<'_>,
-) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
+fn decode_response(message: RawMessage<'_>) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
     let suffix = response_suffix(message.route);
     let packet = message.packet;
     let id = packet.id;
@@ -371,7 +363,7 @@ pub fn decode_response(
     Ok(Packet { id, body })
 }
 
-pub fn encode_request<T: AsRef<[u8]>>(
+fn encode_request<T: AsRef<[u8]>>(
     packet: Packet<Request<T>>,
     destination: &[u8],
     out: &mut [u8],
@@ -453,7 +445,7 @@ fn request_command<T>(request: &Request<T>) -> Command {
     }
 }
 
-pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
+fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
     packet: Packet<Response<T, D>>,
     source: &[u8],
     out: &mut [u8],
