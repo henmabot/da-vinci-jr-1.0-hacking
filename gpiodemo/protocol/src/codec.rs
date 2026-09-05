@@ -1,7 +1,7 @@
 use crate::{
     command::{
-        DecodedRequest, DecodedResponse, Direction, Level, Query, QueryValue, Request, Response,
-        ResponseError, TargetError,
+        Command, DecodedRequest, DecodedResponse, Direction, Level, Query, QueryValue, Request,
+        Response, ResponseError, TargetError,
     },
     framing::MAX_PACKET_LEN,
     message::{Message, Packet, RequestId, parse_packet_id, valid_route_token},
@@ -76,43 +76,48 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
         kind: DecodeErrorKind::Malformed,
     };
 
+    let command = Command::try_from(command).map_err(|_| DecodeError {
+        id: Some(id),
+        kind: DecodeErrorKind::UnknownCommand,
+    })?;
+
     let body = match command {
-        b"HAI" if tokens.next().is_none() => Request::Hello,
-        b"HRU" if tokens.next().is_none() => Request::Status,
-        b"MAP" if tokens.next().is_none() => Request::Map,
-        b"BYE" if tokens.next().is_none() => Request::Bye,
-        b"DIR" => {
+        Command::Hello if tokens.next().is_none() => Request::Hello,
+        Command::Status if tokens.next().is_none() => Request::Status,
+        Command::Map if tokens.next().is_none() => Request::Map,
+        Command::Bye if tokens.next().is_none() => Request::Bye,
+        Command::Direction => {
             let target = next_target(&mut tokens, malformed())?;
             let direction: Direction = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Direction { target, direction }
         }
-        b"GET" => {
+        Command::Get => {
             let target = next_target(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Get { target }
         }
-        b"SET" => {
+        Command::Set => {
             let target = next_target(&mut tokens, malformed())?;
             let level: Level = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Set { target, level }
         }
-        b"PLL" => {
+        Command::Pullup => {
             let target = next_target(&mut tokens, malformed())?;
             let enabled =
                 parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Pullup { target, enabled }
         }
-        b"LSN" => {
+        Command::Listen => {
             let target = next_target(&mut tokens, malformed())?;
             let enabled =
                 parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Listen { target, enabled }
         }
-        b"WYD" => {
+        Command::Query => {
             let target = next_target(&mut tokens, malformed())?;
             let what: Query = next_as(&mut tokens, malformed())?;
             if tokens.next().is_some() {
@@ -120,13 +125,7 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
             }
             Request::Query { target, what }
         }
-        b"HAI" | b"HRU" | b"MAP" | b"BYE" => return Err(malformed()),
-        _ => {
-            return Err(DecodeError {
-                id: Some(id),
-                kind: DecodeErrorKind::UnknownCommand,
-            });
-        }
+        Command::Hello | Command::Status | Command::Map | Command::Bye => return Err(malformed()),
     };
 
     Ok(Packet { id, body })
@@ -286,12 +285,11 @@ fn encode_request_body<T: AsRef<[u8]>>(
     writer: &mut Writer<'_>,
     body: Request<T>,
 ) -> Result<(), EncodeError> {
+    writer.bytes(request_command(&body).as_ref())?;
     match body {
-        Request::Hello => writer.bytes(b"HAI")?,
-        Request::Status => writer.bytes(b"HRU")?,
-        Request::Map => writer.bytes(b"MAP")?,
+        Request::Hello | Request::Status | Request::Map | Request::Bye => {}
         Request::Direction { target, direction } => {
-            writer.bytes(b"DIR ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match direction {
                 Direction::Input => b" IN OK?",
@@ -299,12 +297,12 @@ fn encode_request_body<T: AsRef<[u8]>>(
             })?;
         }
         Request::Get { target } => {
-            writer.bytes(b"GET ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(b" OK?")?;
         }
         Request::Set { target, level } => {
-            writer.bytes(b"SET ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match level {
                 Level::Low => b" LOW OK?",
@@ -312,17 +310,17 @@ fn encode_request_body<T: AsRef<[u8]>>(
             })?;
         }
         Request::Pullup { target, enabled } => {
-            writer.bytes(b"PLL ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
         }
         Request::Listen { target, enabled } => {
-            writer.bytes(b"LSN ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(if enabled { b" ON OK?" } else { b" OFF OK?" })?;
         }
         Request::Query { target, what } => {
-            writer.bytes(b"WYD ")?;
+            writer.bytes(b" ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match what {
                 Query::Direction => b" DIR",
@@ -330,9 +328,23 @@ fn encode_request_body<T: AsRef<[u8]>>(
                 Query::Listen => b" LSN",
             })?;
         }
-        Request::Bye => writer.bytes(b"BYE")?,
     }
     Ok(())
+}
+
+fn request_command<T>(request: &Request<T>) -> Command {
+    match request {
+        Request::Hello => Command::Hello,
+        Request::Status => Command::Status,
+        Request::Map => Command::Map,
+        Request::Direction { .. } => Command::Direction,
+        Request::Get { .. } => Command::Get,
+        Request::Set { .. } => Command::Set,
+        Request::Pullup { .. } => Command::Pullup,
+        Request::Listen { .. } => Command::Listen,
+        Request::Query { .. } => Command::Query,
+        Request::Bye => Command::Bye,
+    }
 }
 
 pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(

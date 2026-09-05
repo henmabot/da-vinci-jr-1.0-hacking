@@ -1,5 +1,41 @@
 use core::fmt;
 
+macro_rules! fixed_wire_enum {
+    (
+        $vis:vis enum $name:ident {
+            $($variant:ident => $wire:literal),+ $(,)?
+        }
+    ) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        $vis enum $name {
+            $($variant),+
+        }
+
+        impl $name {
+            $vis const ALL: &'static [Self] = &[$(Self::$variant),+];
+        }
+
+        impl AsRef<[u8]> for $name {
+            fn as_ref(&self) -> &[u8] {
+                match self {
+                    $(Self::$variant => $wire),+
+                }
+            }
+        }
+
+        impl TryFrom<&[u8]> for $name {
+            type Error = ParseTokenError;
+
+            fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+                match token {
+                    $($wire => Ok(Self::$variant)),+,
+                    _ => Err(ParseTokenError),
+                }
+            }
+        }
+    };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseTokenError;
 
@@ -10,6 +46,21 @@ impl fmt::Display for ParseTokenError {
 }
 
 impl core::error::Error for ParseTokenError {}
+
+fixed_wire_enum! {
+    pub enum Command {
+        Hello => b"HAI",
+        Status => b"HRU",
+        Map => b"MAP",
+        Direction => b"DIR",
+        Get => b"GET",
+        Set => b"SET",
+        Pullup => b"PLL",
+        Listen => b"LSN",
+        Query => b"WYD",
+        Bye => b"BYE",
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {

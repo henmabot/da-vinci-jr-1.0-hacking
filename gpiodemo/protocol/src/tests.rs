@@ -243,6 +243,30 @@ fn request_wire_examples_use_symbolic_targets() {
 }
 
 #[test]
+fn request_command_wire_vocabulary_round_trips_and_is_canonical() {
+    let expected = [
+        (Command::Hello, b"HAI".as_slice()),
+        (Command::Status, b"HRU".as_slice()),
+        (Command::Map, b"MAP".as_slice()),
+        (Command::Direction, b"DIR".as_slice()),
+        (Command::Get, b"GET".as_slice()),
+        (Command::Set, b"SET".as_slice()),
+        (Command::Pullup, b"PLL".as_slice()),
+        (Command::Listen, b"LSN".as_slice()),
+        (Command::Query, b"WYD".as_slice()),
+        (Command::Bye, b"BYE".as_slice()),
+    ];
+    let commands = expected.map(|(command, _)| command);
+
+    assert_eq!(Command::ALL, commands.as_slice());
+    for (command, token) in expected {
+        assert_eq!(command.as_ref(), token);
+        assert_eq!(Command::try_from(token), Ok(command));
+    }
+    assert_eq!(Command::try_from(b"NOPE".as_slice()), Err(ParseTokenError));
+}
+
+#[test]
 fn response_wire_examples_use_symbolic_pins() {
     let cases = [
         (Response::Hello, "008 SAM HII <3\n"),
