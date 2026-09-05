@@ -17,7 +17,7 @@ mod board {
     };
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
-        BankId, GpioHal, Node, PinId,
+        BankId, GpioHal, Node, PinId, PinMode,
         router::Route,
         sam::{SAM_IDENTITY, SAM_PIN_MAP, SamBank},
         transport::{ByteError, FramedLink, NonBlockingBytes},
@@ -71,31 +71,31 @@ mod board {
             &SAM_PIN_MAP
         }
 
-        fn input(&mut self, pin: PinId, pullup: bool) {
+        fn configure(&mut self, pin: PinId, mode: PinMode) {
             with_pin!(pin, |port, mask| {
-                if pullup {
-                    port.ppddr.write_with_zero(|w| w.bits(mask));
-                    port.puer.write_with_zero(|w| w.bits(mask));
-                } else {
-                    port.pudr.write_with_zero(|w| w.bits(mask));
-                    port.ppddr.write_with_zero(|w| w.bits(mask));
+                match mode {
+                    PinMode::Input { pull_up } => {
+                        if pull_up {
+                            port.ppddr.write_with_zero(|w| w.bits(mask));
+                            port.puer.write_with_zero(|w| w.bits(mask));
+                        } else {
+                            port.pudr.write_with_zero(|w| w.bits(mask));
+                            port.ppddr.write_with_zero(|w| w.bits(mask));
+                        }
+                        port.odr.write_with_zero(|w| w.bits(mask));
+                    }
+                    PinMode::Output { initial } => {
+                        port.pudr.write_with_zero(|w| w.bits(mask));
+                        port.ppddr.write_with_zero(|w| w.bits(mask));
+                        if initial == Level::High {
+                            port.sodr.write_with_zero(|w| w.bits(mask));
+                        } else {
+                            port.codr.write_with_zero(|w| w.bits(mask));
+                        }
+                        port.oer.write_with_zero(|w| w.bits(mask));
+                        port.ower.write_with_zero(|w| w.bits(mask));
+                    }
                 }
-                port.odr.write_with_zero(|w| w.bits(mask));
-                port.per.write_with_zero(|w| w.bits(mask));
-            });
-        }
-
-        fn output(&mut self, pin: PinId, level: Level) {
-            with_pin!(pin, |port, mask| {
-                port.pudr.write_with_zero(|w| w.bits(mask));
-                port.ppddr.write_with_zero(|w| w.bits(mask));
-                if level == Level::High {
-                    port.sodr.write_with_zero(|w| w.bits(mask));
-                } else {
-                    port.codr.write_with_zero(|w| w.bits(mask));
-                }
-                port.oer.write_with_zero(|w| w.bits(mask));
-                port.ower.write_with_zero(|w| w.bits(mask));
                 port.per.write_with_zero(|w| w.bits(mask));
             });
         }

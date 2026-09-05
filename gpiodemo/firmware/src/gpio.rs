@@ -140,10 +140,15 @@ impl PinMap {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinMode {
+    Input { pull_up: bool },
+    Output { initial: Level },
+}
+
 pub trait GpioHal {
     fn pin_map(&self) -> &'static PinMap;
-    fn input(&mut self, pin: PinId, pull_up: bool);
-    fn output(&mut self, pin: PinId, level: Level);
+    fn configure(&mut self, pin: PinId, mode: PinMode);
     fn write(&mut self, pin: PinId, level: Level);
     fn read_bank(&self, bank: BankId) -> u32;
 }
@@ -430,10 +435,13 @@ impl Firmware {
             PinState::Configured { listener, .. } => listener,
             PinState::Unset => None,
         };
-        match direction {
-            Direction::Input => gpio.input(pin, false),
-            Direction::Output => gpio.output(pin, Level::Low),
-        }
+        let mode = match direction {
+            Direction::Input => PinMode::Input { pull_up: false },
+            Direction::Output => PinMode::Output {
+                initial: Level::Low,
+            },
+        };
+        gpio.configure(pin, mode);
         self.pins[pin.index()] = PinState::Configured {
             direction,
             pull_up: false,
@@ -519,11 +527,12 @@ impl Firmware {
         else {
             return;
         };
-        *pull_up = enabled;
-        if *direction == Direction::Input {
-            gpio.input(pin, enabled);
-            *previous = read_pin(map, gpio, pin);
+        if *direction != Direction::Input {
+            return;
         }
+        *pull_up = enabled;
+        gpio.configure(pin, PinMode::Input { pull_up: enabled });
+        *previous = read_pin(map, gpio, pin);
     }
 
     fn set_listening<G: GpioHal>(
@@ -608,7 +617,7 @@ impl Firmware {
             let pin = PinId(index as u8);
             let state = self.state_mut(pin);
             if !matches!(state, PinState::Unset) && map.pin(pin).capabilities.input() {
-                gpio.input(pin, false);
+                gpio.configure(pin, PinMode::Input { pull_up: false });
             }
             *state = PinState::Unset;
         }
@@ -716,17 +725,20 @@ mod tests {
             self.map
         }
 
-        fn input(&mut self, pin: PinId, pull_up: bool) {
-            self.inputs[pin.index()] = true;
-            self.outputs[pin.index()] = false;
-            self.pull_ups[pin.index()] = pull_up;
-        }
-
-        fn output(&mut self, pin: PinId, level: Level) {
-            self.inputs[pin.index()] = false;
-            self.outputs[pin.index()] = true;
-            self.pull_ups[pin.index()] = false;
-            self.values[pin.index()] = level;
+        fn configure(&mut self, pin: PinId, mode: PinMode) {
+            match mode {
+                PinMode::Input { pull_up } => {
+                    self.inputs[pin.index()] = true;
+                    self.outputs[pin.index()] = false;
+                    self.pull_ups[pin.index()] = pull_up;
+                }
+                PinMode::Output { initial } => {
+                    self.inputs[pin.index()] = false;
+                    self.outputs[pin.index()] = true;
+                    self.pull_ups[pin.index()] = false;
+                    self.values[pin.index()] = initial;
+                }
+            }
         }
 
         fn write(&mut self, pin: PinId, level: Level) {
@@ -925,6 +937,40 @@ mod tests {
                 target: b"PIO0_0".as_slice(),
                 level: Level::High,
             }
+        );
+    }
+
+    #[test]
+    fn pullup_does_not_reconfigure_output_pins() {
+        let mut firmware = firmware();
+        let mut gpio = FakeHal::new(&SYNTH_MAP);
+        firmware.handle(
+            request(
+                1,
+                Request::Direction {
+                    target: b"PIO0_0",
+                    direction: Direction::Output,
+                },
+            ),
+            &mut gpio,
+        );
+        assert_eq!(gpio.values[0], Level::Low);
+
+        firmware.handle(
+            request(
+                2,
+                Request::Pullup {
+                    target: b"PIO0_0",
+                    enabled: true,
+                },
+            ),
+            &mut gpio,
+        );
+
+        assert!(!gpio.pull_ups[0]);
+        assert_eq!(
+            firmware.query(PinId::new(0), Query::Pullup),
+            QueryValue::Enabled(false)
         );
     }
 

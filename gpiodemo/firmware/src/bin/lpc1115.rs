@@ -10,7 +10,7 @@ mod board {
 
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
-        BankId, GpioHal, Node, PinId,
+        BankId, GpioHal, Node, PinId, PinMode,
         lpc::{LPC_IDENTITY, LPC_PIN_MAP, LpcBank, LpcPadKind, pin_hw},
         transport::{ByteError, NonBlockingBytes},
     };
@@ -38,7 +38,7 @@ mod board {
             }
         }
 
-        fn configure(&self, pin: PinId, pull_up: bool) {
+        fn configure_pad(&self, pin: PinId, pull_up: bool) {
             let hw = pin_hw(pin);
             let offset = hw.iocon_offset() as usize;
             // SAFETY: LpcGpio owns IOCON for the lifetime of this adapter. Each PinId comes from
@@ -74,25 +74,26 @@ mod board {
             &LPC_PIN_MAP
         }
 
-        fn input(&mut self, pin: PinId, pull_up: bool) {
-            self.configure(pin, pull_up);
+        fn configure(&mut self, pin: PinId, mode: PinMode) {
             let hw = pin_hw(pin);
             let mask = 1u32 << hw.bit();
-            // The PAC models DIR as a whole-bank bitmap, so a raw masked update is the only
-            // available way to change one GPIO direction without disturbing its neighbours.
-            self.registers(hw.bank())
-                .dir
-                .modify(|r, w| unsafe { w.bits(r.bits() & !mask) });
-        }
-
-        fn output(&mut self, pin: PinId, level: Level) {
-            self.configure(pin, false);
-            self.write(pin, level);
-            let hw = pin_hw(pin);
-            let mask = 1u32 << hw.bit();
-            self.registers(hw.bank())
-                .dir
-                .modify(|r, w| unsafe { w.bits(r.bits() | mask) });
+            match mode {
+                PinMode::Input { pull_up } => {
+                    self.configure_pad(pin, pull_up);
+                    // The PAC models DIR as a whole-bank bitmap, so a raw masked update is the
+                    // only available way to change one GPIO direction without disturbing peers.
+                    self.registers(hw.bank())
+                        .dir
+                        .modify(|r, w| unsafe { w.bits(r.bits() & !mask) });
+                }
+                PinMode::Output { initial } => {
+                    self.configure_pad(pin, false);
+                    self.write(pin, initial);
+                    self.registers(hw.bank())
+                        .dir
+                        .modify(|r, w| unsafe { w.bits(r.bits() | mask) });
+                }
+            }
         }
 
         fn write(&mut self, pin: PinId, level: Level) {

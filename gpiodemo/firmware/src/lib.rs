@@ -9,6 +9,6 @@ pub mod transport;
 
 pub use gpio::{
     BankId, BankInfo, Capabilities, Firmware, GpioHal, MAX_BANKS, MAX_PINS, PinId, PinInfo, PinMap,
-    Target,
+    PinMode, Target,
 };
 pub use node::Node;

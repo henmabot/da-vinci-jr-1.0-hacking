@@ -165,7 +165,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap,
+        BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap, PinMode,
         router::{FrameError, FrameLink},
     };
 
@@ -189,17 +189,20 @@ mod tests {
             &MAP
         }
 
-        fn input(&mut self, _: PinId, _: bool) {}
+        fn configure(&mut self, _: PinId, mode: PinMode) {
+            if let PinMode::Output { initial } = mode {
+                self.bank = match initial {
+                    Level::Low => 0,
+                    Level::High => 1 << 3,
+                };
+            }
+        }
 
-        fn output(&mut self, _: PinId, level: Level) {
+        fn write(&mut self, _: PinId, level: Level) {
             self.bank = match level {
                 Level::Low => 0,
                 Level::High => 1 << 3,
             };
-        }
-
-        fn write(&mut self, _: PinId, level: Level) {
-            self.output(PinId::new(0), level);
         }
 
         fn read_bank(&self, _: BankId) -> u32 {
