@@ -1,15 +1,32 @@
-use crate::gpio::{BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap};
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
+use crate::gpio::map::{BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap};
 
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+use core::ptr::{read_volatile, write_volatile};
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+use da_vinci_protocol::Level;
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+use lpc11xx as pac;
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+use crate::{
+    gpio::{GpioHal, PinMode},
+    transport::{ByteError, NonBlockingBytes},
+};
+
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LpcBank {
+pub(crate) enum LpcBank {
     Pio0,
     Pio1,
     Pio2,
     Pio3,
 }
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 impl LpcBank {
-    pub const fn id(self) -> BankId {
+    pub(crate) const fn id(self) -> BankId {
         BankId::new(match self {
             Self::Pio0 => 0,
             Self::Pio1 => 1,
@@ -18,7 +35,8 @@ impl LpcBank {
         })
     }
 
-    pub fn from_id(id: BankId) -> Option<Self> {
+    #[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+    pub(crate) fn from_id(id: BankId) -> Option<Self> {
         match id.index() {
             0 => Some(Self::Pio0),
             1 => Some(Self::Pio1),
@@ -29,15 +47,17 @@ impl LpcBank {
     }
 }
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LpcPadKind {
+enum LpcPadKind {
     Standard,
     Analog,
     I2cOpenDrain,
 }
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LpcPinHw {
+struct LpcPinHw {
     bank: LpcBank,
     bit: u8,
     iocon_offset: u8,
@@ -45,30 +65,35 @@ pub struct LpcPinHw {
     pad_kind: LpcPadKind,
 }
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 impl LpcPinHw {
-    pub const fn bank(self) -> LpcBank {
+    const fn bank(self) -> LpcBank {
         self.bank
     }
 
-    pub const fn bit(self) -> u8 {
+    const fn bit(self) -> u8 {
         self.bit
     }
 
-    pub const fn iocon_offset(self) -> u8 {
+    #[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+    const fn iocon_offset(self) -> u8 {
         self.iocon_offset
     }
 
-    pub const fn gpio_function(self) -> u8 {
+    #[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+    const fn gpio_function(self) -> u8 {
         self.gpio_function
     }
 
-    pub const fn pad_kind(self) -> LpcPadKind {
+    #[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+    const fn pad_kind(self) -> LpcPadKind {
         self.pad_kind
     }
 }
 
 pub const LPC_IDENTITY: &[u8] = b"LPC1115 GPIO";
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 static BANKS: [BankInfo; 4] = [
     BankInfo::new("PIO0"),
     BankInfo::new("PIO1"),
@@ -76,6 +101,7 @@ static BANKS: [BankInfo; 4] = [
     BankInfo::new("PIO3"),
 ];
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 macro_rules! lpc_pins {
     ($($token:literal => {
         package: $package:literal,
@@ -108,6 +134,7 @@ macro_rules! lpc_pins {
     };
 }
 
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
 lpc_pins! {
     "PIO0_0" => { package: 3, bank: Pio0, bit: 0, iocon: 0x0c, function: 0, kind: Standard, caps: NONE },
     "PIO0_1" => { package: 4, bank: Pio0, bit: 1, iocon: 0x10, function: 0, kind: Standard, caps: INPUT },
@@ -153,16 +180,163 @@ lpc_pins! {
     "PIO3_5" => { package: 21, bank: Pio3, bit: 5, iocon: 0x48, function: 0, kind: Standard, caps: INPUT },
 }
 
-pub static LPC_PIN_MAP: PinMap = PinMap::new(&BANKS, PINS);
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
+pub(crate) static LPC_PIN_MAP: PinMap = PinMap::new(&BANKS, PINS);
 
-pub fn pin_hw(pin: PinId) -> &'static LpcPinHw {
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
+fn pin_hw(pin: PinId) -> &'static LpcPinHw {
     &LPC_HW[pin.index()]
+}
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+pub struct LpcGpio {
+    _iocon: pac::IOCON,
+    gpio0: pac::GPIO0,
+    gpio1: pac::GPIO1,
+    gpio2: pac::GPIO2,
+    gpio3: pac::GPIO3,
+}
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+impl LpcGpio {
+    pub const fn new(
+        iocon: pac::IOCON,
+        gpio0: pac::GPIO0,
+        gpio1: pac::GPIO1,
+        gpio2: pac::GPIO2,
+        gpio3: pac::GPIO3,
+    ) -> Self {
+        Self {
+            _iocon: iocon,
+            gpio0,
+            gpio1,
+            gpio2,
+            gpio3,
+        }
+    }
+
+    fn registers(&self, bank: LpcBank) -> &pac::gpio0::RegisterBlock {
+        match bank {
+            LpcBank::Pio0 => &self.gpio0,
+            LpcBank::Pio1 => &self.gpio1,
+            LpcBank::Pio2 => &self.gpio2,
+            LpcBank::Pio3 => &self.gpio3,
+        }
+    }
+
+    fn configure_pad(&self, pin: PinId, pull_up: bool) {
+        let hw = pin_hw(pin);
+        let offset = hw.iocon_offset() as usize;
+        // SAFETY: LpcGpio owns IOCON for its lifetime. Each PinId comes from LPC_PIN_MAP and has
+        // matching hardware metadata. The PAC exposes IOCON as named registers rather than an
+        // indexable array, so volatile pointer access is required for metadata-driven dispatch.
+        unsafe {
+            let register = (pac::IOCON::ptr() as *mut u8).add(offset).cast::<u32>();
+            let current = read_volatile(register);
+            let next = match hw.pad_kind() {
+                LpcPadKind::I2cOpenDrain => (current & !(0x07 | (0x03 << 8))) | (1 << 8),
+                LpcPadKind::Standard | LpcPadKind::Analog => {
+                    let mode = if pull_up { 2 } else { 0 };
+                    let mut bits = (current & !(0x07 | (0x03 << 3)))
+                        | u32::from(hw.gpio_function())
+                        | ((mode as u32) << 3);
+                    if hw.pad_kind() == LpcPadKind::Analog {
+                        bits |= 1 << 7;
+                    }
+                    bits
+                }
+            };
+            write_volatile(register, next);
+        }
+    }
+}
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+impl GpioHal for LpcGpio {
+    fn pin_map(&self) -> &'static PinMap {
+        &LPC_PIN_MAP
+    }
+
+    fn configure(&mut self, pin: PinId, mode: PinMode) {
+        let hw = pin_hw(pin);
+        let mask = 1u32 << hw.bit();
+        match mode {
+            PinMode::Input { pull_up } => {
+                self.configure_pad(pin, pull_up);
+                // DIR is a whole-bank bitmap in this PAC, so changing one pin requires a masked
+                // raw update while preserving neighbouring direction bits.
+                self.registers(hw.bank())
+                    .dir
+                    .modify(|r, w| unsafe { w.bits(r.bits() & !mask) });
+            }
+            PinMode::Output { initial } => {
+                self.configure_pad(pin, false);
+                self.write(pin, initial);
+                self.registers(hw.bank())
+                    .dir
+                    .modify(|r, w| unsafe { w.bits(r.bits() | mask) });
+            }
+        }
+    }
+
+    fn write(&mut self, pin: PinId, level: Level) {
+        let hw = pin_hw(pin);
+        let mask = 1u32 << hw.bit();
+        // DATA is likewise exposed as a whole-bank bitmap by this PAC.
+        self.registers(hw.bank()).data.modify(|r, w| unsafe {
+            w.bits(match level {
+                Level::Low => r.bits() & !mask,
+                Level::High => r.bits() | mask,
+            })
+        });
+    }
+
+    fn read_bank(&self, bank: BankId) -> u32 {
+        self.registers(LpcBank::from_id(bank).expect("LPC pin map contains only GPIO0-3"))
+            .data
+            .read()
+            .bits()
+    }
+}
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+pub struct LpcUart(pac::UART);
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+impl LpcUart {
+    pub const fn new(uart: pac::UART) -> Self {
+        Self(uart)
+    }
+}
+
+#[cfg(all(target_arch = "arm", feature = "lpc1115"))]
+impl NonBlockingBytes for LpcUart {
+    fn try_read(&mut self, out: &mut [u8]) -> Result<usize, ByteError> {
+        let mut read = 0;
+        while read < out.len() && self.0.lsr.read().rdr().bit_is_set() {
+            out[read] = self.0.rbr().read().rbr().bits();
+            read += 1;
+        }
+        if read == 0 {
+            Err(ByteError::WouldBlock)
+        } else {
+            Ok(read)
+        }
+    }
+
+    fn try_write(&mut self, bytes: &[u8]) -> Result<usize, ByteError> {
+        if bytes.is_empty() || !self.0.lsr.read().thre().bit_is_set() {
+            return Err(ByteError::WouldBlock);
+        }
+        self.0.thr().write(|w| w.thr().bits(bytes[0]));
+        Ok(1)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Target;
+    use crate::gpio::Target;
 
     #[test]
     fn map_covers_the_48_pin_package_conservatively() {

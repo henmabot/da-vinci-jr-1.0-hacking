@@ -1,157 +1,12 @@
-pub use da_vinci_protocol::PinCapabilities as Capabilities;
 use da_vinci_protocol::{
     DecodedRequest, Direction, Level, Packet, Query, QueryValue, RequestId, Response,
     ResponseError, TargetError,
 };
 
-pub const MAX_PINS: usize = 128;
-pub const MAX_BANKS: usize = 8;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PinId(u8);
-
-impl PinId {
-    pub const fn new(index: u8) -> Self {
-        Self(index)
-    }
-
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BankId(u8);
-
-impl BankId {
-    pub const fn new(index: u8) -> Self {
-        Self(index)
-    }
-
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BankInfo {
-    pub token: &'static str,
-}
-
-impl BankInfo {
-    pub const fn new(token: &'static str) -> Self {
-        Self { token }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PinInfo {
-    pub token: &'static str,
-    pub package_pin: Option<u16>,
-    pub bank: BankId,
-    pub bit: u8,
-    pub capabilities: Capabilities,
-}
-
-impl PinInfo {
-    pub const fn new(
-        token: &'static str,
-        package_pin: Option<u16>,
-        bank: BankId,
-        bit: u8,
-        capabilities: Capabilities,
-    ) -> Self {
-        Self {
-            token,
-            package_pin,
-            bank,
-            bit,
-            capabilities,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Pin(PinId),
-    Bank(BankId),
-    All,
-}
-
-pub struct PinMap {
-    banks: &'static [BankInfo],
-    pins: &'static [PinInfo],
-}
-
-impl PinMap {
-    pub const fn new(banks: &'static [BankInfo], pins: &'static [PinInfo]) -> Self {
-        assert!(banks.len() <= MAX_BANKS);
-        assert!(pins.len() <= MAX_PINS);
-        assert!(pins.len() <= u8::MAX as usize);
-        Self { banks, pins }
-    }
-
-    pub const fn banks(&self) -> &'static [BankInfo] {
-        self.banks
-    }
-
-    pub const fn pins(&self) -> &'static [PinInfo] {
-        self.pins
-    }
-
-    pub fn bank(&self, id: BankId) -> &'static BankInfo {
-        &self.banks[id.index()]
-    }
-
-    pub fn pin(&self, id: PinId) -> &'static PinInfo {
-        &self.pins[id.index()]
-    }
-
-    pub fn resolve(&self, token: &[u8]) -> Option<Target> {
-        if token == b"ALL" {
-            return Some(Target::All);
-        }
-        if let Some(index) = self
-            .banks
-            .iter()
-            .position(|bank| bank.token.as_bytes() == token)
-        {
-            return Some(Target::Bank(BankId(index as u8)));
-        }
-        self.pins
-            .iter()
-            .position(|pin| pin.token.as_bytes() == token)
-            .map(|index| Target::Pin(PinId(index as u8)))
-    }
-
-    pub fn pins_for(&self, target: Target) -> impl Iterator<Item = PinId> + '_ {
-        self.pins
-            .iter()
-            .enumerate()
-            .filter_map(move |(index, pin)| {
-                let id = PinId(index as u8);
-                match target {
-                    Target::Pin(target) if target == id => Some(id),
-                    Target::Bank(bank) if pin.bank == bank => Some(id),
-                    Target::All => Some(id),
-                    _ => None,
-                }
-            })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PinMode {
-    Input { pull_up: bool },
-    Output { initial: Level },
-}
-
-pub trait GpioHal {
-    fn pin_map(&self) -> &'static PinMap;
-    fn configure(&mut self, pin: PinId, mode: PinMode);
-    fn write(&mut self, pin: PinId, level: Level);
-    fn read_bank(&self, bank: BankId) -> u32;
-}
+use super::{
+    GpioHal, PinMode,
+    map::{MAX_BANKS, MAX_PINS, PinId, PinMap, Target},
+};
 
 type FirmwareResponse = Response<&'static [u8], &'static [u8]>;
 
@@ -180,7 +35,7 @@ struct BulkResponse {
     kind: BulkKind,
 }
 
-pub struct Firmware {
+pub(crate) struct Firmware {
     identity: &'static [u8],
     pins: [PinState; MAX_PINS],
     bulk: Option<BulkResponse>,
@@ -188,7 +43,7 @@ pub struct Firmware {
 }
 
 impl Firmware {
-    pub const fn new(identity: &'static [u8]) -> Self {
+    pub(crate) const fn new(identity: &'static [u8]) -> Self {
         Self {
             identity,
             pins: [PinState::Unset; MAX_PINS],
@@ -197,7 +52,7 @@ impl Firmware {
         }
     }
 
-    pub fn handle<G: GpioHal>(
+    pub(crate) fn handle<G: GpioHal>(
         &mut self,
         packet: Packet<DecodedRequest<'_>>,
         gpio: &mut G,
@@ -292,7 +147,7 @@ impl Firmware {
             .expect("new bulk response always yields a packet")
     }
 
-    pub fn poll_bulk<G: GpioHal>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
+    pub(crate) fn poll_bulk<G: GpioHal>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
         let map = gpio.pin_map();
         let BulkResponse { id, mut next, kind } = self.bulk?;
 
@@ -327,7 +182,7 @@ impl Firmware {
         };
 
         while next < map.pins().len() {
-            let pin = PinId(next as u8);
+            let pin = PinId::new(next as u8);
             next += 1;
             let info = map.pin(pin);
             if !target_contains(map, target, pin) || !info.capabilities.available() {
@@ -362,7 +217,10 @@ impl Firmware {
         })
     }
 
-    pub fn poll_listener<G: GpioHal>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
+    pub(crate) fn poll_listener<G: GpioHal>(
+        &mut self,
+        gpio: &G,
+    ) -> Option<Packet<FirmwareResponse>> {
         let map = gpio.pin_map();
         let pin_count = map.pins().len();
         if pin_count == 0 {
@@ -372,7 +230,7 @@ impl Firmware {
         let mut snapshots = [None; MAX_BANKS];
         for offset in 0..pin_count {
             let index = (self.listener_cursor + offset) % pin_count;
-            let pin = PinId(index as u8);
+            let pin = PinId::new(index as u8);
             let PinState::Configured {
                 listener: Some(listener),
                 previous,
@@ -614,7 +472,7 @@ impl Firmware {
         self.listener_cursor = 0;
         let map = gpio.pin_map();
         for index in 0..map.pins().len() {
-            let pin = PinId(index as u8);
+            let pin = PinId::new(index as u8);
             let state = self.state_mut(pin);
             if !matches!(state, PinState::Unset) && map.pin(pin).capabilities.input() {
                 gpio.configure(pin, PinMode::Input { pull_up: false });
@@ -679,7 +537,10 @@ mod tests {
     use core::cell::Cell;
 
     use super::*;
-    use crate::sam::{BANK_A, BANK_B, BANK_C, SAM_IDENTITY, SAM_PIN_MAP};
+    use crate::{
+        gpio::map::{BankId, BankInfo, Capabilities, PinInfo},
+        sam::{SAM_IDENTITY, SAM_PIN_MAP},
+    };
     use da_vinci_protocol::Request;
 
     const BANK_0: BankId = BankId::new(0);
@@ -770,35 +631,6 @@ mod tests {
 
     fn firmware() -> Firmware {
         Firmware::new(b"SYNTH GPIO")
-    }
-
-    #[test]
-    fn sam_map_preserves_native_names_package_pins_and_reservations() {
-        assert_eq!(SAM_PIN_MAP.banks().len(), 5);
-        assert_eq!(SAM_PIN_MAP.pins().len(), 117);
-        assert_eq!(SAM_PIN_MAP.bank(BANK_C).token, "PIOC");
-
-        let Target::Pin(pb12) = SAM_PIN_MAP.resolve(b"PB12").unwrap() else {
-            panic!("PB12 must resolve to a pin");
-        };
-        assert_eq!(SAM_PIN_MAP.pin(pb12).package_pin, Some(87));
-
-        for token in [b"PA05".as_slice(), b"PA06"] {
-            let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {
-                panic!("reserved SAM UART target must still be present in metadata");
-            };
-            assert!(!SAM_PIN_MAP.pin(pin).capabilities.available());
-            assert_eq!(SAM_PIN_MAP.pin(pin).bank, BANK_A);
-        }
-
-        for token in [b"PB08".as_slice(), b"PB09", b"PB10", b"PB11"] {
-            let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {
-                panic!("reserved SAM target must still be present in metadata");
-            };
-            assert!(!SAM_PIN_MAP.pin(pin).capabilities.available());
-            assert_eq!(SAM_PIN_MAP.pin(pin).bank, BANK_B);
-        }
-        assert_eq!(SAM_IDENTITY, b"SAM4E8E GPIO");
     }
 
     #[test]

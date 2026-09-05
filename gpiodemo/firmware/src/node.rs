@@ -4,7 +4,7 @@ use da_vinci_protocol::{
 };
 
 use crate::{
-    Firmware, GpioHal,
+    gpio::{Firmware, GpioHal},
     router::{Route, Router},
     transport::{ByteError, FramedTransport, NonBlockingBytes},
 };
@@ -165,7 +165,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap, PinMode,
+        BankId, PinId, PinMap, PinMode,
+        gpio::map::{BankInfo, Capabilities, PinInfo},
         router::{FrameError, FrameLink},
     };
 

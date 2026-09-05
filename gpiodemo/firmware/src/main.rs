@@ -9,7 +9,6 @@ mod board {
     use atsam4_hal::{
         clock::{ClockController, MainClock, SlowClock},
         gpio::{GpioExt, Ports},
-        hal::serial::{Read, Write},
         pac,
         serial::Uart1,
         udp::{UdpBus, usb_device},
@@ -17,113 +16,17 @@ mod board {
     };
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
-        BankId, GpioHal, Node, PinId, PinMode,
+        Node,
         router::Route,
-        sam::{SAM_IDENTITY, SAM_PIN_MAP, SamBank},
+        sam::{SAM_IDENTITY, SamGpio, SamUartBytes},
         transport::{ByteError, FramedLink, NonBlockingBytes},
     };
-    use da_vinci_protocol::Level;
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
     const LOCAL_ROUTE: &[u8] = b"SAM";
     const LPC_DESTINATIONS: &[&[u8]] = &[b"LPC"];
-
-    struct SamGpio;
-
-    macro_rules! with_pin {
-        ($pin:expr, |$port:ident, $mask:ident| $body:block) => {{
-            let info = SAM_PIN_MAP.pin($pin);
-            let $mask = 1u32 << info.bit;
-            // SAFETY: Firmware is the only SamGpio caller and only passes IDs from SAM_PIN_MAP.
-            // Reserved clock/USB pins never reach this adapter,
-            // and the firmware loop is single-threaded, so these MMIO registers are not aliased.
-            unsafe {
-                match SamBank::from_id(info.bank).expect("SAM pin map contains only PIOA-E") {
-                    SamBank::A => {
-                        let $port = &*pac::PIOA::ptr();
-                        $body
-                    }
-                    SamBank::B => {
-                        let $port = &*pac::PIOB::ptr();
-                        $body
-                    }
-                    SamBank::C => {
-                        let $port = &*pac::PIOC::ptr();
-                        $body
-                    }
-                    SamBank::D => {
-                        let $port = &*pac::PIOD::ptr();
-                        $body
-                    }
-                    SamBank::E => {
-                        let $port = &*pac::PIOE::ptr();
-                        $body
-                    }
-                }
-            }
-        }};
-    }
-
-    impl GpioHal for SamGpio {
-        fn pin_map(&self) -> &'static da_vinci_firmware::PinMap {
-            &SAM_PIN_MAP
-        }
-
-        fn configure(&mut self, pin: PinId, mode: PinMode) {
-            with_pin!(pin, |port, mask| {
-                match mode {
-                    PinMode::Input { pull_up } => {
-                        if pull_up {
-                            port.ppddr.write_with_zero(|w| w.bits(mask));
-                            port.puer.write_with_zero(|w| w.bits(mask));
-                        } else {
-                            port.pudr.write_with_zero(|w| w.bits(mask));
-                            port.ppddr.write_with_zero(|w| w.bits(mask));
-                        }
-                        port.odr.write_with_zero(|w| w.bits(mask));
-                    }
-                    PinMode::Output { initial } => {
-                        port.pudr.write_with_zero(|w| w.bits(mask));
-                        port.ppddr.write_with_zero(|w| w.bits(mask));
-                        if initial == Level::High {
-                            port.sodr.write_with_zero(|w| w.bits(mask));
-                        } else {
-                            port.codr.write_with_zero(|w| w.bits(mask));
-                        }
-                        port.oer.write_with_zero(|w| w.bits(mask));
-                        port.ower.write_with_zero(|w| w.bits(mask));
-                    }
-                }
-                port.per.write_with_zero(|w| w.bits(mask));
-            });
-        }
-
-        fn write(&mut self, pin: PinId, level: Level) {
-            with_pin!(pin, |port, mask| {
-                if level == Level::High {
-                    port.sodr.write_with_zero(|w| w.bits(mask));
-                } else {
-                    port.codr.write_with_zero(|w| w.bits(mask));
-                }
-            });
-        }
-
-        fn read_bank(&self, bank: BankId) -> u32 {
-            // SAFETY: Firmware is the only SamGpio caller, the loop is single-threaded,
-            // and reading PDSR does not mutate or alias the PIO registers.
-            unsafe {
-                match SamBank::from_id(bank).expect("SAM pin map contains only PIOA-E") {
-                    SamBank::A => (&*pac::PIOA::ptr()).pdsr.read().bits(),
-                    SamBank::B => (&*pac::PIOB::ptr()).pdsr.read().bits(),
-                    SamBank::C => (&*pac::PIOC::ptr()).pdsr.read().bits(),
-                    SamBank::D => (&*pac::PIOD::ptr()).pdsr.read().bits(),
-                    SamBank::E => (&*pac::PIOE::ptr()).pdsr.read().bits(),
-                }
-            }
-        }
-    }
 
     struct UsbBytes<'a, 'bus, B: usb_device::bus::UsbBus>(&'a mut SerialPort<'bus, B>);
 
@@ -134,45 +37,6 @@ mod board {
 
         fn try_write(&mut self, bytes: &[u8]) -> Result<usize, ByteError> {
             self.0.write(bytes).map_err(byte_error)
-        }
-    }
-
-    struct SamUartBytes(Uart1);
-
-    impl NonBlockingBytes for SamUartBytes {
-        fn try_read(&mut self, out: &mut [u8]) -> Result<usize, ByteError> {
-            let mut read = 0;
-            while read < out.len() {
-                match self.0.read() {
-                    Ok(byte) => {
-                        out[read] = byte;
-                        read += 1;
-                    }
-                    Err(nb::Error::WouldBlock) => break,
-                    Err(nb::Error::Other(_)) => return Err(ByteError::Down),
-                }
-            }
-            if read == 0 {
-                Err(ByteError::WouldBlock)
-            } else {
-                Ok(read)
-            }
-        }
-
-        fn try_write(&mut self, bytes: &[u8]) -> Result<usize, ByteError> {
-            let mut written = 0;
-            while written < bytes.len() {
-                match self.0.write(bytes[written]) {
-                    Ok(()) => written += 1,
-                    Err(nb::Error::WouldBlock) => break,
-                    Err(nb::Error::Other(_)) => return Err(ByteError::Down),
-                }
-            }
-            if written == 0 {
-                Err(ByteError::WouldBlock)
-            } else {
-                Ok(written)
-            }
         }
     }
 
@@ -231,7 +95,7 @@ mod board {
             115_200,
             None,
         );
-        let mut lpc_link = FramedLink::new(SamUartBytes(uart));
+        let mut lpc_link = FramedLink::new(SamUartBytes::new(uart));
         let lpc_route = Route::new(b"LPC", LPC_DESTINATIONS, &mut lpc_link);
         let mut gpio = SamGpio;
         let mut node = Node::new(SAM_IDENTITY, LOCAL_ROUTE, [lpc_route]);

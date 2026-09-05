@@ -1,14 +1,13 @@
 #![no_std]
 
-pub mod gpio;
+mod gpio;
+#[cfg(feature = "lpc1115")]
 pub mod lpc;
-pub mod node;
+mod node;
 pub mod router;
+#[cfg(feature = "sam4e8e")]
 pub mod sam;
 pub mod transport;
 
-pub use gpio::{
-    BankId, BankInfo, Capabilities, Firmware, GpioHal, MAX_BANKS, MAX_PINS, PinId, PinInfo, PinMap,
-    PinMode, Target,
-};
+pub use gpio::{BankId, GpioHal, PinId, PinMap, PinMode};
 pub use node::Node;
