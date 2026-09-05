@@ -3,8 +3,13 @@ mod serial_log;
 
 use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
-use connection::{Connection, DeviceEvent, Event as ConnectionEvent, Request};
-use da_vinci_protocol::{Direction, Level, Pin, PinTable, PinTarget, Port, ResponseError};
+use connection::{
+    BankKey, Connection, DeviceEvent, Event as ConnectionEvent, PinKey, Request as RoutedRequest,
+    ResponseError, RouteKey, Target as RoutedTarget,
+};
+use da_vinci_protocol::{
+    Direction, Level, Pin, PinTable, PinTarget, Port, Request as ProtocolRequest,
+};
 use iced::{
     Background, Border, Color, Element, Length, Size, Subscription, Task, Theme,
     alignment::{Horizontal, Vertical},
@@ -18,6 +23,8 @@ use serial_log::SerialLog;
 
 const MAX_IO_EVENTS_PER_TICK: usize = 256;
 const MAX_COMMAND_HISTORY: usize = 200;
+const ROUTES: [&str; 2] = ["SAM", "LPC"];
+type Request = ProtocolRequest<PinTarget>;
 const MODES: [Mode; 3] = [Mode::Input, Mode::InputPullup, Mode::Output];
 const BULK_SCOPES: [PinTarget; 6] = [
     PinTarget::All,
@@ -256,6 +263,10 @@ struct App {
     selected_port: Option<PortChoice>,
     connected_port: Option<String>,
     connection: Connection,
+    sam_route: RouteKey,
+    lpc_route: RouteKey,
+    sam_pin_keys: PinTable<Option<PinKey>>,
+    sam_bank_keys: [Option<BankKey>; 5],
     log: SerialLog,
     autoscroll: bool,
     log_scroll: iced::widget::Id,
@@ -275,6 +286,14 @@ impl App {
             .split(pane_grid::Axis::Vertical, pins_pane, PaneKind::Log)
             .expect("initial GPIO/log split must succeed");
         panes.resize(split, 0.76);
+        let connection = Connection::spawn(&ROUTES);
+        let sam_route = connection
+            .route_key("SAM")
+            .expect("SAM route is configured");
+        let lpc_route = connection
+            .route_key("LPC")
+            .expect("LPC route is configured");
+
         (
             Self {
                 pins: PinTable::filled(PinState::UNSET),
@@ -287,7 +306,11 @@ impl App {
                 ports: Vec::new(),
                 selected_port: None,
                 connected_port: None,
-                connection: Connection::spawn(),
+                connection,
+                sam_route,
+                lpc_route,
+                sam_pin_keys: PinTable::filled(None),
+                sam_bank_keys: [None; 5],
                 log: SerialLog::new(),
                 autoscroll: true,
                 log_scroll: iced::widget::Id::unique(),
@@ -1012,11 +1035,79 @@ impl App {
         }
     }
 
+    fn routed_target(&self, target: PinTarget) -> Result<RoutedTarget, String> {
+        match target {
+            PinTarget::Pin(pin) => self.sam_pin_keys[pin]
+                .map(RoutedTarget::Pin)
+                .ok_or_else(|| format!("{} is not present in the discovered SAM map", pin)),
+            PinTarget::Bank(port) => self.sam_bank_keys[port_index(port)]
+                .map(RoutedTarget::Bank)
+                .ok_or_else(|| format!("{port} is not present in the discovered SAM map")),
+            PinTarget::All => Ok(RoutedTarget::All),
+        }
+    }
+
+    fn routed_request(&self, request: Request) -> Result<RoutedRequest, String> {
+        request.try_map_target(|target| self.routed_target(target))
+    }
+
+    fn legacy_target(&self, target: RoutedTarget) -> Option<PinTarget> {
+        match target {
+            RoutedTarget::Pin(pin) if pin.route() == self.sam_route => Pin::all()
+                .find(|candidate| self.sam_pin_keys[*candidate] == Some(pin))
+                .map(PinTarget::Pin),
+            RoutedTarget::Bank(bank) => [Port::A, Port::B, Port::C, Port::D, Port::E]
+                .into_iter()
+                .find(|port| self.sam_bank_keys[port_index(*port)] == Some(bank))
+                .map(PinTarget::Bank),
+            RoutedTarget::All => Some(PinTarget::All),
+            RoutedTarget::Pin(_) => None,
+        }
+    }
+
+    fn legacy_request(&self, route: RouteKey, request: RoutedRequest) -> Option<Request> {
+        (route == self.sam_route)
+            .then(|| request.try_map_target(|target| self.legacy_target(target).ok_or(())))?
+            .ok()
+    }
+
+    fn legacy_pin(&self, pin: PinKey) -> Option<Pin> {
+        (pin.route() == self.sam_route).then_some(())?;
+        Pin::all().find(|candidate| self.sam_pin_keys[*candidate] == Some(pin))
+    }
+
+    fn sync_sam_map(&mut self) {
+        self.sam_pin_keys.fill(None);
+        self.sam_bank_keys.fill(None);
+        for pin in Pin::all() {
+            self.sam_pin_keys[pin] = self.connection.pin_key(self.sam_route, &pin.to_string());
+        }
+        for port in [Port::A, Port::B, Port::C, Port::D, Port::E] {
+            self.sam_bank_keys[port_index(port)] =
+                self.connection.bank_key(self.sam_route, &port.to_string());
+        }
+    }
+
+    fn send_routed_request(&mut self, route: RouteKey, request: RoutedRequest) {
+        match self.connection.send(route, request) {
+            Ok(line) => self.push_log(format!("TX {line}")),
+            Err(error) => self.error = Some(error),
+        }
+    }
+
     fn send_request(&mut self, request: Request) {
         if !self.require_connection() {
             return;
         }
-        match self.connection.send(request) {
+        let routed = match self.routed_request(request) {
+            Ok(request) => request,
+            Err(error) => {
+                self.fail_request(request);
+                self.error = Some(error);
+                return;
+            }
+        };
+        match self.connection.send(self.sam_route, routed) {
             Ok(line) => self.push_log(format!("TX {line}")),
             Err(error) => {
                 self.fail_request(request);
@@ -1063,14 +1154,20 @@ impl App {
             match event {
                 ConnectionEvent::Connected(port) => {
                     self.connected_port = Some(port.clone());
-                    self.device_status = "Connected".into();
+                    self.device_status = "Connected; discovering pin maps".into();
                     self.error = None;
                     self.reset_pins();
+                    self.sam_pin_keys.fill(None);
+                    self.sam_bank_keys.fill(None);
+                    self.send_routed_request(self.sam_route, RoutedRequest::Map);
+                    self.send_routed_request(self.lpc_route, RoutedRequest::Map);
                 }
                 ConnectionEvent::Disconnected(reason) => {
                     self.connected_port = None;
                     self.device_status = "Disconnected".into();
                     self.reset_pending();
+                    self.sam_pin_keys.fill(None);
+                    self.sam_bank_keys.fill(None);
                     self.error = reason;
                 }
                 ConnectionEvent::Received { line, event } => {
@@ -1102,99 +1199,150 @@ impl App {
 
     fn handle_device_event(&mut self, event: DeviceEvent) {
         match event {
-            DeviceEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
-            DeviceEvent::Status(identity) => self.device_status = identity,
-            DeviceEvent::Ack(request) => match request {
-                Request::Direction { target, .. } => {
-                    let Some(mode) = self.pending_mode(target) else {
-                        return;
-                    };
-                    self.send_request(Request::Pullup {
-                        target,
-                        enabled: mode == Mode::InputPullup,
-                    });
+            DeviceEvent::Hello { route } => {
+                self.device_status = format!("{} replied HII", self.connection.route_name(route));
+            }
+            DeviceEvent::Status { route, identity } => {
+                self.device_status = format!("{}: {identity}", self.connection.route_name(route));
+            }
+            DeviceEvent::MapReady { route } => {
+                if route == self.sam_route {
+                    self.sync_sam_map();
                 }
-                Request::Pullup { target, .. } => {
-                    let mut read = false;
-                    for pin in target.pins() {
-                        let state = &mut self.pins[pin];
-                        if let Some(mode) = state.target_mode.take() {
-                            state.mode = Some(mode);
-                            if mode.is_input() {
-                                read = true;
-                            } else {
-                                state.level = Some(Level::Low);
+                self.device_status = format!(
+                    "{} map: {} banks, {} pins",
+                    self.connection.route_name(route),
+                    self.connection.banks(route).count(),
+                    self.connection.pins(route).count()
+                );
+            }
+            DeviceEvent::Ack { route, request } => {
+                let Some(request) = self.legacy_request(route, request) else {
+                    return;
+                };
+                match request {
+                    Request::Direction { target, .. } => {
+                        let Some(mode) = self.pending_mode(target) else {
+                            return;
+                        };
+                        self.send_request(Request::Pullup {
+                            target,
+                            enabled: mode == Mode::InputPullup,
+                        });
+                    }
+                    Request::Pullup { target, .. } => {
+                        let mut read = false;
+                        for pin in target.pins() {
+                            let state = &mut self.pins[pin];
+                            if let Some(mode) = state.target_mode.take() {
+                                state.mode = Some(mode);
+                                if mode.is_input() {
+                                    read = true;
+                                } else {
+                                    state.level = Some(Level::Low);
+                                }
+                            }
+                        }
+                        if read {
+                            match target {
+                                PinTarget::Pin(pin) => self.read_pin(pin),
+                                PinTarget::Bank(_) | PinTarget::All => self.read_scope(target),
                             }
                         }
                     }
-                    if read {
-                        match target {
-                            PinTarget::Pin(pin) => self.read_pin(pin),
-                            PinTarget::Bank(_) | PinTarget::All => self.read_scope(target),
+                    Request::Set { target, level } => {
+                        for pin in target.pins() {
+                            if self.pins[pin].mode == Some(Mode::Output) {
+                                let state = &mut self.pins[pin];
+                                state.level = Some(level);
+                                state.value_pending = false;
+                            }
                         }
                     }
-                }
-                Request::Set { target, level } => {
-                    for pin in target.pins() {
-                        if self.pins[pin].mode == Some(Mode::Output) {
-                            let state = &mut self.pins[pin];
-                            state.level = Some(level);
-                            state.value_pending = false;
+                    Request::Listen { target, enabled } => {
+                        for pin in target.pins() {
+                            if self.pins[pin].mode.is_some_and(Mode::is_input) {
+                                self.pins[pin].listener = if enabled {
+                                    ListenerState::On
+                                } else {
+                                    ListenerState::Off
+                                };
+                            }
                         }
                     }
+                    _ => {}
                 }
-                Request::Listen { target, enabled } => {
-                    for pin in target.pins() {
-                        if self.pins[pin].mode.is_some_and(Mode::is_input) {
-                            self.pins[pin].listener = if enabled {
-                                ListenerState::On
-                            } else {
-                                ListenerState::Off
-                            };
-                        }
-                    }
-                }
-                _ => {}
-            },
+            }
             DeviceEvent::PinValue { pin, level } => {
-                let state = &mut self.pins[pin];
-                state.level = Some(level);
-                state.value_pending = false;
+                if let Some(pin) = self.legacy_pin(pin) {
+                    let state = &mut self.pins[pin];
+                    state.level = Some(level);
+                    state.value_pending = false;
+                }
             }
             DeviceEvent::PinState { pin, what, value } => {
-                self.device_status = format!("{} {what:?}: {value:?}", pin_display(pin));
+                self.device_status =
+                    format!("{} {what:?}: {value:?}", self.routed_pin_display(pin));
             }
-            DeviceEvent::DeviceError { request, error } => {
-                self.fail_request(request);
+            DeviceEvent::DeviceError {
+                route,
+                source,
+                request,
+                error,
+            } => {
+                if let Some(request) = self.legacy_request(route, request) {
+                    self.fail_request(request);
+                }
                 self.error = Some(match error {
-                    ResponseError::BadPacket => "Device rejected a malformed packet".into(),
+                    ResponseError::BadPacket => {
+                        format!("{source} rejected a malformed packet")
+                    }
                     ResponseError::Target {
                         target: pin,
                         reason,
-                    } => {
-                        format!("{}: {reason:?}", pin_display(pin))
-                    }
+                    } => format!("{}: {reason:?}", self.routed_pin_display(pin)),
                     ResponseError::NoRoute { destination } => {
-                        format!("No route to {destination}")
+                        format!("{source}: no route to {destination}")
                     }
                     ResponseError::RouteBusy { next_hop } => {
-                        format!("Route {next_hop} is busy")
+                        format!("{source}: route {next_hop} is busy")
                     }
                     ResponseError::RouteDown { next_hop } => {
-                        format!("Route {next_hop} is down")
+                        format!("{source}: route {next_hop} is down")
                     }
                 });
             }
-            DeviceEvent::Unknown { request } => {
-                self.fail_request(request);
-                self.error = Some("Device returned IDK".into());
+            DeviceEvent::Unknown { route, request } => {
+                if let Some(request) = self.legacy_request(route, request) {
+                    self.fail_request(request);
+                }
+                self.error = Some(format!(
+                    "{} returned IDK",
+                    self.connection.route_name(route)
+                ));
             }
-            DeviceEvent::Bye => {
-                self.reset_pins();
-                self.device_status = "Device reset acknowledged".into();
+            DeviceEvent::Bye { route } => {
+                if route == self.sam_route {
+                    self.reset_pins();
+                }
+                self.device_status =
+                    format!("{} reset acknowledged", self.connection.route_name(route));
             }
             DeviceEvent::Untracked => {}
         }
+    }
+
+    fn routed_pin_display(&self, pin: PinKey) -> String {
+        if let Some(pin) = self.legacy_pin(pin) {
+            return pin_display(pin);
+        }
+        self.connection.pin_info(pin).map_or_else(
+            || "unknown pin".into(),
+            |info| match info.package_pin {
+                Some(package_pin) => format!("{} ({package_pin})", info.token),
+                None => info.token.clone(),
+            },
+        )
     }
 
     fn pending_mode(&self, target: PinTarget) -> Option<Mode> {
@@ -1363,6 +1511,16 @@ fn level_box(level: Option<Level>, pending: bool) -> Element<'static, Message> {
         .into()
 }
 
+fn port_index(port: Port) -> usize {
+    match port {
+        Port::A => 0,
+        Port::B => 1,
+        Port::C => 2,
+        Port::D => 3,
+        Port::E => 4,
+    }
+}
+
 fn pin_display(pin: Pin) -> String {
     format!(
         "P{}{} ({})",
@@ -1465,7 +1623,31 @@ mod tests {
     fn connected_app() -> App {
         let (mut app, _) = App::new();
         app.connected_port = Some("test".into());
+        let pins = (0..32)
+            .map(|bit| {
+                (
+                    format!("PA{bit:02}"),
+                    0,
+                    bit,
+                    da_vinci_protocol::PinCapabilities::GPIO,
+                )
+            })
+            .collect();
+        app.connection.install_map_for_test(
+            app.sam_route,
+            vec!["PIOA".into(), "PIOC".into()],
+            pins,
+        );
+        app.sync_sam_map();
         app
+    }
+
+    fn ack(app: &mut App, request: Request) {
+        let request = app.routed_request(request).unwrap();
+        app.handle_device_event(DeviceEvent::Ack {
+            route: app.sam_route,
+            request,
+        });
     }
 
     fn last_log(app: &App) -> &str {
@@ -1482,16 +1664,22 @@ mod tests {
         app.apply_bulk_mode();
         assert_eq!(last_log(&app), "TX 001 SAM DIR PIOC IN OK?");
 
-        app.handle_device_event(DeviceEvent::Ack(Request::Direction {
-            target: PinTarget::Bank(Port::C),
-            direction: Direction::Input,
-        }));
+        ack(
+            &mut app,
+            Request::Direction {
+                target: PinTarget::Bank(Port::C),
+                direction: Direction::Input,
+            },
+        );
         assert_eq!(last_log(&app), "TX 002 SAM PLL PIOC ON OK?");
 
-        app.handle_device_event(DeviceEvent::Ack(Request::Pullup {
-            target: PinTarget::Bank(Port::C),
-            enabled: true,
-        }));
+        ack(
+            &mut app,
+            Request::Pullup {
+                target: PinTarget::Bank(Port::C),
+                enabled: true,
+            },
+        );
         assert_eq!(last_log(&app), "TX 003 SAM GET PIOC OK?");
 
         app.set_listener_scope(PinTarget::Bank(Port::C), true);

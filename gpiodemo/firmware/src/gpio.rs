@@ -1,3 +1,4 @@
+pub use da_vinci_protocol::PinCapabilities as Capabilities;
 use da_vinci_protocol::{
     DecodedRequest, Direction, Level, Packet, Query, QueryValue, Response, ResponseError,
     TargetError,
@@ -29,51 +30,6 @@ impl BankId {
 
     pub const fn index(self) -> usize {
         self.0 as usize
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Capabilities(u8);
-
-impl Capabilities {
-    const INPUT_BIT: u8 = 1 << 0;
-    const OUTPUT_BIT: u8 = 1 << 1;
-    const PULL_UP_BIT: u8 = 1 << 2;
-
-    pub const NONE: Self = Self(0);
-    pub const GPIO: Self = Self(Self::INPUT_BIT | Self::OUTPUT_BIT | Self::PULL_UP_BIT);
-    pub(crate) const INPUT: Self = Self(Self::INPUT_BIT);
-    pub const INPUT_ONLY: Self = Self(Self::INPUT_BIT | Self::PULL_UP_BIT);
-
-    pub const fn new(input: bool, output: bool, pull_up: bool) -> Self {
-        Self(
-            (if input { Self::INPUT_BIT } else { 0 })
-                | (if output { Self::OUTPUT_BIT } else { 0 })
-                | (if pull_up { Self::PULL_UP_BIT } else { 0 }),
-        )
-    }
-
-    pub const fn available(self) -> bool {
-        self.0 != 0
-    }
-
-    pub const fn input(self) -> bool {
-        self.0 & Self::INPUT_BIT != 0
-    }
-
-    pub const fn output(self) -> bool {
-        self.0 & Self::OUTPUT_BIT != 0
-    }
-
-    pub const fn pull_up(self) -> bool {
-        self.0 & Self::PULL_UP_BIT != 0
-    }
-
-    const fn supports_direction(self, direction: Direction) -> bool {
-        match direction {
-            Direction::Input => self.input(),
-            Direction::Output => self.output(),
-        }
     }
 }
 
@@ -207,14 +163,14 @@ enum PinState {
 
 #[derive(Clone, Copy)]
 enum BulkKind {
-    Values,
-    States(Query),
+    Values(Target),
+    States(Target, Query),
+    Map,
 }
 
 #[derive(Clone, Copy)]
 struct BulkResponse {
     id: u16,
-    target: Target,
     next: usize,
     kind: BulkKind,
 }
@@ -247,6 +203,7 @@ impl Firmware {
             DecodedRequest::Status => Response::Status {
                 identity: self.identity,
             },
+            DecodedRequest::Map => return self.begin_bulk(packet.id, BulkKind::Map, gpio),
             DecodedRequest::Direction { target, direction } => {
                 self.resolve(map, target).map_or_else(
                     |error| error,
@@ -269,7 +226,7 @@ impl Firmware {
                         Err(error) => error,
                     }
                 } else {
-                    return self.begin_bulk(packet.id, target, BulkKind::Values, gpio);
+                    return self.begin_bulk(packet.id, BulkKind::Values(target), gpio);
                 }
             }
             DecodedRequest::Set { target, level } => self.resolve(map, target).map_or_else(
@@ -301,7 +258,7 @@ impl Firmware {
                         Err(error) => error,
                     }
                 } else {
-                    return self.begin_bulk(packet.id, target, BulkKind::States(what), gpio);
+                    return self.begin_bulk(packet.id, BulkKind::States(target, what), gpio);
                 }
             }
             DecodedRequest::Bye => {
@@ -322,28 +279,47 @@ impl Firmware {
     fn begin_bulk<G: GpioHal>(
         &mut self,
         id: u16,
-        target: Target,
         kind: BulkKind,
         gpio: &G,
     ) -> Packet<FirmwareResponse> {
-        self.bulk = Some(BulkResponse {
-            id,
-            target,
-            next: 0,
-            kind,
-        });
+        self.bulk = Some(BulkResponse { id, next: 0, kind });
         self.poll_bulk(gpio)
             .expect("new bulk response always yields a packet")
     }
 
     pub fn poll_bulk<G: GpioHal>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
         let map = gpio.pin_map();
-        let BulkResponse {
-            id,
-            target,
-            mut next,
-            kind,
-        } = self.bulk?;
+        let BulkResponse { id, mut next, kind } = self.bulk?;
+
+        if matches!(kind, BulkKind::Map) {
+            let body = if next < map.banks().len() {
+                Response::MapBank {
+                    bank: map.banks()[next].token.as_bytes(),
+                }
+            } else if let Some(info) = map.pins().get(next - map.banks().len()) {
+                Response::MapPin {
+                    target: info.token.as_bytes(),
+                    package_pin: info.package_pin,
+                    bank: map.bank(info.bank).token.as_bytes(),
+                    bit: info.bit,
+                    capabilities: info.capabilities,
+                }
+            } else {
+                self.bulk = None;
+                return Some(Packet {
+                    id,
+                    body: Response::Ack,
+                });
+            };
+            next += 1;
+            self.bulk = Some(BulkResponse { id, next, kind });
+            return Some(Packet { id, body });
+        }
+
+        let target = match kind {
+            BulkKind::Values(target) | BulkKind::States(target, _) => target,
+            BulkKind::Map => unreachable!(),
+        };
 
         while next < map.pins().len() {
             let pin = PinId(next as u8);
@@ -354,7 +330,7 @@ impl Firmware {
             }
 
             let body = match kind {
-                BulkKind::Values => {
+                BulkKind::Values(_) => {
                     if matches!(self.state(pin), PinState::Unset) {
                         continue;
                     }
@@ -363,18 +339,14 @@ impl Firmware {
                         level: read_pin(map, gpio, pin),
                     }
                 }
-                BulkKind::States(what) => Response::State {
+                BulkKind::States(_, what) => Response::State {
                     target: info.token.as_bytes(),
                     what,
                     value: self.query(pin, what),
                 },
+                BulkKind::Map => unreachable!(),
             };
-            self.bulk = Some(BulkResponse {
-                id,
-                target,
-                next,
-                kind,
-            });
+            self.bulk = Some(BulkResponse { id, next, kind });
             return Some(Packet { id, body });
         }
 
@@ -708,7 +680,7 @@ mod tests {
     static SYNTH_PINS: [PinInfo; 4] = [
         PinInfo::new("PIO0_0", Some(1), BANK_0, 0, Capabilities::GPIO),
         PinInfo::new("PIO0_1", Some(2), BANK_0, 1, Capabilities::NONE),
-        PinInfo::new("PX07", None, BANK_1, 7, Capabilities::INPUT_ONLY),
+        PinInfo::new("PX07", None, BANK_1, 7, Capabilities::INPUT_PULLUP),
         PinInfo::new("PX08", Some(8), BANK_1, 8, Capabilities::GPIO),
     ];
     static SYNTH_MAP: PinMap = PinMap::new(&SYNTH_BANKS, &SYNTH_PINS);
@@ -824,6 +796,81 @@ mod tests {
         );
         assert_eq!(SYNTH_MAP.resolve(b"PX08"), Some(Target::Pin(PinId::new(3))));
         assert_eq!(SYNTH_MAP.resolve(b"PA00"), None);
+    }
+
+    #[test]
+    fn map_stream_uses_synthetic_pin_map_and_terminal_ack() {
+        let mut firmware = firmware();
+        let mut gpio = FakeHal::new(&SYNTH_MAP);
+        let first = firmware.handle(request(10, Request::Map), &mut gpio);
+        assert_eq!(
+            first,
+            Packet {
+                id: 10,
+                body: Response::MapBank {
+                    bank: b"PIO0".as_slice(),
+                },
+            }
+        );
+        assert_eq!(
+            firmware.poll_bulk(&gpio),
+            Some(Packet {
+                id: 10,
+                body: Response::MapBank {
+                    bank: b"PORTX".as_slice(),
+                },
+            })
+        );
+
+        for (index, info) in SYNTH_MAP.pins().iter().enumerate() {
+            assert_eq!(
+                firmware.poll_bulk(&gpio),
+                Some(Packet {
+                    id: 10,
+                    body: Response::MapPin {
+                        target: info.token.as_bytes(),
+                        package_pin: info.package_pin,
+                        bank: SYNTH_MAP.bank(info.bank).token.as_bytes(),
+                        bit: info.bit,
+                        capabilities: info.capabilities,
+                    },
+                }),
+                "pin record {index}"
+            );
+        }
+        assert_eq!(firmware.poll_bulk(&gpio).unwrap().body, Response::Ack);
+        assert!(firmware.poll_bulk(&gpio).is_none());
+    }
+
+    #[test]
+    fn real_sam_map_stream_records_all_metadata_within_frame_limit() {
+        use da_vinci_protocol::{MAX_PACKET_LEN, encode_response};
+
+        let mut firmware = Firmware::new(SAM_IDENTITY);
+        let mut gpio = FakeHal::new(&SAM_PIN_MAP);
+        let mut packet = Some(firmware.handle(request(11, Request::Map), &mut gpio));
+        let mut banks = 0;
+        let mut pins = 0;
+        let mut unavailable = 0;
+
+        while let Some(current) = packet {
+            let mut frame = [0; MAX_PACKET_LEN];
+            encode_response(current, b"SAM", &mut frame).expect("every SAM MAP record must fit");
+            match current.body {
+                Response::MapBank { .. } => banks += 1,
+                Response::MapPin { capabilities, .. } => {
+                    pins += 1;
+                    unavailable += usize::from(!capabilities.available());
+                }
+                Response::Ack => break,
+                _ => panic!("MAP stream emitted unrelated response"),
+            }
+            packet = firmware.poll_bulk(&gpio);
+        }
+
+        assert_eq!(banks, SAM_PIN_MAP.banks().len());
+        assert_eq!(pins, SAM_PIN_MAP.pins().len());
+        assert_eq!(unavailable, 6);
     }
 
     #[test]

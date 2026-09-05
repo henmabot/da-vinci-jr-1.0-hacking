@@ -8,7 +8,7 @@ Each packet is one ASCII line terminated by `\n`. Receivers can ignore `\r` whil
 
 The host allocates request IDs from `001` through `999`. IDs are decimal, and the host renders them as three digits on the wire. After `999`, allocation wraps to `001`. The host must not reuse an ID while a request with that ID is still outstanding. Firmware preserves the host's ID in every response and listener event. Intermediate devices do not allocate or translate IDs.
 
-Most requests finish after one response. Grouped requests finish at their terminal `OKA`, and a successful `LSN ... ON` keeps its request ID alive for later `HYG` listener events until listening is stopped, replaced, or reset.
+Most requests finish after one response. Grouped requests and `MAP` finish at their terminal `OKA`. A successful `LSN ... ON` keeps its request ID alive for later `HYG` listener events until listening is stopped, replaced, or reset.
 
 ## Packet envelopes
 
@@ -63,6 +63,7 @@ Pins begin in the `UNSET` state. `DIR` initializes a pin. Commands whose meaning
 | --- | --- | --- |
 | Hello | `HAI` | Check that the addressed node is responding. |
 | Status | `HRU` | Ask the node to identify itself. |
+| Map | `MAP` | Stream the addressed node's GPIO bank and pin metadata. |
 | Direction | `DIR <target> IN OK?` / `DIR <target> OUT OK?` | Configure input or output direction. |
 | Read | `GET <target> OK?` | Read initialized pins in the selected scope. |
 | Write | `SET <target> LOW OK?` / `SET <target> HIGH OK?` | Drive initialized output pins. |
@@ -85,6 +86,8 @@ All successful and error responses keep the original request ID and name the res
 | --- | --- |
 | `HII <3` | Reply to `HAI`. |
 | `IAM SAM4E8E GPIO <3` | Current SAM status reply to `HRU`. |
+| `MAP BANK <bank> <3` | One bank record in a `MAP` stream. |
+| `MAP PIN <target> <package-pin|-> <bank> <bit> <capabilities> <3` | One pin record in a `MAP` stream. |
 | `OKA <3` | Successful acknowledgement or grouped-response terminator. |
 | `HYG <pin> LOW <3` / `HYG <pin> HIGH <3` | Pin value or listener event. |
 | `HYG <pin> DIR <value> <3` | Direction state. Value is `IN`, `OUT`, or `UNSET`. |
@@ -100,6 +103,32 @@ All successful and error responses keep the original request ID and name the res
 | `CYA <3` | Reply to `BYE`. |
 
 If packet framing or the packet ID is malformed before a usable request ID exists, no correlated response is possible.
+
+## Pin-map discovery
+
+`MAP` describes the GPIO topology of the addressed node. It discovers that node's banks and pins. It does not discover routes or the network graph.
+
+One `MAP` request streams every bank record followed by every pin record under the same request ID. `OKA <3` terminates the stream. A node with no exposed banks or pins can reply with the terminal `OKA` immediately.
+
+Bank records have this form:
+
+```text
+070 SAM MAP BANK PIOA <3
+```
+
+Pin records have this form:
+
+```text
+070 SAM MAP PIN PA00 102 PIOA 0 7 <3
+070 SAM MAP PIN PA05 73 PIOA 5 0 <3
+070 SAM OKA <3
+```
+
+The pin fields are the native target token, physical package-pin number, bank token, bit/order within the bank, and capability bits. A `-` package-pin field means that the physical package pin is unknown.
+
+Capability bits are additive: `1` means input, `2` means output, and `4` means pull-up control. For example, `7` supports all three operations, `1` is input-only, and `0` marks a pin unavailable for GPIO commands. MAP includes unavailable pins so a host can display the complete node topology while respecting those capability flags.
+
+The metadata in a `MAP` response is the same topology that the node uses when it resolves later GPIO target tokens. A host must discard a partial map if the stream fails before the terminal `OKA`.
 
 ## Individual and grouped operations
 

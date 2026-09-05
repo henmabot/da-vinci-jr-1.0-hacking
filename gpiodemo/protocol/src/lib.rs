@@ -151,6 +151,78 @@ impl TryFrom<&[u8]> for Direction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinCapabilities(u8);
+
+impl PinCapabilities {
+    const INPUT_BIT: u8 = 1 << 0;
+    const OUTPUT_BIT: u8 = 1 << 1;
+    const PULL_UP_BIT: u8 = 1 << 2;
+
+    pub const NONE: Self = Self(0);
+    pub const INPUT: Self = Self(Self::INPUT_BIT);
+    pub const INPUT_PULLUP: Self = Self(Self::INPUT_BIT | Self::PULL_UP_BIT);
+    pub const GPIO: Self = Self(Self::INPUT_BIT | Self::OUTPUT_BIT | Self::PULL_UP_BIT);
+
+    pub const fn new(input: bool, output: bool, pull_up: bool) -> Self {
+        Self(
+            (if input { Self::INPUT_BIT } else { 0 })
+                | (if output { Self::OUTPUT_BIT } else { 0 })
+                | (if pull_up { Self::PULL_UP_BIT } else { 0 }),
+        )
+    }
+
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        if bits <= Self::GPIO.0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn available(self) -> bool {
+        self.0 != 0
+    }
+
+    pub const fn input(self) -> bool {
+        self.0 & Self::INPUT_BIT != 0
+    }
+
+    pub const fn output(self) -> bool {
+        self.0 & Self::OUTPUT_BIT != 0
+    }
+
+    pub const fn pull_up(self) -> bool {
+        self.0 & Self::PULL_UP_BIT != 0
+    }
+
+    pub const fn supports_direction(self, direction: Direction) -> bool {
+        match direction {
+            Direction::Input => self.input(),
+            Direction::Output => self.output(),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for PinCapabilities {
+    type Error = ParseTokenError;
+
+    fn try_from(token: &[u8]) -> Result<Self, Self::Error> {
+        let [digit] = token else {
+            return Err(ParseTokenError);
+        };
+        let bits = match digit {
+            b'0'..=b'7' => *digit - b'0',
+            _ => return Err(ParseTokenError),
+        };
+        Self::from_bits(bits).ok_or(ParseTokenError)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Port {
     A,
     B,
@@ -409,6 +481,7 @@ pub enum QueryValue {
 pub enum Request<T> {
     Hello,
     Status,
+    Map,
     Direction { target: T, direction: Direction },
     Get { target: T },
     Set { target: T, level: Level },
@@ -423,6 +496,7 @@ impl<T> Request<T> {
         match self {
             Self::Hello => Request::Hello,
             Self::Status => Request::Status,
+            Self::Map => Request::Map,
             Self::Direction { target, direction } => Request::Direction {
                 target: map(target),
                 direction,
@@ -457,6 +531,7 @@ impl<T> Request<T> {
         Ok(match self {
             Self::Hello => Request::Hello,
             Self::Status => Request::Status,
+            Self::Map => Request::Map,
             Self::Direction { target, direction } => Request::Direction {
                 target: map(target)?,
                 direction,
@@ -506,6 +581,16 @@ pub enum Response<T, D> {
     Status {
         identity: D,
     },
+    MapBank {
+        bank: D,
+    },
+    MapPin {
+        target: T,
+        package_pin: Option<u16>,
+        bank: D,
+        bit: u8,
+        capabilities: PinCapabilities,
+    },
     Ack,
     Value {
         target: T,
@@ -534,6 +619,22 @@ impl<T, D> Response<T, D> {
             Self::Hello => Response::Hello,
             Self::Status { identity } => Response::Status {
                 identity: map_data(identity)?,
+            },
+            Self::MapBank { bank } => Response::MapBank {
+                bank: map_data(bank)?,
+            },
+            Self::MapPin {
+                target,
+                package_pin,
+                bank,
+                bit,
+                capabilities,
+            } => Response::MapPin {
+                target: map_target(target)?,
+                package_pin,
+                bank: map_data(bank)?,
+                bit,
+                capabilities,
             },
             Self::Ack => Response::Ack,
             Self::Value { target, level } => Response::Value {
@@ -645,6 +746,7 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
     let body = match command {
         b"HAI" if tokens.next().is_none() => Request::Hello,
         b"HRU" if tokens.next().is_none() => Request::Status,
+        b"MAP" if tokens.next().is_none() => Request::Map,
         b"BYE" if tokens.next().is_none() => Request::Bye,
         b"DIR" => {
             let target = next_target(&mut tokens, malformed())?;
@@ -685,7 +787,7 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
             }
             Request::Query { target, what }
         }
-        b"HAI" | b"HRU" | b"BYE" => return Err(malformed()),
+        b"HAI" | b"HRU" | b"MAP" | b"BYE" => return Err(malformed()),
         _ => {
             return Err(DecodeError {
                 id: Some(id),
@@ -721,6 +823,32 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
             let identity = status_identity(packet.body).ok_or_else(malformed)?;
             Response::Status { identity }
         }
+        b"MAP" => match tokens.next() {
+            Some(b"BANK") => {
+                let bank = next_target(&mut tokens, malformed())?;
+                expect_suffix(&mut tokens, b"<3", malformed())?;
+                Response::MapBank { bank }
+            }
+            Some(b"PIN") => {
+                let target = next_target(&mut tokens, malformed())?;
+                let package_pin = match tokens.next().ok_or_else(malformed)? {
+                    b"-" => None,
+                    token => Some(parse_u16(token).ok_or_else(malformed)?),
+                };
+                let bank = next_target(&mut tokens, malformed())?;
+                let bit = parse_u8(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
+                let capabilities = next_as(&mut tokens, malformed())?;
+                expect_suffix(&mut tokens, b"<3", malformed())?;
+                Response::MapPin {
+                    target,
+                    package_pin,
+                    bank,
+                    bit,
+                    capabilities,
+                }
+            }
+            _ => return Err(malformed()),
+        },
         b"OKA" => {
             expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Ack
@@ -824,6 +952,7 @@ pub fn encode_request<T: AsRef<[u8]>>(
     match packet.body {
         Request::Hello => writer.bytes(b" HAI\n")?,
         Request::Status => writer.bytes(b" HRU\n")?,
+        Request::Map => writer.bytes(b" MAP\n")?,
         Request::Direction { target, direction } => {
             writer.bytes(b" DIR ")?;
             writer.target(target.as_ref())?;
@@ -887,6 +1016,34 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             }
             writer.bytes(b" IAM ")?;
             writer.bytes(identity.as_ref())?;
+            writer.bytes(b" <3\n")?;
+        }
+        Response::MapBank { bank } => {
+            writer.bytes(b" MAP BANK ")?;
+            writer.target(bank.as_ref())?;
+            writer.bytes(b" <3\n")?;
+        }
+        Response::MapPin {
+            target,
+            package_pin,
+            bank,
+            bit,
+            capabilities,
+        } => {
+            writer.bytes(b" MAP PIN ")?;
+            writer.target(target.as_ref())?;
+            writer.bytes(b" ")?;
+            if let Some(package_pin) = package_pin {
+                writer.decimal(package_pin)?;
+            } else {
+                writer.bytes(b"-")?;
+            }
+            writer.bytes(b" ")?;
+            writer.target(bank.as_ref())?;
+            writer.bytes(b" ")?;
+            writer.decimal(u16::from(bit))?;
+            writer.bytes(b" ")?;
+            writer.bytes(&[b'0' + capabilities.bits()])?;
             writer.bytes(b" <3\n")?;
         }
         Response::Ack => writer.bytes(b" OKA <3\n")?,
@@ -975,6 +1132,19 @@ fn expect_suffix<'a>(
     (tokens.next() == Some(suffix) && tokens.next().is_none())
         .then_some(())
         .ok_or(error)
+}
+
+fn parse_u8(token: &[u8]) -> Option<u8> {
+    u8::try_from(parse_u16(token)?).ok()
+}
+
+fn parse_u16(token: &[u8]) -> Option<u16> {
+    if token.is_empty() || !token.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    token.iter().try_fold(0u16, |value, digit| {
+        value.checked_mul(10)?.checked_add(u16::from(*digit - b'0'))
+    })
 }
 
 fn parse_enabled(token: &[u8]) -> Option<bool> {
@@ -1107,6 +1277,20 @@ impl<'a> Writer<'a> {
             return Err(EncodeError::InvalidTargetToken);
         }
         self.bytes(target)
+    }
+
+    fn decimal(&mut self, value: u16) -> Result<(), EncodeError> {
+        let mut digits = [0u8; 5];
+        let mut value = value;
+        let mut start = digits.len();
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (value % 10) as u8;
+            value /= 10;
+            if value == 0 {
+                return self.bytes(&digits[start..]);
+            }
+        }
     }
 
     fn decimal3(&mut self, value: u16) -> Result<(), EncodeError> {
@@ -1258,6 +1442,7 @@ mod tests {
         let cases = [
             (Request::Hello, "001 SAM HAI\n"),
             (Request::Status, "001 SAM HRU\n"),
+            (Request::Map, "001 SAM MAP\n"),
             (
                 Request::Direction {
                     target: b"PA00".as_slice(),
@@ -1366,6 +1551,32 @@ mod tests {
                 },
                 "008 SAM IAM SAM4E8E GPIO <3\n",
             ),
+            (
+                Response::MapBank {
+                    bank: b"PIOA".as_slice(),
+                },
+                "008 SAM MAP BANK PIOA <3\n",
+            ),
+            (
+                Response::MapPin {
+                    target: b"PA00".as_slice(),
+                    package_pin: Some(102),
+                    bank: b"PIOA".as_slice(),
+                    bit: 0,
+                    capabilities: PinCapabilities::GPIO,
+                },
+                "008 SAM MAP PIN PA00 102 PIOA 0 7 <3\n",
+            ),
+            (
+                Response::MapPin {
+                    target: b"PIO2_3".as_slice(),
+                    package_pin: None,
+                    bank: b"PIO2".as_slice(),
+                    bit: 3,
+                    capabilities: PinCapabilities::INPUT,
+                },
+                "008 SAM MAP PIN PIO2_3 - PIO2 3 1 <3\n",
+            ),
             (Response::Ack, "008 SAM OKA <3\n"),
             (
                 Response::Value {
@@ -1444,6 +1655,23 @@ mod tests {
             let len = encode_response(packet, b"SAM", &mut out).unwrap();
             assert_eq!(&out[..len], expected.as_bytes());
             assert_eq!(decoded_response(&out[..len]), Ok(packet));
+        }
+    }
+
+    #[test]
+    fn map_codec_rejects_bad_numeric_and_capability_fields() {
+        for line in [
+            b"008 SAM MAP PIN PA00 nope PIOA 0 7 <3".as_slice(),
+            b"008 SAM MAP PIN PA00 102 PIOA 999 7 <3",
+            b"008 SAM MAP PIN PA00 102 PIOA 0 8 <3",
+        ] {
+            assert_eq!(
+                decoded_response(line),
+                Err(DecodeError {
+                    id: Some(8),
+                    kind: DecodeErrorKind::Malformed,
+                })
+            );
         }
     }
 
