@@ -1,0 +1,176 @@
+# GPIO wire protocol
+
+The GPIO controller uses newline-delimited ASCII packets. The desktop host sends requests and firmware nodes send responses. Every packet begins with a request ID and a route token.
+
+## Framing and packet IDs
+
+Each packet is one ASCII line terminated by `\n`. Receivers can ignore `\r` while assembling a line. A packet must fit within the protocol's 64-byte maximum frame size, including its newline terminator.
+
+The host allocates request IDs from `001` through `999`. IDs are decimal, and the host renders them as three digits on the wire. After `999`, allocation wraps to `001`. The host must not reuse an ID while a request with that ID is still outstanding. Firmware preserves the host's ID in every response and listener event. Intermediate devices do not allocate or translate IDs.
+
+Most requests finish after one response. Grouped requests finish at their terminal `OKA`, and a successful `LSN ... ON` keeps its request ID alive for later `HYG` listener events until listening is stopped, replaced, or reset.
+
+## Packet envelopes
+
+Requests have this form:
+
+```text
+<id> <destination> <command...>
+```
+
+Responses have this form:
+
+```text
+<id> <source> <response...>
+```
+
+For example:
+
+```text
+001 SAM HAI
+001 SAM HII <3
+```
+
+`destination` and `source` are protocol-name tokens such as `SAM`, `LPC`, or another configured name. They are not a closed list defined by the protocol. A token is non-empty and contains no whitespace or control characters.
+
+The current PC-connected node is named `SAM`.
+
+## Targets
+
+GPIO commands that take a target accept one of three forms:
+
+| Form | Example | Meaning |
+| --- | --- | --- |
+| Pin | `PA00` | One GPIO pin |
+| Bank | `PIOA` | One GPIO bank |
+| All | `ALL` | Every exposed GPIO pin |
+
+The current SAM node exposes these native names:
+
+- `PA00` through `PA31` in `PIOA`.
+- `PB00` through `PB14` in `PIOB`.
+- `PC00` through `PC31` in `PIOC`.
+- `PD00` through `PD31` in `PIOD`.
+- `PE00` through `PE05` in `PIOE`.
+
+Numeric GPIO IDs are not valid targets. SAM pins PB08 through PB11 are reserved by the board and report `UNAVAILABLE` for individual operations. Grouped operations skip unavailable pins.
+
+Pins begin in the `UNSET` state. `DIR` initializes a pin. Commands whose meaning depends on an initialized direction do not implicitly initialize it.
+
+## Requests
+
+| Command | Form | Meaning |
+| --- | --- | --- |
+| Hello | `HAI` | Check that the addressed node is responding. |
+| Status | `HRU` | Ask the node to identify itself. |
+| Direction | `DIR <target> IN OK?` / `DIR <target> OUT OK?` | Configure input or output direction. |
+| Read | `GET <target> OK?` | Read initialized pins in the selected scope. |
+| Write | `SET <target> LOW OK?` / `SET <target> HIGH OK?` | Drive initialized output pins. |
+| Pull-up | `PLL <target> OFF OK?` / `PLL <target> ON OK?` | Turn input pull-up off or on. |
+| Listen | `LSN <target> OFF OK?` / `LSN <target> ON OK?` | Stop or start change notifications. |
+| Query | `WYD <target> DIR` / `WYD <target> PLL` / `WYD <target> LSN` | Query direction, pull-up, or listener state. |
+| Reset | `BYE` | Reset GPIO/listener state for the node. |
+
+### Command ordering
+
+`DIR` establishes the pin's direction and initializes its GPIO state. A direction change resets pull-up state to off. Configure direction before relying on `GET`, `SET`, `PLL`, or `LSN`.
+
+`PLL` is meaningful for initialized inputs. `SET` acts on initialized outputs. `LSN` reports changes on initialized inputs. Grouped forms apply only to pins for which the operation is meaningful and skip pins that do not qualify.
+
+## Responses
+
+All successful and error responses keep the original request ID and name the responding source node.
+
+| Response | Meaning |
+| --- | --- |
+| `HII <3` | Reply to `HAI`. |
+| `IAM SAM4E8E GPIO <3` | Current SAM status reply to `HRU`. |
+| `OKA <3` | Successful acknowledgement or grouped-response terminator. |
+| `HYG <pin> LOW <3` / `HYG <pin> HIGH <3` | Pin value or listener event. |
+| `HYG <pin> DIR <value> <3` | Direction state. Value is `IN`, `OUT`, or `UNSET`. |
+| `HYG <pin> PLL <value> <3` | Pull-up state. Value is `ON`, `OFF`, or `UNSET`. |
+| `HYG <pin> LSN <value> <3` | Listener state. Value is `ON`, `OFF`, or `UNSET`. |
+| `UMM BAD_PACKET <3` | A known request form was malformed. |
+| `UMM <pin> UNSET <3` | An individual operation required an initialized pin. |
+| `UMM <pin> UNAVAILABLE <3` | An individual operation addressed an unavailable/reserved pin. |
+| `IDK <3` | The command name is unknown. |
+| `CYA <3` | Reply to `BYE`. |
+
+If packet framing or the packet ID is malformed before a usable request ID exists, no correlated response is possible.
+
+## Individual and grouped operations
+
+An individual target produces its normal direct response or error. Bank and `ALL` targets are grouped operations where applicable.
+
+`GET <bank|ALL> OK?` sends one `HYG <pin> <level> <3` response for each initialized matching pin, then finishes with `OKA <3` under the same request ID.
+
+`WYD <bank|ALL> <query>` sends one `HYG` state response for each available matching pin, then finishes with `OKA <3` under the same request ID.
+
+Grouped mutations such as `DIR`, `SET`, `PLL`, and `LSN` apply to the matching eligible pins and finish with `OKA <3`. Unavailable pins are skipped rather than turning the whole grouped operation into an error.
+
+Example grouped read:
+
+```text
+020 SAM GET PIOC OK?
+020 SAM HYG PC00 LOW <3
+020 SAM HYG PC01 HIGH <3
+020 SAM OKA <3
+```
+
+The exact number of `HYG` lines depends on current pin state and the chosen operation.
+
+## Listener lifecycle
+
+A successful listener-enable request is persistent. The acknowledgement and every later change notification use the original request ID:
+
+```text
+030 SAM LSN PA00 ON OK?
+030 SAM OKA <3
+030 SAM HYG PA00 HIGH <3
+030 SAM HYG PA00 LOW <3
+```
+
+`LSN PA00 OFF OK?` stops that listener. Re-enabling/replacing a listener transfers future events to the new request ID only after the new request succeeds. `BYE` clears all listener state.
+
+Grouped listener setup follows the same rule: one request ID identifies the listeners created by that grouped request until a later command stops, replaces, or resets them.
+
+## Reset behavior
+
+`BYE` resets initialized pins to input with pull-up off, clears listener state, and forgets the node's GPIO configuration state. The response is:
+
+```text
+040 SAM BYE
+040 SAM CYA <3
+```
+
+After reset, pins are `UNSET` again from the protocol's point of view.
+
+## Error examples
+
+Malformed known command:
+
+```text
+050 SAM DIR PA00 SIDEWAYS OK?
+050 SAM UMM BAD_PACKET <3
+```
+
+Unknown command:
+
+```text
+051 SAM WAT PA00
+051 SAM IDK <3
+```
+
+Unavailable pin:
+
+```text
+052 SAM DIR PB08 OUT OK?
+052 SAM UMM PB08 UNAVAILABLE <3
+```
+
+Uninitialized individual read:
+
+```text
+053 SAM GET PA00 OK?
+053 SAM UMM PA00 UNSET <3
+```
