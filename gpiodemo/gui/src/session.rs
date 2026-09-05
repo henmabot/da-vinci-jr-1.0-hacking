@@ -25,6 +25,24 @@ pub(super) struct PinKey {
     index: usize,
 }
 
+impl From<PinKey> for ListenerKey {
+    fn from(pin: PinKey) -> Self {
+        Self {
+            route: pin.route.0,
+            pin: pin.index,
+        }
+    }
+}
+
+impl From<ListenerKey> for PinKey {
+    fn from(key: ListenerKey) -> Self {
+        Self {
+            route: RouteKey(key.route),
+            index: key.pin,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Target {
     Pin(PinKey),
@@ -1242,10 +1260,7 @@ impl DeviceSession {
         values
             .into_iter()
             .filter_map(|value| {
-                let pin = PinKey {
-                    route: RouteKey(value.key.route),
-                    index: value.key.pin,
-                };
+                let pin = value.key.into();
                 if !self.listener_is_active(pin, value.id) {
                     return None;
                 }
@@ -1348,10 +1363,11 @@ impl DeviceSession {
                         .enumerate()
                         .filter_map(|(index, pin)| {
                             pin.listener_id.map(|id| ListenerPin {
-                                key: ListenerKey {
-                                    route: route_index,
-                                    pin: index,
-                                },
+                                key: PinKey {
+                                    route: RouteKey(route_index),
+                                    index,
+                                }
+                                .into(),
                                 token: pin.info.token.as_bytes().into(),
                                 id,
                             })
