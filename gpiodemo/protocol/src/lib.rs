@@ -513,16 +513,14 @@ pub fn encode_response_envelope(
     encode_envelope(envelope.id, envelope.source, envelope.body, out)
 }
 
-pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
-    let mut tokens = line
+pub fn decode_request(envelope: RequestEnvelope<'_>) -> Result<Packet<Request>, DecodeError> {
+    let id = envelope.id;
+    let mut tokens = envelope
+        .body
         .split(u8::is_ascii_whitespace)
         .filter(|token| !token.is_empty());
-    let id = tokens.next().and_then(parse_packet_id).ok_or(DecodeError {
-        id: None,
-        kind: DecodeErrorKind::Malformed,
-    })?;
     let command = tokens.next().ok_or(DecodeError {
-        id: None,
+        id: Some(id),
         kind: DecodeErrorKind::Malformed,
     })?;
 
@@ -586,16 +584,14 @@ pub fn decode_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
-    let mut tokens = line
+pub fn decode_response(envelope: ResponseEnvelope<'_>) -> Result<Packet<Response>, DecodeError> {
+    let id = envelope.id;
+    let mut tokens = envelope
+        .body
         .split(u8::is_ascii_whitespace)
         .filter(|token| !token.is_empty());
-    let id = tokens.next().and_then(parse_packet_id).ok_or(DecodeError {
-        id: None,
-        kind: DecodeErrorKind::Malformed,
-    })?;
     let command = tokens.next().ok_or(DecodeError {
-        id: None,
+        id: Some(id),
         kind: DecodeErrorKind::Malformed,
     })?;
     let malformed = || DecodeError {
@@ -680,9 +676,16 @@ pub fn decode_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
     Ok(Packet { id, body })
 }
 
-pub fn encode_request(packet: Packet<Request>, out: &mut [u8]) -> Result<usize, EncodeError> {
-    let mut writer = Writer::new(out);
+pub fn encode_request(
+    packet: Packet<Request>,
+    destination: &[u8],
+    out: &mut [u8],
+) -> Result<usize, EncodeError> {
+    let capacity = out.len().min(MAX_PACKET_LEN);
+    let mut writer = Writer::new(&mut out[..capacity]);
     writer.id(packet.id)?;
+    writer.bytes(b" ")?;
+    writer.route(destination)?;
     match packet.body {
         Request::Hello => writer.bytes(b" HAI\n")?,
         Request::Status => writer.bytes(b" HRU\n")?,
@@ -731,9 +734,16 @@ pub fn encode_request(packet: Packet<Request>, out: &mut [u8]) -> Result<usize, 
     Ok(writer.len())
 }
 
-pub fn encode_response(packet: Packet<Response>, out: &mut [u8]) -> Result<usize, EncodeError> {
-    let mut writer = Writer::new(out);
+pub fn encode_response(
+    packet: Packet<Response>,
+    source: &[u8],
+    out: &mut [u8],
+) -> Result<usize, EncodeError> {
+    let capacity = out.len().min(MAX_PACKET_LEN);
+    let mut writer = Writer::new(&mut out[..capacity]);
     writer.id(packet.id)?;
+    writer.bytes(b" ")?;
+    writer.route(source)?;
     match packet.body {
         Response::Hello => writer.bytes(b" HII <3\n")?,
         Response::Status => writer.bytes(b" IAM SAM4E8E GPIO <3\n")?,
@@ -836,14 +846,11 @@ fn encode_envelope(
     body: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
-    if !valid_route_token(route) {
-        return Err(EncodeError::InvalidRouteToken);
-    }
     let capacity = out.len().min(MAX_PACKET_LEN);
     let mut writer = Writer::new(&mut out[..capacity]);
     writer.id(id)?;
     writer.bytes(b" ")?;
-    writer.bytes(route)?;
+    writer.route(route)?;
     writer.bytes(b" ")?;
     writer.bytes(body)?;
     writer.bytes(b"\n")?;
@@ -903,6 +910,13 @@ impl<'a> Writer<'a> {
         self.decimal3(value)
     }
 
+    fn route(&mut self, route: &[u8]) -> Result<(), EncodeError> {
+        if !valid_route_token(route) {
+            return Err(EncodeError::InvalidRouteToken);
+        }
+        self.bytes(route)
+    }
+
     fn target(&mut self, target: PinTarget) -> Result<(), EncodeError> {
         match target {
             PinTarget::Pin(pin) => self.pin(pin),
@@ -940,9 +954,17 @@ mod tests {
 
     fn encoded_request(id: u16, body: Request) -> [u8; MAX_PACKET_LEN] {
         let mut out = [0u8; MAX_PACKET_LEN];
-        let len = encode_request(Packet { id, body }, &mut out).unwrap();
-        assert_eq!(decode_request(&out[..len]), Ok(Packet { id, body }));
+        let len = encode_request(Packet { id, body }, b"SAM", &mut out).unwrap();
+        assert_eq!(decoded_request(&out[..len]), Ok(Packet { id, body }));
         out
+    }
+
+    fn decoded_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
+        decode_request_envelope(line).and_then(decode_request)
+    }
+
+    fn decoded_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
+        decode_response_envelope(line).and_then(decode_response)
     }
     fn pin(index: u8) -> Pin {
         Pin::from_wire_index(index).unwrap()
@@ -952,9 +974,9 @@ mod tests {
     fn line_buffer_frames_and_recovers_after_overflow() {
         let mut buffer = LineBuffer::new();
         let mut seen = false;
-        for &byte in b"\r001 HAI\r\n" {
+        for &byte in b"\r001 SAM HAI\r\n" {
             if let Some(line) = buffer.push(byte).unwrap() {
-                assert_eq!(line, b"001 HAI");
+                assert_eq!(line, b"001 SAM HAI");
                 seen = true;
             }
         }
@@ -967,9 +989,9 @@ mod tests {
         assert_eq!(buffer.push(b'x'), Ok(None));
         assert_eq!(buffer.push(b'\n'), Ok(None));
 
-        for &byte in b"008 HII <3\n" {
+        for &byte in b"008 SAM HII <3\n" {
             if let Some(line) = buffer.push(byte).unwrap() {
-                assert_eq!(line, b"008 HII <3");
+                assert_eq!(line, b"008 SAM HII <3");
             }
         }
     }
@@ -1054,98 +1076,98 @@ mod tests {
     #[test]
     fn request_wire_examples_use_symbolic_targets() {
         let cases = [
-            (Request::Hello, "001 HAI\n"),
-            (Request::Status, "001 HRU\n"),
+            (Request::Hello, "001 SAM HAI\n"),
+            (Request::Status, "001 SAM HRU\n"),
             (
                 Request::Direction {
                     target: PinTarget::Pin(pin(0)),
                     direction: Direction::Input,
                 },
-                "001 DIR PA00 IN OK?\n",
+                "001 SAM DIR PA00 IN OK?\n",
             ),
             (
                 Request::Direction {
                     target: PinTarget::Pin(pin(116)),
                     direction: Direction::Output,
                 },
-                "001 DIR PE05 OUT OK?\n",
+                "001 SAM DIR PE05 OUT OK?\n",
             ),
             (
                 Request::Get {
                     target: PinTarget::Pin(pin(5)),
                 },
-                "001 GET PA05 OK?\n",
+                "001 SAM GET PA05 OK?\n",
             ),
             (
                 Request::Set {
                     target: PinTarget::Bank(Port::C),
                     level: Level::High,
                 },
-                "001 SET PIOC HIGH OK?\n",
+                "001 SAM SET PIOC HIGH OK?\n",
             ),
             (
                 Request::Pullup {
                     target: PinTarget::Bank(Port::B),
                     enabled: false,
                 },
-                "001 PLL PIOB OFF OK?\n",
+                "001 SAM PLL PIOB OFF OK?\n",
             ),
             (
                 Request::Listen {
                     target: PinTarget::Bank(Port::E),
                     enabled: true,
                 },
-                "001 LSN PIOE ON OK?\n",
+                "001 SAM LSN PIOE ON OK?\n",
             ),
             (
                 Request::Query {
                     target: PinTarget::Pin(pin(72)),
                     what: Query::Direction,
                 },
-                "001 WYD PC25 DIR\n",
+                "001 SAM WYD PC25 DIR\n",
             ),
             (
                 Request::Direction {
                     target: PinTarget::All,
                     direction: Direction::Input,
                 },
-                "001 DIR ALL IN OK?\n",
+                "001 SAM DIR ALL IN OK?\n",
             ),
             (
                 Request::Get {
                     target: PinTarget::All,
                 },
-                "001 GET ALL OK?\n",
+                "001 SAM GET ALL OK?\n",
             ),
             (
                 Request::Set {
                     target: PinTarget::All,
                     level: Level::High,
                 },
-                "001 SET ALL HIGH OK?\n",
+                "001 SAM SET ALL HIGH OK?\n",
             ),
             (
                 Request::Pullup {
                     target: PinTarget::All,
                     enabled: true,
                 },
-                "001 PLL ALL ON OK?\n",
+                "001 SAM PLL ALL ON OK?\n",
             ),
             (
                 Request::Listen {
                     target: PinTarget::All,
                     enabled: true,
                 },
-                "001 LSN ALL ON OK?\n",
+                "001 SAM LSN ALL ON OK?\n",
             ),
             (
                 Request::Query {
                     target: PinTarget::All,
                     what: Query::Listen,
                 },
-                "001 WYD ALL LSN\n",
+                "001 SAM WYD ALL LSN\n",
             ),
-            (Request::Bye, "001 BYE\n"),
+            (Request::Bye, "001 SAM BYE\n"),
         ];
 
         for (body, expected) in cases {
@@ -1157,15 +1179,15 @@ mod tests {
     #[test]
     fn response_wire_examples_use_symbolic_pins() {
         let cases = [
-            (Response::Hello, "008 HII <3\n"),
-            (Response::Status, "008 IAM SAM4E8E GPIO <3\n"),
-            (Response::Ack, "008 OKA <3\n"),
+            (Response::Hello, "008 SAM HII <3\n"),
+            (Response::Status, "008 SAM IAM SAM4E8E GPIO <3\n"),
+            (Response::Ack, "008 SAM OKA <3\n"),
             (
                 Response::Value {
                     pin: pin(0),
                     level: Level::High,
                 },
-                "008 HYG PA00 HIGH <3\n",
+                "008 SAM HYG PA00 HIGH <3\n",
             ),
             (
                 Response::State {
@@ -1173,7 +1195,7 @@ mod tests {
                     what: Query::Direction,
                     value: QueryValue::Direction(Direction::Input),
                 },
-                "008 HYG PA00 DIR IN <3\n",
+                "008 SAM HYG PA00 DIR IN <3\n",
             ),
             (
                 Response::State {
@@ -1181,7 +1203,7 @@ mod tests {
                     what: Query::Pullup,
                     value: QueryValue::Enabled(true),
                 },
-                "008 HYG PA00 PLL ON <3\n",
+                "008 SAM HYG PA00 PLL ON <3\n",
             ),
             (
                 Response::State {
@@ -1189,57 +1211,57 @@ mod tests {
                     what: Query::Listen,
                     value: QueryValue::Unset,
                 },
-                "008 HYG PA00 LSN UNSET <3\n",
+                "008 SAM HYG PA00 LSN UNSET <3\n",
             ),
             (
                 Response::Error(ResponseError::BadPacket),
-                "008 UMM BAD_PACKET <3\n",
+                "008 SAM UMM BAD_PACKET <3\n",
             ),
             (
                 Response::Error(ResponseError::Pin {
                     pin: pin(40),
                     reason: PinError::Unavailable,
                 }),
-                "008 UMM PB08 UNAVAILABLE <3\n",
+                "008 SAM UMM PB08 UNAVAILABLE <3\n",
             ),
             (
                 Response::Error(ResponseError::Pin {
                     pin: pin(3),
                     reason: PinError::Unset,
                 }),
-                "008 UMM PA03 UNSET <3\n",
+                "008 SAM UMM PA03 UNSET <3\n",
             ),
-            (Response::Unknown, "008 IDK <3\n"),
-            (Response::Bye, "008 CYA <3\n"),
+            (Response::Unknown, "008 SAM IDK <3\n"),
+            (Response::Bye, "008 SAM CYA <3\n"),
         ];
 
         for (body, expected) in cases {
             let packet = Packet { id: 8, body };
             let mut out = [0u8; MAX_PACKET_LEN];
-            let len = encode_response(packet, &mut out).unwrap();
+            let len = encode_response(packet, b"SAM", &mut out).unwrap();
             assert_eq!(&out[..len], expected.as_bytes());
-            assert_eq!(decode_response(&out[..len]), Ok(packet));
+            assert_eq!(decoded_response(&out[..len]), Ok(packet));
         }
     }
 
     #[test]
     fn malformed_known_and_unknown_requests_are_distinct() {
         assert_eq!(
-            decode_request(b"007 DIR PA00 SIDEWAYS OK?\n"),
+            decoded_request(b"007 SAM DIR PA00 SIDEWAYS OK?\n"),
             Err(DecodeError {
                 id: Some(7),
                 kind: DecodeErrorKind::Malformed,
             })
         );
         assert_eq!(
-            decode_request(b"007 WAT PA00\n"),
+            decoded_request(b"007 SAM WAT PA00\n"),
             Err(DecodeError {
                 id: Some(7),
                 kind: DecodeErrorKind::UnknownCommand,
             })
         );
         assert_eq!(
-            decode_request(b"nope HAI\n"),
+            decoded_request(b"nope SAM HAI\n"),
             Err(DecodeError {
                 id: None,
                 kind: DecodeErrorKind::Malformed,
@@ -1250,7 +1272,7 @@ mod tests {
     #[test]
     fn packet_ids_remain_decimal_but_numeric_gpio_targets_are_rejected() {
         assert_eq!(
-            decode_request(b"9 GET PE05 OK?"),
+            decoded_request(b"9 SAM GET PE05 OK?"),
             Ok(Packet {
                 id: 9,
                 body: Request::Get {
@@ -1258,9 +1280,9 @@ mod tests {
                 },
             })
         );
-        assert!(decode_request(b"1000 HAI").is_err());
-        assert!(decode_request(b"001 GET 116 OK?").is_err());
-        assert!(decode_request(b"001 GET PE06 OK?").is_err());
+        assert!(decoded_request(b"1000 SAM HAI").is_err());
+        assert!(decoded_request(b"001 SAM GET 116 OK?").is_err());
+        assert!(decoded_request(b"001 SAM GET PE06 OK?").is_err());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::{
 use da_vinci_protocol::{
     DecodeError, Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin,
     PinTable, PinTarget, Query, QueryValue, Request, Response, ResponseError, decode_response,
-    encode_request,
+    decode_response_envelope, encode_request,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -192,7 +192,7 @@ impl Connection {
     fn prepare(&mut self, request: Request) -> Result<(u16, Vec<u8>), String> {
         let id = self.allocate_id()?;
         let mut buffer = [0u8; MAX_PACKET_LEN];
-        let len = encode_request(Packet { id, body: request }, &mut buffer)
+        let len = encode_request(Packet { id, body: request }, b"SAM", &mut buffer)
             .expect("protocol request always fits fixed packet buffer");
         self.pending[id as usize] = Some(request);
         Ok((id, buffer[..len].to_vec()))
@@ -479,7 +479,7 @@ fn route_line(
     listener_updates: &mut PinTable<Option<ListenerValue>>,
 ) {
     let wire_line = WireLine::new(line);
-    match decode_response(line) {
+    match decode_response_envelope(line).and_then(decode_response) {
         Ok(Packet {
             id,
             body: Response::Value { pin, level },
@@ -630,7 +630,11 @@ mod tests {
         let (events, received) = mpsc::sync_channel(1);
         let mut state = IoState::new();
 
-        handle_io_command(IoCommand::Write(b"001 HAI\n".to_vec()), &mut state, &events);
+        handle_io_command(
+            IoCommand::Write(b"001 SAM HAI\n".to_vec()),
+            &mut state,
+            &events,
+        );
 
         assert!(state.writes.is_empty());
         assert!(received.try_recv().is_err());
@@ -646,9 +650,9 @@ mod tests {
 
         for index in 0..EVENT_QUEUE_CAPACITY * 2 {
             let line = if index % 2 == 0 {
-                b"008 HYG PA05 LOW <3".as_slice()
+                b"008 SAM HYG PA05 LOW <3".as_slice()
             } else {
-                b"008 HYG PA05 HIGH <3".as_slice()
+                b"008 SAM HYG PA05 HIGH <3".as_slice()
             };
             route_line(line, &events, &listeners, &mut updates);
         }
@@ -666,7 +670,7 @@ mod tests {
             coalesce_listener_update(
                 &mut updates,
                 target,
-                WireLine::new(b"008 HYG PA05 HIGH <3"),
+                WireLine::new(b"008 SAM HYG PA05 HIGH <3"),
                 8,
                 Level::High,
             );
@@ -684,19 +688,34 @@ mod tests {
         let mut updates = PinTable::filled(None);
         let (events, received) = mpsc::sync_channel(4);
 
-        route_line(b"008 HYG PA05 HIGH <3", &events, &listeners, &mut updates);
+        route_line(
+            b"008 SAM HYG PA05 HIGH <3",
+            &events,
+            &listeners,
+            &mut updates,
+        );
         assert!(matches!(received.try_recv(), Ok(IoEvent::Line { .. })));
         assert!(updates[target].is_none());
 
         listeners[target] = Some(8);
-        route_line(b"008 HYG PA05 HIGH <3", &events, &listeners, &mut updates);
+        route_line(
+            b"008 SAM HYG PA05 HIGH <3",
+            &events,
+            &listeners,
+            &mut updates,
+        );
         assert!(received.try_recv().is_err());
         assert!(updates[target].is_some());
 
-        route_line(b"009 HYG PA05 LOW <3", &events, &listeners, &mut updates);
+        route_line(
+            b"009 SAM HYG PA05 LOW <3",
+            &events,
+            &listeners,
+            &mut updates,
+        );
         assert!(matches!(received.try_recv(), Ok(IoEvent::Line { .. })));
 
-        route_line(b"008 KTHX <3", &events, &listeners, &mut updates);
+        route_line(b"008 SAM KTHX <3", &events, &listeners, &mut updates);
         assert!(matches!(received.try_recv(), Ok(IoEvent::Line { .. })));
     }
 
@@ -710,7 +729,7 @@ mod tests {
         coalesce_listener_update(
             &mut state.listener_updates,
             target,
-            WireLine::new(b"008 HYG PA05 HIGH <3"),
+            WireLine::new(b"008 SAM HYG PA05 HIGH <3"),
             8,
             Level::High,
         );
@@ -723,7 +742,7 @@ mod tests {
         coalesce_listener_update(
             &mut state.listener_updates,
             target,
-            WireLine::new(b"009 HYG PA05 LOW <3"),
+            WireLine::new(b"009 SAM HYG PA05 LOW <3"),
             9,
             Level::Low,
         );

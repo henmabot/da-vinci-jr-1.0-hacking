@@ -1468,25 +1468,25 @@ mod tests {
         app.overwrite = true;
 
         app.apply_bulk_mode();
-        assert_eq!(last_log(&app), "TX 001 DIR PIOC IN OK?");
+        assert_eq!(last_log(&app), "TX 001 SAM DIR PIOC IN OK?");
 
         app.handle_device_event(DeviceEvent::Ack(Request::Direction {
             target: PinTarget::Bank(Port::C),
             direction: Direction::Input,
         }));
-        assert_eq!(last_log(&app), "TX 002 PLL PIOC ON OK?");
+        assert_eq!(last_log(&app), "TX 002 SAM PLL PIOC ON OK?");
 
         app.handle_device_event(DeviceEvent::Ack(Request::Pullup {
             target: PinTarget::Bank(Port::C),
             enabled: true,
         }));
-        assert_eq!(last_log(&app), "TX 003 GET PIOC OK?");
+        assert_eq!(last_log(&app), "TX 003 SAM GET PIOC OK?");
 
         app.set_listener_scope(PinTarget::Bank(Port::C), true);
-        assert_eq!(last_log(&app), "TX 004 LSN PIOC ON OK?");
+        assert_eq!(last_log(&app), "TX 004 SAM LSN PIOC ON OK?");
 
         app.read_scope(PinTarget::Bank(Port::C));
-        assert_eq!(last_log(&app), "TX 005 GET PIOC OK?");
+        assert_eq!(last_log(&app), "TX 005 SAM GET PIOC OK?");
     }
 
     #[test]
@@ -1502,7 +1502,7 @@ mod tests {
         let commands: Vec<_> = app.log.iter().collect();
         assert_eq!(
             commands,
-            ["TX 001 LSN PA00 OFF OK?", "TX 002 DIR PA00 OUT OK?"]
+            ["TX 001 SAM LSN PA00 OFF OK?", "TX 002 SAM DIR PA00 OUT OK?"]
         );
     }
 
@@ -1515,7 +1515,7 @@ mod tests {
         assert_eq!(app.confirm_set, Some((PinTarget::All, Level::High)));
 
         let _ = app.update(Message::BulkSetConfirm);
-        assert_eq!(last_log(&app), "TX 001 SET ALL HIGH OK?");
+        assert_eq!(last_log(&app), "TX 001 SAM SET ALL HIGH OK?");
     }
 
     #[test]

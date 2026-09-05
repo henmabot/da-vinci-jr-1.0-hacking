@@ -66,11 +66,13 @@ mod board {
     use da_vinci_firmware::{Firmware, Gpio};
     use da_vinci_protocol::{
         DecodeErrorKind, Level, LineBuffer, MAX_PACKET_LEN, Packet, Pin, Port, Response,
-        ResponseError, decode_request, encode_response,
+        ResponseError, decode_request, decode_request_envelope, encode_response,
     };
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
+
+    const LOCAL_ROUTE: &[u8] = b"SAM";
 
     struct SamGpio;
 
@@ -186,7 +188,7 @@ mod board {
                 self.is_empty(),
                 "response queued while USB TX is still pending"
             );
-            self.len = encode_response(packet, &mut self.bytes)
+            self.len = encode_response(packet, LOCAL_ROUTE, &mut self.bytes)
                 .expect("protocol response always fits fixed packet buffer");
             self.offset = 0;
         }
@@ -269,19 +271,18 @@ mod board {
             if tx.is_empty() {
                 while let Some(byte) = rx.pop() {
                     if let Ok(Some(line)) = reader.push(byte) {
-                        match decode_request(line) {
-                            Ok(packet) => tx.queue(firmware.handle(packet, &mut gpio)),
-                            Err(error) => {
-                                if let Some(id) = error.id {
-                                    let body = match error.kind {
-                                        DecodeErrorKind::Malformed => {
-                                            Response::Error(ResponseError::BadPacket)
-                                        }
-                                        DecodeErrorKind::UnknownCommand => Response::Unknown,
-                                    };
-                                    tx.queue(Packet { id, body });
+                        match decode_request_envelope(line) {
+                            Ok(envelope) if envelope.destination == LOCAL_ROUTE => {
+                                match decode_request(envelope) {
+                                    Ok(packet) => tx.queue(firmware.handle(packet, &mut gpio)),
+                                    Err(error) => queue_decode_error(error, &mut tx),
                                 }
                             }
+                            Ok(envelope) => tx.queue(Packet {
+                                id: envelope.id,
+                                body: Response::Error(ResponseError::BadPacket),
+                            }),
+                            Err(error) => queue_decode_error(error, &mut tx),
                         }
                         if !tx.is_empty() {
                             break;
@@ -296,6 +297,16 @@ mod board {
                 tx.queue(packet);
             }
             tx.flush(&mut serial);
+        }
+    }
+
+    fn queue_decode_error(error: da_vinci_protocol::DecodeError, tx: &mut PendingTx) {
+        if let Some(id) = error.id {
+            let body = match error.kind {
+                DecodeErrorKind::Malformed => Response::Error(ResponseError::BadPacket),
+                DecodeErrorKind::UnknownCommand => Response::Unknown,
+            };
+            tx.queue(Packet { id, body });
         }
     }
 }
@@ -319,10 +330,13 @@ mod tests {
         let mut rx = RxBuffer::new();
         let mut reader = LineBuffer::new();
 
-        assert!(rx.try_extend(b"001 HA"));
+        assert!(rx.try_extend(b"001 SAM HA"));
         assert_eq!(next_line(&mut rx, &mut reader), None);
         assert!(rx.try_extend(b"I\n"));
-        assert_eq!(next_line(&mut rx, &mut reader), Some(b"001 HAI".to_vec()));
+        assert_eq!(
+            next_line(&mut rx, &mut reader),
+            Some(b"001 SAM HAI".to_vec())
+        );
     }
 
     #[test]
@@ -330,9 +344,15 @@ mod tests {
         let mut rx = RxBuffer::new();
         let mut reader = LineBuffer::new();
 
-        assert!(rx.try_extend(b"001 HAI\n002 HRU\n"));
-        assert_eq!(next_line(&mut rx, &mut reader), Some(b"001 HAI".to_vec()));
-        assert_eq!(next_line(&mut rx, &mut reader), Some(b"002 HRU".to_vec()));
+        assert!(rx.try_extend(b"001 SAM HAI\n002 SAM HRU\n"));
+        assert_eq!(
+            next_line(&mut rx, &mut reader),
+            Some(b"001 SAM HAI".to_vec())
+        );
+        assert_eq!(
+            next_line(&mut rx, &mut reader),
+            Some(b"002 SAM HRU".to_vec())
+        );
     }
 
     #[test]
@@ -340,10 +360,16 @@ mod tests {
         let mut rx = RxBuffer::new();
         let mut reader = LineBuffer::new();
 
-        assert!(rx.try_extend(b"001 HAI\n002 HRU\n"));
-        assert_eq!(next_line(&mut rx, &mut reader), Some(b"001 HAI".to_vec()));
+        assert!(rx.try_extend(b"001 SAM HAI\n002 SAM HRU\n"));
+        assert_eq!(
+            next_line(&mut rx, &mut reader),
+            Some(b"001 SAM HAI".to_vec())
+        );
         assert!(rx.len != 0);
-        assert_eq!(next_line(&mut rx, &mut reader), Some(b"002 HRU".to_vec()));
+        assert_eq!(
+            next_line(&mut rx, &mut reader),
+            Some(b"002 SAM HRU".to_vec())
+        );
     }
 
     #[test]
