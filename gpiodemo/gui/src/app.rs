@@ -123,16 +123,6 @@ pub(super) enum PaneKind {
     Log,
 }
 
-impl fmt::Display for Mode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Input => "INPUT",
-            Self::InputPullup => "IN_PULLUP",
-            Self::Output => "OUTPUT",
-        })
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) enum HistoryDirection {
     Previous,

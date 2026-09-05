@@ -1,4 +1,4 @@
-use std::array;
+use std::{array, fmt};
 
 use da_vinci_protocol::{
     Command, DecodeError, Direction, Level, MAX_PACKET_LEN, Packet, PinCapabilities, Query,
@@ -135,6 +135,16 @@ pub(super) enum Mode {
     Input,
     InputPullup,
     Output,
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Input => "INPUT",
+            Self::InputPullup => "IN_PULLUP",
+            Self::Output => "OUTPUT",
+        })
+    }
 }
 
 impl Mode {
@@ -877,8 +887,7 @@ impl DeviceSession {
         let expected = self.route_name(pending.route);
         if !routing_error && incoming.source != expected {
             return Err(format!(
-                "Response {:03} came from {}, expected {expected}",
-                id.get(),
+                "Response {id} came from {}, expected {expected}",
                 incoming.source
             ));
         }
@@ -1004,15 +1013,12 @@ impl DeviceSession {
     fn require_map(&mut self, pending: Pending, id: RequestId) -> Result<&mut MapBuilder, String> {
         if pending.request != Request::Map || pending.lifetime != RequestLifetime::StreamUntilAck {
             self.retire(id);
-            return Err(format!(
-                "Unexpected MAP response for request {:03}",
-                id.get()
-            ));
+            return Err(format!("Unexpected MAP response for request {id}"));
         }
         self.routes[pending.route.0]
             .discovery
             .as_mut()
-            .ok_or_else(|| format!("MAP response for {:03} has no active discovery", id.get()))
+            .ok_or_else(|| format!("MAP response for {id} has no active discovery"))
     }
 
     fn resolve_pin(&self, route: RouteKey, token: &str) -> Result<PinKey, String> {
@@ -1053,10 +1059,7 @@ impl DeviceSession {
             Request::Map => {
                 let Some(builder) = self.routes[pending.route.0].discovery.take() else {
                     self.retire(id);
-                    return Err(format!(
-                        "MAP {:03} completed without discovery state",
-                        id.get()
-                    ));
+                    return Err(format!("MAP {id} completed without discovery state"));
                 };
                 self.routes[pending.route.0].map = Some(builder.finish());
                 self.complete(id, true, false);
