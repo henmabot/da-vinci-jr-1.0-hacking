@@ -19,7 +19,7 @@ fn decoded_request(line: &[u8]) -> Result<Packet<DecodedRequest<'_>>, DecodeErro
 
 fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
     let envelope = decode_message(line)?;
-    decode_response(envelope.packet)
+    decode_response(envelope)
 }
 #[test]
 fn line_buffer_frames_and_recovers_after_overflow() {
@@ -380,6 +380,10 @@ fn response_wire_examples_use_symbolic_pins() {
         let len = encode_response(packet, b"SAM", &mut out).unwrap();
         assert_eq!(&out[..len], expected.as_bytes());
         assert_eq!(decoded_response(&out[..len]), Ok(packet));
+
+        let len = encode_response(packet, b"LPC", &mut out).unwrap();
+        assert!(out[..len].ends_with(b" :3\n"));
+        assert_eq!(decoded_response(&out[..len]), Ok(packet));
     }
 }
 
@@ -487,7 +491,7 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
         },
     };
     let len = encode_response(response, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"022 LPC HYG PIO2_3 LOW <3\n");
+    assert_eq!(&out[..len], b"022 LPC HYG PIO2_3 LOW :3\n");
     assert_eq!(decoded_response(&out[..len]), Ok(response));
 
     let status = Packet {
@@ -497,6 +501,33 @@ fn typed_codec_round_trips_non_sam_targets_and_identity() {
         },
     };
     let len = encode_response(status, b"LPC", &mut out).unwrap();
-    assert_eq!(&out[..len], b"023 LPC IAM LPC1115 GPIO <3\n");
+    assert_eq!(&out[..len], b"023 LPC IAM LPC1115 GPIO :3\n");
     assert_eq!(decoded_response(&out[..len]), Ok(status));
+}
+
+#[test]
+fn response_terminator_follows_source_and_is_validated_on_decode() {
+    let packet = Packet {
+        id: id(31),
+        body: Response::<&[u8], &[u8]>::Hello,
+    };
+    let mut out = [0; MAX_PACKET_LEN];
+
+    let len = encode_response(packet, b"SAM", &mut out).unwrap();
+    assert_eq!(&out[..len], b"031 SAM HII <3\n");
+    assert_eq!(decoded_response(&out[..len]), Ok(packet));
+
+    let len = encode_response(packet, b"LPC", &mut out).unwrap();
+    assert_eq!(&out[..len], b"031 LPC HII :3\n");
+    assert_eq!(decoded_response(&out[..len]), Ok(packet));
+
+    for line in [b"031 SAM HII :3".as_slice(), b"031 LPC HII <3"] {
+        assert_eq!(
+            decoded_response(line),
+            Err(DecodeError {
+                id: Some(id(31)),
+                kind: DecodeErrorKind::Malformed,
+            })
+        );
+    }
 }

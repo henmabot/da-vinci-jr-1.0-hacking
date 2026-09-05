@@ -131,7 +131,9 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
+pub fn decode_response(message: Message<'_>) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
+    let suffix = response_suffix(message.route);
+    let packet = message.packet;
     let id = packet.id;
     let mut tokens = packet
         .body
@@ -148,17 +150,17 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
 
     let body = match command {
         b"HII" => {
-            expect_suffix(&mut tokens, b"<3", malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
             Response::Hello
         }
         b"IAM" => {
-            let identity = status_identity(packet.body).ok_or_else(malformed)?;
+            let identity = status_identity(packet.body, suffix).ok_or_else(malformed)?;
             Response::Status { identity }
         }
         b"MAP" => match tokens.next() {
             Some(b"BANK") => {
                 let bank = next_target(&mut tokens, malformed())?;
-                expect_suffix(&mut tokens, b"<3", malformed())?;
+                expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::MapBank { bank }
             }
             Some(b"PIN") => {
@@ -170,7 +172,7 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
                 let bank = next_target(&mut tokens, malformed())?;
                 let bit = parse_u8(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
                 let capabilities = next_as(&mut tokens, malformed())?;
-                expect_suffix(&mut tokens, b"<3", malformed())?;
+                expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::MapPin {
                     target,
                     package_pin,
@@ -182,15 +184,15 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
             _ => return Err(malformed()),
         },
         b"OKA" => {
-            expect_suffix(&mut tokens, b"<3", malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
             Response::Ack
         }
         b"CYA" => {
-            expect_suffix(&mut tokens, b"<3", malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
             Response::Bye
         }
         b"IDK" => {
-            expect_suffix(&mut tokens, b"<3", malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
             Response::Unknown
         }
         b"UMM" => {
@@ -228,14 +230,14 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
                 Some(_) => return Err(malformed()),
                 None => return Err(malformed()),
             };
-            expect_suffix(&mut tokens, b"<3", malformed())?;
+            expect_suffix(&mut tokens, suffix, malformed())?;
             Response::Error(error)
         }
         b"HYG" => {
             let target = next_target(&mut tokens, malformed())?;
             let next = tokens.next().ok_or_else(malformed)?;
             if let Ok(level) = Level::try_from(next) {
-                expect_suffix(&mut tokens, b"<3", malformed())?;
+                expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::Value { target, level }
             } else {
                 let what = Query::try_from(next).map_err(|_| malformed())?;
@@ -252,7 +254,7 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'
                         _ => return Err(malformed()),
                     },
                 };
-                expect_suffix(&mut tokens, b"<3", malformed())?;
+                expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::State {
                     target,
                     what,
@@ -353,7 +355,9 @@ pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
     encode_message_with(packet.id, source, out, |writer| {
-        encode_response_body(writer, packet.body)
+        encode_response_body(writer, packet.body)?;
+        writer.bytes(b" ")?;
+        writer.bytes(response_suffix(source))
     })
 }
 
@@ -362,19 +366,17 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
     body: Response<T, D>,
 ) -> Result<(), EncodeError> {
     match body {
-        Response::Hello => writer.bytes(b"HII <3")?,
+        Response::Hello => writer.bytes(b"HII")?,
         Response::Status { identity } => {
             if !valid_identity(identity.as_ref()) {
                 return Err(EncodeError::InvalidIdentity);
             }
             writer.bytes(b"IAM ")?;
             writer.bytes(identity.as_ref())?;
-            writer.bytes(b" <3")?;
         }
         Response::MapBank { bank } => {
             writer.bytes(b"MAP BANK ")?;
             writer.target(bank.as_ref())?;
-            writer.bytes(b" <3")?;
         }
         Response::MapPin {
             target,
@@ -397,15 +399,14 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             writer.decimal(u16::from(bit))?;
             writer.bytes(b" ")?;
             writer.bytes(&[b'0' + capabilities.bits()])?;
-            writer.bytes(b" <3")?;
         }
-        Response::Ack => writer.bytes(b"OKA <3")?,
+        Response::Ack => writer.bytes(b"OKA")?,
         Response::Value { target, level } => {
             writer.bytes(b"HYG ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match level {
-                Level::Low => b" LOW <3",
-                Level::High => b" HIGH <3",
+                Level::Low => b" LOW",
+                Level::High => b" HIGH",
             })?;
         }
         Response::State {
@@ -427,34 +428,30 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
                 QueryValue::Enabled(true) => b"ON",
                 QueryValue::Enabled(false) => b"OFF",
             })?;
-            writer.bytes(b" <3")?;
         }
-        Response::Error(ResponseError::BadPacket) => writer.bytes(b"UMM BAD_PACKET <3")?,
+        Response::Error(ResponseError::BadPacket) => writer.bytes(b"UMM BAD_PACKET")?,
         Response::Error(ResponseError::Target { target, reason }) => {
             writer.bytes(b"UMM ")?;
             writer.target(target.as_ref())?;
             writer.bytes(match reason {
-                TargetError::Unset => b" UNSET <3",
-                TargetError::Unavailable => b" UNAVAILABLE <3",
+                TargetError::Unset => b" UNSET",
+                TargetError::Unavailable => b" UNAVAILABLE",
             })?;
         }
         Response::Error(ResponseError::NoRoute { destination }) => {
             writer.bytes(b"UMM NO_ROUTE ")?;
             writer.route(destination.as_ref())?;
-            writer.bytes(b" <3")?;
         }
         Response::Error(ResponseError::RouteBusy { next_hop }) => {
             writer.bytes(b"UMM ROUTE_BUSY ")?;
             writer.route(next_hop.as_ref())?;
-            writer.bytes(b" <3")?;
         }
         Response::Error(ResponseError::RouteDown { next_hop }) => {
             writer.bytes(b"UMM ROUTE_DOWN ")?;
             writer.route(next_hop.as_ref())?;
-            writer.bytes(b" <3")?;
         }
-        Response::Unknown => writer.bytes(b"IDK <3")?,
-        Response::Bye => writer.bytes(b"CYA <3")?,
+        Response::Unknown => writer.bytes(b"IDK")?,
+        Response::Bye => writer.bytes(b"CYA")?,
     }
     Ok(())
 }
@@ -542,9 +539,16 @@ fn valid_target_token(token: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
-fn status_identity(body: &[u8]) -> Option<&[u8]> {
-    let identity = body.strip_prefix(b"IAM ")?.strip_suffix(b" <3")?;
+fn status_identity<'a>(body: &'a [u8], suffix: &[u8]) -> Option<&'a [u8]> {
+    let identity = body
+        .strip_prefix(b"IAM ")?
+        .strip_suffix(suffix)?
+        .strip_suffix(b" ")?;
     valid_identity(identity).then_some(identity)
+}
+
+fn response_suffix(source: &[u8]) -> &'static [u8] {
+    if source == b"LPC" { b":3" } else { b"<3" }
 }
 
 fn valid_identity(identity: &[u8]) -> bool {

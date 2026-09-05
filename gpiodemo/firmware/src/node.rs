@@ -257,7 +257,7 @@ mod tests {
 
         assert_eq!(
             bytes.output,
-            b"101 LPC HII <3\n102 LPC IAM LPC1115 GPIO <3\n103 LPC OKA <3\n104 LPC UMM NO_ROUTE XYZ <3\n"
+            b"101 LPC HII :3\n102 LPC IAM LPC1115 GPIO :3\n103 LPC OKA :3\n104 LPC UMM NO_ROUTE XYZ :3\n"
         );
     }
 
@@ -303,17 +303,17 @@ mod tests {
 
         incoming
             .borrow_mut()
-            .push_back(b"200 LPC HII <3\n".to_vec());
+            .push_back(b"200 LPC HII :3\n".to_vec());
         incoming
             .borrow_mut()
-            .push_back(b"230 LPC HYG PIO2_3 HIGH <3\n".to_vec());
+            .push_back(b"230 LPC HYG PIO2_3 HIGH :3\n".to_vec());
         for _ in 0..12 {
             node.poll(&mut bytes, &mut gpio).unwrap();
         }
 
         assert_eq!(
             bytes.output,
-            b"201 SAM HII <3\n200 LPC HII <3\n230 LPC HYG PIO2_3 HIGH <3\n"
+            b"201 SAM HII <3\n200 LPC HII :3\n230 LPC HYG PIO2_3 HIGH :3\n"
         );
     }
 }

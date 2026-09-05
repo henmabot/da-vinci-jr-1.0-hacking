@@ -279,7 +279,8 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
 
 fn route_line(wire_line: WireLine, events: &SyncSender<IoEvent>, state: &mut IoState) {
     let decoded = decode_message(wire_line.as_bytes()).and_then(|envelope| {
-        decode_response(envelope.packet).map(|packet| (envelope.route, packet))
+        let source = envelope.route;
+        decode_response(envelope).map(|packet| (source, packet))
     });
     match decoded {
         Ok((

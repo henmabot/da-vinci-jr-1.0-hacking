@@ -521,8 +521,8 @@ mod tests {
     fn downstream_responses_and_events_return_upstream_unchanged() {
         let (mut link, control) = FakeLink::new(SendMode::Ready);
         let mut router = Router::new(b"SAM", [Route::new(b"LPC", &[b"LPC"], &mut link)]);
-        let response = b"061 LPC HII <3\n".to_vec();
-        let event = b"062 LPC HYG PIO2_3 HIGH <3\n".to_vec();
+        let response = b"061 LPC HII :3\n".to_vec();
+        let event = b"062 LPC HYG PIO2_3 HIGH :3\n".to_vec();
         control
             .incoming
             .borrow_mut()
