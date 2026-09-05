@@ -33,6 +33,12 @@ pub(super) struct SerialIo {
     events: Receiver<IoEvent>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct PortInfo {
+    pub(super) path: String,
+    pub(super) description: Option<String>,
+}
+
 impl SerialIo {
     pub(super) fn spawn() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
@@ -44,9 +50,18 @@ impl SerialIo {
         }
     }
 
-    pub(super) fn available_ports() -> Result<Vec<String>, String> {
+    pub(super) fn available_ports() -> Result<Vec<PortInfo>, String> {
         serialport::available_ports()
-            .map(|ports| ports.into_iter().map(|port| port.port_name).collect())
+            .map(|ports| {
+                ports
+                    .into_iter()
+                    .filter(|port| keep_serial_port(&port.port_name))
+                    .map(|port| PortInfo {
+                        path: port.port_name,
+                        description: port_description(&port.port_type),
+                    })
+                    .collect()
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -92,6 +107,34 @@ impl SerialIo {
         drop(receiver);
         self.commands = commands;
     }
+}
+
+fn port_description(port_type: &serialport::SerialPortType) -> Option<String> {
+    match port_type {
+        serialport::SerialPortType::UsbPort(usb) => {
+            usb.product.clone().or_else(|| usb.manufacturer.clone())
+        }
+        serialport::SerialPortType::BluetoothPort => Some("Bluetooth".into()),
+        _ => None,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn is_macos_callout_port(path: &str) -> bool {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("cu."))
+}
+
+#[cfg(target_os = "macos")]
+fn keep_serial_port(path: &str) -> bool {
+    is_macos_callout_port(path)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keep_serial_port(_path: &str) -> bool {
+    true
 }
 
 #[derive(Clone)]
@@ -376,6 +419,45 @@ fn transient_io_error(error: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serial_port_macos_callout_filter_recognizes_cu_only() {
+        assert!(is_macos_callout_port("/dev/cu.usbmodem101"));
+        assert!(is_macos_callout_port("cu.debug-console"));
+        assert!(!is_macos_callout_port("/dev/tty.usbmodem101"));
+        assert!(!is_macos_callout_port("/dev/cuish"));
+    }
+
+    #[test]
+    fn serial_port_description_identifies_bluetooth() {
+        assert_eq!(
+            port_description(&serialport::SerialPortType::BluetoothPort),
+            Some("Bluetooth".into())
+        );
+    }
+
+    #[test]
+    fn serial_port_usb_description_prefers_product_name() {
+        let usb = serialport::UsbPortInfo {
+            vid: 0x03eb,
+            pid: 0x6124,
+            serial_number: None,
+            manufacturer: Some("Microchip".into()),
+            product: Some("CDC Serial".into()),
+        };
+
+        assert_eq!(
+            port_description(&serialport::SerialPortType::UsbPort(usb)),
+            Some("CDC Serial".into())
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn serial_port_non_macos_filter_keeps_all_names() {
+        assert!(keep_serial_port("/dev/ttyUSB0"));
+        assert!(keep_serial_port("/dev/cu.usbmodem101"));
+    }
 
     fn frame(bytes: &[u8]) -> Frame {
         Frame::try_from(bytes).unwrap()

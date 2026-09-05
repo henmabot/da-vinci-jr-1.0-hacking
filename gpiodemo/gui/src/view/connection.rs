@@ -35,6 +35,7 @@ impl App {
         .text_size(CONTROL_TEXT_SIZE)
         .padding([5, 8])
         .width(Length::Fill);
+        let ports = container(ports).width(Length::Fill).clip(true);
 
         let routes = pick_list(
             self.routes.as_slice(),

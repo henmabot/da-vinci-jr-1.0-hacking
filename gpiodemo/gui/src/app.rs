@@ -8,6 +8,7 @@ use iced::{
 };
 
 use crate::{
+    io::PortInfo,
     serial_log::SerialLog,
     session::{
         BankKey, DeviceEvent, DeviceSession, Event as ConnectionEvent, Mode, PinKey,
@@ -50,12 +51,17 @@ pub(super) struct PortChoice {
 }
 
 impl PortChoice {
-    fn new(path: String) -> Self {
+    fn new(port: PortInfo) -> Self {
+        let path = port.path;
         let label = Path::new(&path)
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or(&path)
             .to_owned();
+        let label = match port.description {
+            Some(description) => format!("{label} — {description}"),
+            None => label,
+        };
         Self { path, label }
     }
 }
@@ -130,7 +136,7 @@ pub(super) enum HistoryDirection {
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     Tick,
-    PortsLoaded(Result<Vec<String>, String>),
+    PortsLoaded(Result<Vec<PortInfo>, String>),
     RefreshPorts,
     PortSelected(PortChoice),
     Connect,
@@ -297,14 +303,11 @@ impl App {
             Message::Tick => self.drain_io(),
             Message::PortsLoaded(result) => match result {
                 Ok(ports) => {
+                    let selected_path = self.selected_port.as_ref().map(|port| port.path.as_str());
                     self.ports = ports.into_iter().map(PortChoice::new).collect();
-                    if self
-                        .selected_port
-                        .as_ref()
-                        .is_none_or(|selected| !self.ports.contains(selected))
-                    {
-                        self.selected_port = self.ports.first().cloned();
-                    }
+                    self.selected_port = selected_path
+                        .and_then(|path| self.ports.iter().find(|port| port.path == path).cloned())
+                        .or_else(|| self.ports.first().cloned());
                 }
                 Err(error) => self.error = Some(error),
             },
@@ -805,6 +808,48 @@ fn load_ports() -> Task<Message> {
 mod tests {
     use super::*;
     use da_vinci_protocol::PinCapabilities;
+
+    #[test]
+    fn serial_port_choice_displays_name_and_description_but_keeps_raw_path() {
+        let choice = PortChoice::new(PortInfo {
+            path: "/dev/cu.usbmodem101".into(),
+            description: Some("CDC Serial".into()),
+        });
+
+        assert_eq!(choice.path, "/dev/cu.usbmodem101");
+        assert_eq!(choice.label, "cu.usbmodem101 — CDC Serial");
+    }
+
+    #[test]
+    fn serial_port_refresh_preserves_selection_by_raw_path() {
+        let mut app = App::with_routes(&ROUTES);
+        app.ports = vec![
+            PortChoice::new(PortInfo {
+                path: "/dev/cu.first".into(),
+                description: Some("First".into()),
+            }),
+            PortChoice::new(PortInfo {
+                path: "/dev/cu.second".into(),
+                description: Some("Old description".into()),
+            }),
+        ];
+        app.selected_port = Some(app.ports[1].clone());
+
+        let _ = app.update(Message::PortsLoaded(Ok(vec![
+            PortInfo {
+                path: "/dev/cu.first".into(),
+                description: Some("First".into()),
+            },
+            PortInfo {
+                path: "/dev/cu.second".into(),
+                description: Some("New description".into()),
+            },
+        ])));
+
+        let selected = app.selected_port.as_ref().unwrap();
+        assert_eq!(selected.path, "/dev/cu.second");
+        assert_eq!(selected.label, "cu.second — New description");
+    }
 
     fn install_sam_map(app: &mut App) {
         let sam = app.session.route_key("SAM").unwrap();

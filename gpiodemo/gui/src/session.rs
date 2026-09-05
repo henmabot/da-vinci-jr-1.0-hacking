@@ -7,7 +7,7 @@ use da_vinci_protocol::{
     ResponseError as ProtocolResponseError, Toggle,
 };
 
-use crate::io::{IoEvent, ListenerKey, ListenerPin, ListenerRoute, SerialIo};
+use crate::io::{IoEvent, ListenerKey, ListenerPin, ListenerRoute, PortInfo, SerialIo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RouteKey(usize);
@@ -764,7 +764,7 @@ impl DeviceSession {
         self.routes[route.0].map = Some(RouteMap { banks, pins });
     }
 
-    pub(super) fn available_ports() -> Result<Vec<String>, String> {
+    pub(super) fn available_ports() -> Result<Vec<PortInfo>, String> {
         SerialIo::available_ports()
     }
 
