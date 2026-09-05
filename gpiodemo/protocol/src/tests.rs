@@ -597,4 +597,17 @@ fn version_and_help_wire_examples_are_typed_and_source_aware() {
             },
         })
     );
+
+    for source in [b"SAM".as_slice(), b"LPC"] {
+        for &command in Command::ALL {
+            let packet = Packet {
+                id: id(45),
+                body: Response::<&[u8], &[u8]>::Help { command },
+            };
+            let mut out = [0; MAX_PACKET_LEN];
+            let len = encode_response(packet, source, &mut out).unwrap();
+            assert!(len <= MAX_PACKET_LEN);
+            assert_eq!(decoded_response(&out[..len]), Ok(packet));
+        }
+    }
 }

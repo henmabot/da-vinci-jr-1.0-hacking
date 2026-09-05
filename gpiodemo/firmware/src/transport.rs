@@ -382,7 +382,7 @@ mod framed_link_tests {
     #[test]
     fn framed_link_owns_partial_uart_tx_and_line_rx() {
         let bytes = Bytes {
-            reads: [b"200 LPC HII ".to_vec(), b"<3\n".to_vec()].into(),
+            reads: [b"200 LPC HII ".to_vec(), b":3\n".to_vec()].into(),
             writes: Vec::new(),
             write_limit: 3,
         };
@@ -399,7 +399,7 @@ mod framed_link_tests {
         }
 
         assert_eq!(link.bytes.writes, b"200 LPC HAI\n");
-        assert_eq!(response, Some(b"200 LPC HII <3\n".to_vec()));
+        assert_eq!(response, Some(b"200 LPC HII :3\n".to_vec()));
     }
 
     #[test]
