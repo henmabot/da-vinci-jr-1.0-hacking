@@ -1,5 +1,8 @@
 #[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
-use crate::gpio::map::{BankId, Capabilities, PinId, PinInfo, PinMap};
+use crate::gpio::map::{BankId, PinId, PinInfo, PinMap};
+
+#[cfg(any(test, all(target_arch = "arm", feature = "lpc1115")))]
+use da_vinci_protocol::PinCapabilities as Capabilities;
 
 #[cfg(all(target_arch = "arm", feature = "lpc1115"))]
 use core::ptr::{read_volatile, write_volatile};
@@ -318,16 +321,16 @@ mod tests {
 
         let mut package_pins = [false; 49];
         for (index, pin) in LPC_PIN_MAP.pins().iter().enumerate() {
-            let token = pin.token.as_bytes();
+            let token = pin.target().as_bytes();
             assert!(token.starts_with(b"PIO"));
-            assert_eq!(token[3] - b'0', pin.bank.index() as u8);
-            assert_eq!(pin.token[5..].parse::<u8>().unwrap(), pin.bit);
+            assert_eq!(token[3] - b'0', pin.bank().index() as u8);
+            assert_eq!(pin.target()[5..].parse::<u8>().unwrap(), pin.bit());
 
             let hw = pin_hw(LPC_PIN_MAP.pin_id(index));
-            assert_eq!(hw.bank.id(), pin.bank);
-            assert_eq!(hw.bit, pin.bit);
+            assert_eq!(hw.bank.id(), *pin.bank());
+            assert_eq!(hw.bit, pin.bit());
 
-            let package_pin = pin.package_pin.unwrap() as usize;
+            let package_pin = pin.package_pin().unwrap() as usize;
             assert!((1..=48).contains(&package_pin));
             assert!(!package_pins[package_pin]);
             package_pins[package_pin] = true;
@@ -343,25 +346,23 @@ mod tests {
             let Target::Pin(pin) = LPC_PIN_MAP.resolve(token).unwrap() else {
                 panic!("reserved LPC target must resolve to a pin");
             };
-            assert_eq!(LPC_PIN_MAP.pin(pin).capabilities, Capabilities::NONE);
+            assert_eq!(LPC_PIN_MAP.pin(pin).capabilities(), Capabilities::NONE);
         }
 
         for token in [b"PIO0_4".as_slice(), b"PIO0_5"] {
             let Target::Pin(pin) = LPC_PIN_MAP.resolve(token).unwrap() else {
                 panic!("I2C LPC target must resolve to a pin");
             };
-            let capabilities = LPC_PIN_MAP.pin(pin).capabilities;
+            let capabilities = LPC_PIN_MAP.pin(pin).capabilities();
             assert!(capabilities.input());
             assert!(capabilities.output());
             assert!(!capabilities.pull_up());
         }
 
-        for pin in LPC_PIN_MAP
-            .pins()
-            .iter()
-            .filter(|pin| pin.capabilities.available() && !matches!(pin.token, "PIO0_4" | "PIO0_5"))
-        {
-            assert_eq!(pin.capabilities, Capabilities::GPIO);
+        for pin in LPC_PIN_MAP.pins().iter().filter(|pin| {
+            pin.capabilities().available() && !matches!(*pin.target(), "PIO0_4" | "PIO0_5")
+        }) {
+            assert_eq!(pin.capabilities(), Capabilities::GPIO);
         }
     }
 }

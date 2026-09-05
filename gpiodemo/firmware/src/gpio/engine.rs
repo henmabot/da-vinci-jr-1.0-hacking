@@ -84,7 +84,7 @@ impl Firmware {
                 if let Target::Pin(pin) = target {
                     match self.initialized(map, pin) {
                         Ok(()) => Response::Value {
-                            target: map.pin(pin).token.as_bytes(),
+                            target: map.pin(pin).target().as_bytes(),
                             level: read_pin(map, gpio, pin),
                         },
                         Err(error) => error,
@@ -118,7 +118,7 @@ impl Firmware {
                 if let Target::Pin(pin) = target {
                     match supported(map, pin) {
                         Ok(()) => Response::State {
-                            target: map.pin(pin).token.as_bytes(),
+                            target: map.pin(pin).target().as_bytes(),
                             what,
                             value: self.query(pin, what),
                         },
@@ -184,11 +184,11 @@ impl Firmware {
                 }
             } else if let Some(info) = map.pins().get(next - map.banks().len()) {
                 Response::MapPin {
-                    target: info.token.as_bytes(),
-                    package_pin: info.package_pin,
-                    bank: map.bank(info.bank).as_bytes(),
-                    bit: info.bit,
-                    capabilities: info.capabilities,
+                    target: info.target().as_bytes(),
+                    package_pin: info.package_pin(),
+                    bank: map.bank(*info.bank()).as_bytes(),
+                    bit: info.bit(),
+                    capabilities: info.capabilities(),
                 }
             } else {
                 self.bulk = None;
@@ -211,7 +211,7 @@ impl Firmware {
             let pin = map.pin_id(next);
             next += 1;
             let info = map.pin(pin);
-            if !target_contains(map, target, pin) || !info.capabilities.available() {
+            if !target_contains(map, target, pin) || !info.capabilities().available() {
                 continue;
             }
 
@@ -221,12 +221,12 @@ impl Firmware {
                         continue;
                     }
                     Response::Value {
-                        target: info.token.as_bytes(),
+                        target: info.target().as_bytes(),
                         level: read_pin(map, gpio, pin),
                     }
                 }
                 BulkKind::States(_, what) => Response::State {
-                    target: info.token.as_bytes(),
+                    target: info.target().as_bytes(),
                     what,
                     value: self.query(pin, what),
                 },
@@ -267,8 +267,8 @@ impl Firmware {
             };
             let info = map.pin(pin);
             let snapshot =
-                *snapshots[info.bank.index()].get_or_insert_with(|| gpio.read_bank(info.bank));
-            let value = level_from_bank(snapshot, info.bit);
+                *snapshots[info.bank().index()].get_or_insert_with(|| gpio.read_bank(*info.bank()));
+            let value = level_from_bank(snapshot, info.bit());
             if value == previous {
                 continue;
             }
@@ -279,7 +279,7 @@ impl Firmware {
             return Some(Packet {
                 id: listener,
                 body: Response::Value {
-                    target: info.token.as_bytes(),
+                    target: info.target().as_bytes(),
                     level: value,
                 },
             });
@@ -295,13 +295,13 @@ impl Firmware {
         gpio: &mut G,
     ) -> FirmwareResponse {
         if let Target::Pin(pin) = target
-            && !map.pin(pin).capabilities.supports_direction(direction)
+            && !map.pin(pin).capabilities().supports_direction(direction)
         {
             return pin_error(map, pin, TargetError::Unavailable);
         }
         for pin in map
             .pins_for(target)
-            .filter(|pin| map.pin(*pin).capabilities.supports_direction(direction))
+            .filter(|pin| map.pin(*pin).capabilities().supports_direction(direction))
         {
             self.set_direction_pin(map, pin, direction, gpio);
         }
@@ -355,7 +355,7 @@ impl Firmware {
         let direct = matches!(target, Target::Pin(_));
         for pin in map
             .pins_for(target)
-            .filter(|pin| map.pin(*pin).capabilities.output())
+            .filter(|pin| map.pin(*pin).capabilities().output())
         {
             if direct || matches!(self.state(pin), PinState::Output) {
                 gpio.write(pin, level);
@@ -379,7 +379,7 @@ impl Firmware {
         for pin in map.pins_for(target) {
             let info = map.pin(pin);
             let is_input = matches!(self.state(pin), PinState::Input { .. });
-            if !info.capabilities.available() || (is_input && !info.capabilities.pull_up()) {
+            if !info.capabilities().available() || (is_input && !info.capabilities().pull_up()) {
                 continue;
             }
             self.set_pull_up_pin(map, pin, enabled, gpio);
@@ -427,7 +427,7 @@ impl Firmware {
         }
         for pin in map
             .pins_for(target)
-            .filter(|pin| map.pin(*pin).capabilities.input())
+            .filter(|pin| map.pin(*pin).capabilities().input())
         {
             self.set_listener_pin(map, pin, enabled, id, gpio);
         }
@@ -482,7 +482,7 @@ impl Firmware {
         let map = gpio.pin_map();
         for pin in map.pin_ids() {
             let state = self.state_mut(pin);
-            if !matches!(state, PinState::Unset) && map.pin(pin).capabilities.input() {
+            if !matches!(state, PinState::Unset) && map.pin(pin).capabilities().input() {
                 gpio.configure(pin, PinMode::Input);
             }
             *state = PinState::Unset;
@@ -501,14 +501,14 @@ impl Firmware {
 fn target_contains(map: &PinMap, target: Target, pin: PinId) -> bool {
     match target {
         Target::Pin(target) => target == pin,
-        Target::Bank(bank) => map.pin(pin).bank == bank,
+        Target::Bank(bank) => *map.pin(pin).bank() == bank,
         Target::All => true,
     }
 }
 
 fn supported(map: &PinMap, pin: PinId) -> Result<(), FirmwareResponse> {
     map.pin(pin)
-        .capabilities
+        .capabilities()
         .available()
         .then_some(())
         .ok_or_else(|| pin_error(map, pin, TargetError::Unavailable))
@@ -516,7 +516,7 @@ fn supported(map: &PinMap, pin: PinId) -> Result<(), FirmwareResponse> {
 
 fn pin_error(map: &PinMap, pin: PinId, reason: TargetError) -> FirmwareResponse {
     Response::Error(ResponseError::Target {
-        target: map.pin(pin).token.as_bytes(),
+        target: map.pin(pin).target().as_bytes(),
         reason,
     })
 }
@@ -527,7 +527,7 @@ fn bad_packet() -> FirmwareResponse {
 
 fn read_pin<G: GpioHal>(map: &PinMap, gpio: &G, pin: PinId) -> Level {
     let info = map.pin(pin);
-    level_from_bank(gpio.read_bank(info.bank), info.bit)
+    level_from_bank(gpio.read_bank(*info.bank()), info.bit())
 }
 
 fn level_from_bank(bits: u32, bit: u8) -> Level {
@@ -546,10 +546,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        gpio::map::{BankId, Capabilities, PinInfo},
+        gpio::map::{BankId, PinInfo},
         sam::{SAM_IDENTITY, SAM_PIN_MAP},
     };
-    use da_vinci_protocol::Request;
+    use da_vinci_protocol::{PinCapabilities as Capabilities, Request};
 
     const BANK_0: BankId = BankId::new(0);
     const BANK_1: BankId = BankId::new(1);
@@ -627,7 +627,7 @@ mod tests {
             self.map.pins_for(Target::Bank(bank)).fold(0, |bits, pin| {
                 let info = self.map.pin(pin);
                 if self.values[pin.index()] == Level::High {
-                    bits | (1u32 << info.bit)
+                    bits | (1u32 << info.bit())
                 } else {
                     bits
                 }
@@ -691,11 +691,11 @@ mod tests {
                 Some(Packet {
                     id: RequestId::new(10).unwrap(),
                     body: Response::MapPin {
-                        target: info.token.as_bytes(),
-                        package_pin: info.package_pin,
-                        bank: SYNTH_MAP.bank(info.bank).as_bytes(),
-                        bit: info.bit,
-                        capabilities: info.capabilities,
+                        target: info.target().as_bytes(),
+                        package_pin: info.package_pin(),
+                        bank: SYNTH_MAP.bank(*info.bank()).as_bytes(),
+                        bit: info.bit(),
+                        capabilities: info.capabilities(),
                     },
                 }),
                 "pin record {index}"

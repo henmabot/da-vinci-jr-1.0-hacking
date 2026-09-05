@@ -157,12 +157,12 @@ mod tests {
 
     use std::{cell::RefCell, collections::VecDeque, rc::Rc, vec::Vec};
 
-    use da_vinci_protocol::{Command, Level};
+    use da_vinci_protocol::{Command, Level, PinCapabilities as Capabilities};
 
     use super::*;
     use crate::{
         BankId, PinId, PinMap, PinMode,
-        gpio::map::{Capabilities, PinInfo},
+        gpio::map::PinInfo,
         router::{FrameError, FrameLink},
     };
 

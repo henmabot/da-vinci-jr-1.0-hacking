@@ -1,5 +1,8 @@
 #[cfg(any(test, all(target_arch = "arm", feature = "sam4e8e")))]
-use crate::gpio::map::{BankId, Capabilities, PinInfo, PinMap};
+use crate::gpio::map::{BankId, PinInfo, PinMap};
+
+#[cfg(any(test, all(target_arch = "arm", feature = "sam4e8e")))]
+use da_vinci_protocol::PinCapabilities as Capabilities;
 
 #[cfg(all(target_arch = "arm", feature = "sam4e8e"))]
 use atsam4_hal::{
@@ -198,12 +201,12 @@ pub struct SamGpio;
 macro_rules! with_pin {
     ($pin:expr, |$port:ident, $mask:ident| $body:block) => {{
         let info = SAM_PIN_MAP.pin($pin);
-        let $mask = 1u32 << info.bit;
+        let $mask = 1u32 << info.bit();
         // SAFETY: Firmware only supplies IDs from SAM_PIN_MAP. Reserved clock/USB pins do not
         // reach this adapter, and the firmware loop is single-threaded, so the MMIO registers are
         // not aliased by another GPIO adapter.
         unsafe {
-            match SamBank::from_id(info.bank).expect("SAM pin map contains only PIOA-E") {
+            match SamBank::from_id(*info.bank()).expect("SAM pin map contains only PIOA-E") {
                 SamBank::A => {
                     let $port = &*pac::PIOA::ptr();
                     $body
@@ -350,22 +353,22 @@ mod tests {
         let Target::Pin(pb12) = SAM_PIN_MAP.resolve(b"PB12").unwrap() else {
             panic!("PB12 must resolve to a pin");
         };
-        assert_eq!(SAM_PIN_MAP.pin(pb12).package_pin, Some(87));
+        assert_eq!(SAM_PIN_MAP.pin(pb12).package_pin(), Some(87));
 
         for token in [b"PA05".as_slice(), b"PA06"] {
             let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {
                 panic!("reserved SAM UART target must still be present in metadata");
             };
-            assert!(!SAM_PIN_MAP.pin(pin).capabilities.available());
-            assert_eq!(SAM_PIN_MAP.pin(pin).bank, BANK_A);
+            assert!(!SAM_PIN_MAP.pin(pin).capabilities().available());
+            assert_eq!(*SAM_PIN_MAP.pin(pin).bank(), BANK_A);
         }
 
         for token in [b"PB08".as_slice(), b"PB09", b"PB10", b"PB11"] {
             let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {
                 panic!("reserved SAM target must still be present in metadata");
             };
-            assert!(!SAM_PIN_MAP.pin(pin).capabilities.available());
-            assert_eq!(SAM_PIN_MAP.pin(pin).bank, BANK_B);
+            assert!(!SAM_PIN_MAP.pin(pin).capabilities().available());
+            assert_eq!(*SAM_PIN_MAP.pin(pin).bank(), BANK_B);
         }
         assert_eq!(SAM_IDENTITY, b"SAM4E8E GPIO");
     }

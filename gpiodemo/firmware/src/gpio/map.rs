@@ -1,4 +1,4 @@
-pub(crate) use da_vinci_protocol::PinCapabilities as Capabilities;
+use da_vinci_protocol::PinDescriptor;
 
 pub(crate) const MAX_PINS: usize = 128;
 pub(crate) const MAX_BANKS: usize = 8;
@@ -26,33 +26,7 @@ impl BankId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PinInfo {
-    pub(crate) token: &'static str,
-    pub(crate) package_pin: Option<u16>,
-    pub(crate) bank: BankId,
-    pub(crate) bit: u8,
-    pub(crate) capabilities: Capabilities,
-}
-
-impl PinInfo {
-    #[cfg(any(test, target_arch = "arm"))]
-    pub(crate) const fn new(
-        token: &'static str,
-        package_pin: Option<u16>,
-        bank: BankId,
-        bit: u8,
-        capabilities: Capabilities,
-    ) -> Self {
-        Self {
-            token,
-            package_pin,
-            bank,
-            bit,
-            capabilities,
-        }
-    }
-}
+pub(crate) type PinInfo = PinDescriptor<&'static str, BankId>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
@@ -118,7 +92,7 @@ impl PinMap {
         }
         self.pins
             .iter()
-            .position(|pin| pin.token.as_bytes() == token)
+            .position(|pin| pin.target().as_bytes() == token)
             .map(|index| Target::Pin(self.pin_id(index)))
     }
 
@@ -130,7 +104,7 @@ impl PinMap {
                 let id = self.pin_id(index);
                 match target {
                     Target::Pin(target) if target == id => Some(id),
-                    Target::Bank(bank) if pin.bank == bank => Some(id),
+                    Target::Bank(bank) if *pin.bank() == bank => Some(id),
                     Target::All => Some(id),
                     _ => None,
                 }
