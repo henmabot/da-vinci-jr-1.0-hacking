@@ -1,6 +1,37 @@
 pub const MAX_PACKET_LEN: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameTooLong;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Frame {
+    bytes: [u8; MAX_PACKET_LEN],
+    len: usize,
+}
+
+impl TryFrom<&[u8]> for Frame {
+    type Error = FrameTooLong;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() > MAX_PACKET_LEN {
+            return Err(FrameTooLong);
+        }
+        let mut frame = Self {
+            bytes: [0; MAX_PACKET_LEN],
+            len: bytes.len(),
+        };
+        frame.bytes[..bytes.len()].copy_from_slice(bytes);
+        Ok(frame)
+    }
+}
+
+impl AsRef<[u8]> for Frame {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineError {
     TooLong,
 }

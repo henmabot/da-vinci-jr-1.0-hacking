@@ -75,6 +75,18 @@ fn line_buffer_frames_and_recovers_after_overflow() {
 }
 
 #[test]
+fn frame_owns_exact_bounded_bytes() {
+    for bytes in [b"".as_slice(), b"001 SAM HAI\n", &[b'x'; MAX_PACKET_LEN]] {
+        let frame = Frame::try_from(bytes).unwrap();
+        assert_eq!(frame.as_ref(), bytes);
+    }
+    assert_eq!(
+        Frame::try_from(&[b'x'; MAX_PACKET_LEN + 1][..]),
+        Err(FrameTooLong)
+    );
+}
+
+#[test]
 fn routed_envelopes_borrow_route_and_opaque_body() {
     let request = b"001 SAM HAI";
     let envelope = decode_message(request).unwrap();
