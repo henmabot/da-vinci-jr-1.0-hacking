@@ -5,6 +5,33 @@ fn id(raw: u16) -> RequestId {
     RequestId::new(raw).unwrap()
 }
 
+#[test]
+fn response_error_maps_generic_fields_at_its_owner() {
+    let target = ResponseError::Target {
+        target: b"PA00".as_slice(),
+        reason: TargetError::Unavailable,
+    }
+    .try_map(core::str::from_utf8, core::str::from_utf8)
+    .unwrap();
+    assert_eq!(
+        target,
+        ResponseError::Target {
+            target: "PA00",
+            reason: TargetError::Unavailable,
+        }
+    );
+
+    let route = ResponseError::<&[u8], _>::RouteDown {
+        next_hop: b"LPC".as_slice(),
+    }
+    .try_map(core::str::from_utf8, core::str::from_utf8)
+    .unwrap();
+    assert_eq!(
+        route,
+        ResponseError::<&str, _>::RouteDown { next_hop: "LPC" }
+    );
+}
+
 fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> [u8; MAX_PACKET_LEN] {
     let mut out = [0u8; MAX_PACKET_LEN];
     let len = encode_request(Packet { id, body }, b"SAM", &mut out).unwrap();

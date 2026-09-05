@@ -1053,22 +1053,7 @@ impl DeviceSession {
         route: RouteKey,
         error: ProtocolResponseError<String, String>,
     ) -> Result<ResponseError, String> {
-        Ok(match error {
-            ProtocolResponseError::BadPacket => ProtocolResponseError::BadPacket,
-            ProtocolResponseError::Target { target, reason } => ProtocolResponseError::Target {
-                target: self.resolve_pin(route, &target)?,
-                reason,
-            },
-            ProtocolResponseError::NoRoute { destination } => {
-                ProtocolResponseError::NoRoute { destination }
-            }
-            ProtocolResponseError::RouteBusy { next_hop } => {
-                ProtocolResponseError::RouteBusy { next_hop }
-            }
-            ProtocolResponseError::RouteDown { next_hop } => {
-                ProtocolResponseError::RouteDown { next_hop }
-            }
-        })
+        error.try_map(|target| self.resolve_pin(route, &target), Ok)
     }
 
     fn ack(&mut self, id: RequestId, pending: Pending) -> Result<DeviceEvent, String> {

@@ -305,6 +305,31 @@ pub enum ResponseError<T, D> {
     RouteDown { next_hop: D },
 }
 
+impl<T, D> ResponseError<T, D> {
+    pub fn try_map<T2, D2, E>(
+        self,
+        map_target: impl FnOnce(T) -> Result<T2, E>,
+        map_data: impl FnOnce(D) -> Result<D2, E>,
+    ) -> Result<ResponseError<T2, D2>, E> {
+        Ok(match self {
+            Self::BadPacket => ResponseError::BadPacket,
+            Self::Target { target, reason } => ResponseError::Target {
+                target: map_target(target)?,
+                reason,
+            },
+            Self::NoRoute { destination } => ResponseError::NoRoute {
+                destination: map_data(destination)?,
+            },
+            Self::RouteBusy { next_hop } => ResponseError::RouteBusy {
+                next_hop: map_data(next_hop)?,
+            },
+            Self::RouteDown { next_hop } => ResponseError::RouteDown {
+                next_hop: map_data(next_hop)?,
+            },
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Response<T, D> {
     Hello,
@@ -388,28 +413,7 @@ impl<T, D> Response<T, D> {
             },
             Self::Version { version } => Response::Version { version },
             Self::Help { command } => Response::Help { command },
-            Self::Error(ResponseError::BadPacket) => Response::Error(ResponseError::BadPacket),
-            Self::Error(ResponseError::Target { target, reason }) => {
-                Response::Error(ResponseError::Target {
-                    target: map_target(target)?,
-                    reason,
-                })
-            }
-            Self::Error(ResponseError::NoRoute { destination }) => {
-                Response::Error(ResponseError::NoRoute {
-                    destination: map_data(destination)?,
-                })
-            }
-            Self::Error(ResponseError::RouteBusy { next_hop }) => {
-                Response::Error(ResponseError::RouteBusy {
-                    next_hop: map_data(next_hop)?,
-                })
-            }
-            Self::Error(ResponseError::RouteDown { next_hop }) => {
-                Response::Error(ResponseError::RouteDown {
-                    next_hop: map_data(next_hop)?,
-                })
-            }
+            Self::Error(error) => Response::Error(error.try_map(map_target, map_data)?),
             Self::Unknown => Response::Unknown,
             Self::Bye => Response::Bye,
         })
