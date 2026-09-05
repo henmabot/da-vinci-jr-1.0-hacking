@@ -7,8 +7,8 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    DecodeError, DecodeErrorKind, Level, LineBuffer, LineError, MAX_PACKET_LEN, Message, Packet,
-    RequestId, Response as ProtocolResponse, decode_message, decode_response,
+    DecodeError, DecodeErrorKind, DecodedResponse, Frame, Level, LineBuffer, LineError,
+    MAX_PACKET_LEN, Message, Packet, RawMessage, RequestId, Response as ProtocolResponse,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -23,33 +23,8 @@ pub(super) struct ListenerKey {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct WireLine {
-    bytes: [u8; MAX_PACKET_LEN],
-    len: usize,
-}
-
-impl WireLine {
-    pub(super) fn new(bytes: &[u8]) -> Self {
-        let mut line = Self {
-            bytes: [0; MAX_PACKET_LEN],
-            len: bytes.len(),
-        };
-        line.bytes[..bytes.len()].copy_from_slice(bytes);
-        line
-    }
-
-    pub(super) fn text(self) -> String {
-        String::from_utf8_lossy(&self.bytes[..self.len]).into_owned()
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ListenerValue {
-    pub(super) line: WireLine,
+    pub(super) line: Frame,
     pub(super) id: RequestId,
     pub(super) key: ListenerKey,
     pub(super) level: Level,
@@ -148,7 +123,7 @@ pub(super) enum IoEvent {
     Connected(String),
     Disconnected(Option<String>),
     Line {
-        line: WireLine,
+        line: Frame,
         packet: Result<OwnedResponse, DecodeError>,
     },
     ListenerValues(Vec<ListenerValue>),
@@ -245,7 +220,8 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
                 for &byte in &buffer[..count] {
                     match state.reader.push(byte) {
                         Ok(Some(line)) => {
-                            let line = WireLine::new(line);
+                            let line = Frame::try_from(line)
+                                .expect("line buffer enforces protocol frame capacity");
                             route_line(line, &events, &mut state);
                         }
                         Ok(None) => {}
@@ -273,38 +249,37 @@ fn io_worker(commands: Receiver<IoCommand>, events: SyncSender<IoEvent>) {
     }
 }
 
-fn route_line(wire_line: WireLine, events: &SyncSender<IoEvent>, state: &mut IoState) {
-    let decoded = decode_message(wire_line.as_bytes()).and_then(|envelope| {
-        let source = envelope.route;
-        decode_response(envelope).map(|packet| (source, packet))
-    });
+fn route_line(wire_line: Frame, events: &SyncSender<IoEvent>, state: &mut IoState) {
+    let decoded =
+        RawMessage::try_from(&wire_line).and_then(Message::<&[u8], DecodedResponse<'_>>::try_from);
     match decoded {
-        Ok((
-            source,
-            Packet {
-                id,
-                body: ProtocolResponse::Value { target, level },
-            },
-        )) => {
+        Ok(Message {
+            route: source,
+            packet:
+                Packet {
+                    id,
+                    body: ProtocolResponse::Value { target, level },
+                },
+        }) => {
             if let Some(pin) = active_listener(&state.listeners, source, id, target) {
                 coalesce_listener_update(&mut state.listener_updates, pin, wire_line, id, level);
             } else {
                 let _ = events.send(IoEvent::Line {
                     line: wire_line,
-                    packet: own_response(
-                        source,
-                        Packet {
+                    packet: own_response(Message {
+                        route: source,
+                        packet: Packet {
                             id,
                             body: ProtocolResponse::Value { target, level },
                         },
-                    ),
+                    }),
                 });
             }
         }
-        Ok((source, packet)) => {
+        Ok(message) => {
             let _ = events.send(IoEvent::Line {
                 line: wire_line,
-                packet: own_response(source, packet),
+                packet: own_response(message),
             });
         }
         Err(error) => {
@@ -317,9 +292,9 @@ fn route_line(wire_line: WireLine, events: &SyncSender<IoEvent>, state: &mut IoS
 }
 
 fn own_response(
-    source: &[u8],
-    packet: Packet<ProtocolResponse<&[u8], &[u8]>>,
+    message: Message<&[u8], DecodedResponse<'_>>,
 ) -> Result<OwnedResponse, DecodeError> {
+    let packet = message.packet;
     let malformed = || DecodeError {
         id: Some(packet.id),
         kind: DecodeErrorKind::Malformed,
@@ -337,7 +312,7 @@ fn own_response(
         },
     )?;
     Ok(OwnedResponse {
-        route: String::from_utf8_lossy(source).into_owned(),
+        route: String::from_utf8_lossy(message.route).into_owned(),
         packet: Packet {
             id: packet.id,
             body,
@@ -369,7 +344,7 @@ fn listener_is_configured(routes: &[ListenerRoute], key: ListenerKey, id: Reques
 fn coalesce_listener_update(
     updates: &mut [Vec<Option<ListenerValue>>],
     key: ListenerKey,
-    line: WireLine,
+    line: Frame,
     id: RequestId,
     level: Level,
 ) {
@@ -461,6 +436,10 @@ fn transient_io_error(error: &io::Error) -> bool {
 mod tests {
     use super::*;
 
+    fn frame(bytes: &[u8]) -> Frame {
+        Frame::try_from(bytes).unwrap()
+    }
+
     fn request_id(raw: u16) -> RequestId {
         RequestId::new(raw).unwrap()
     }
@@ -488,14 +467,14 @@ mod tests {
         coalesce_listener_update(
             &mut updates,
             key,
-            WireLine::new(b"008 SAM HYG PA00 LOW <3"),
+            frame(b"008 SAM HYG PA00 LOW <3"),
             id,
             Level::Low,
         );
         coalesce_listener_update(
             &mut updates,
             key,
-            WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
+            frame(b"008 SAM HYG PA00 HIGH <3"),
             id,
             Level::High,
         );
@@ -522,7 +501,7 @@ mod tests {
         coalesce_listener_update(
             &mut state.listener_updates,
             key,
-            WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
+            frame(b"008 SAM HYG PA00 HIGH <3"),
             old,
             Level::High,
         );
@@ -542,7 +521,7 @@ mod tests {
         coalesce_listener_update(
             &mut state.listener_updates,
             key,
-            WireLine::new(b"009 SAM HYG PA00 LOW <3"),
+            frame(b"009 SAM HYG PA00 LOW <3"),
             new,
             Level::Low,
         );

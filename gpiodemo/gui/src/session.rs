@@ -1,9 +1,9 @@
 use std::{array, fmt};
 
 use da_vinci_protocol::{
-    Command, DecodeError, Direction, Level, MAX_PACKET_LEN, Packet, PinCapabilities, Query,
+    Command, DecodeError, Direction, Frame, Level, Message, Packet, PinCapabilities, Query,
     QueryValue, Request as ProtocolRequest, RequestId, ResponseError as ProtocolResponseError,
-    Toggle, encode_request,
+    Toggle,
 };
 
 use crate::io::{
@@ -766,11 +766,11 @@ impl DeviceSession {
     }
 
     pub(super) fn send(&mut self, route: RouteKey, request: Request) -> Result<String, String> {
-        let (id, bytes) = self.prepare(route, request)?;
-        let line = String::from_utf8_lossy(&bytes)
+        let (id, frame) = self.prepare(route, request)?;
+        let line = String::from_utf8_lossy(frame.as_ref())
             .trim_end_matches(['\r', '\n'])
             .to_owned();
-        if let Err(error) = self.io.write(bytes) {
+        if let Err(error) = self.io.write(frame.as_ref().to_vec()) {
             self.cancel(id);
             return Err(error);
         }
@@ -804,7 +804,7 @@ impl DeviceSession {
                         Err(error) => self.malformed_response(error),
                     };
                     return Some(Event::Received {
-                        line: line.text(),
+                        line: frame_text(&line),
                         event,
                     });
                 }
@@ -826,11 +826,7 @@ impl DeviceSession {
         Err(format!("Malformed response: {error:?}"))
     }
 
-    fn prepare(
-        &mut self,
-        route: RouteKey,
-        request: Request,
-    ) -> Result<(RequestId, Vec<u8>), String> {
+    fn prepare(&mut self, route: RouteKey, request: Request) -> Result<(RequestId, Frame), String> {
         if route.0 >= self.routes.len() {
             return Err("Unknown route key".into());
         }
@@ -844,15 +840,13 @@ impl DeviceSession {
         let id = self.allocate_request_id()?;
         let destination = self.routes[route.0].name.clone();
         let wire_request = request.try_map_target(|target| self.target_token(route, target))?;
-        let mut buffer = [0u8; MAX_PACKET_LEN];
-        let len = encode_request(
-            Packet {
+        let frame = Frame::try_from(Message {
+            route: destination.as_bytes(),
+            packet: Packet {
                 id,
                 body: wire_request,
             },
-            destination.as_bytes(),
-            &mut buffer,
-        )
+        })
         .map_err(|error| format!("Could not encode request: {error:?}"))?;
 
         if matches!(request, Request::Map) {
@@ -863,7 +857,7 @@ impl DeviceSession {
             request,
             lifetime: request_lifetime(request),
         });
-        Ok((id, buffer[..len].to_vec()))
+        Ok((id, frame))
     }
 
     fn target_token(&self, route: RouteKey, target: Target) -> Result<String, String> {
@@ -1254,7 +1248,7 @@ impl DeviceSession {
                 }
                 self.route_pin_mut(pin)?.state.level = Some(value.level);
                 Some(ListenerValue {
-                    line: value.line.text(),
+                    line: frame_text(&value.line),
                     id: value.id,
                     pin,
                     level: value.level,
@@ -1381,6 +1375,10 @@ fn target_contains(route: RouteKey, target: Target, pin_index: usize, bank: Bank
     }
 }
 
+fn frame_text(frame: &Frame) -> String {
+    String::from_utf8_lossy(frame.as_ref()).into_owned()
+}
+
 fn request_lifetime(request: Request) -> RequestLifetime {
     match request {
         Request::Map
@@ -1502,8 +1500,8 @@ mod tests {
             .unwrap();
         assert_eq!(sam_id, request_id(1));
         assert_eq!(lpc_id, request_id(2));
-        assert_eq!(sam_wire, b"001 SAM GET PA00 OK?\n");
-        assert_eq!(lpc_wire, b"002 LPC GET PIO2_3 OK?\n");
+        assert_eq!(sam_wire.as_ref(), b"001 SAM GET PA00 OK?\n");
+        assert_eq!(lpc_wire.as_ref(), b"002 LPC GET PIO2_3 OK?\n");
     }
 
     #[test]
@@ -1556,7 +1554,7 @@ mod tests {
         let (mut connection, sam, _, _, _, _) = setup();
         connection.routes[sam.0].map = None;
         let (id, wire) = connection.prepare(sam, Request::Map).unwrap();
-        assert_eq!(wire, b"001 SAM MAP\n");
+        assert_eq!(wire.as_ref(), b"001 SAM MAP\n");
         assert_eq!(
             request_lifetime(Request::Map),
             RequestLifetime::StreamUntilAck
@@ -1611,7 +1609,7 @@ mod tests {
         let (mut connection, sam, _, _, _, _) = setup();
 
         let (version_id, version_wire) = connection.prepare(sam, Request::Version).unwrap();
-        assert_eq!(version_wire, b"001 SAM VER\n");
+        assert_eq!(version_wire.as_ref(), b"001 SAM VER\n");
         assert_eq!(request_lifetime(Request::Version), RequestLifetime::OneShot);
         assert_eq!(
             connection
@@ -1629,7 +1627,7 @@ mod tests {
         assert!(connection.pending[version_id.slot()].is_none());
 
         let (help_id, help_wire) = connection.prepare(sam, Request::Help).unwrap();
-        assert_eq!(help_wire, b"002 SAM HLP\n");
+        assert_eq!(help_wire.as_ref(), b"002 SAM HLP\n");
         assert_eq!(
             request_lifetime(Request::Help),
             RequestLifetime::StreamUntilAck
@@ -1738,8 +1736,8 @@ mod tests {
 
         let (hello_id, hello) = connection.prepare(sam, Request::Hello).unwrap();
         let (status_id, status) = connection.prepare(sam, Request::Status).unwrap();
-        assert_eq!(hello, b"002 SAM HAI\n");
-        assert_eq!(status, b"003 SAM HRU\n");
+        assert_eq!(hello.as_ref(), b"002 SAM HAI\n");
+        assert_eq!(status.as_ref(), b"003 SAM HRU\n");
         assert_ne!(map_id, hello_id);
         assert_ne!(map_id, status_id);
         assert_eq!(
@@ -1837,7 +1835,7 @@ mod tests {
 
         let values = connection.accept_listener_values(vec![
             crate::io::ListenerValue {
-                line: crate::io::WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
+                line: Frame::try_from(b"008 SAM HYG PA00 HIGH <3".as_slice()).unwrap(),
                 id: listener_id,
                 key: ListenerKey {
                     route: sam.0,
@@ -1847,7 +1845,7 @@ mod tests {
                 coalesced: 3,
             },
             crate::io::ListenerValue {
-                line: crate::io::WireLine::new(b"009 SAM HYG PA00 LOW <3"),
+                line: Frame::try_from(b"009 SAM HYG PA00 LOW <3".as_slice()).unwrap(),
                 id: stale_id,
                 key: ListenerKey {
                     route: sam.0,
@@ -1865,7 +1863,7 @@ mod tests {
         assert!(connection.pin_state(pa00).unwrap().value_pending);
 
         let values = connection.accept_listener_values(vec![crate::io::ListenerValue {
-            line: crate::io::WireLine::new(b"008 SAM HYG PA00 LOW <3"),
+            line: Frame::try_from(b"008 SAM HYG PA00 LOW <3".as_slice()).unwrap(),
             id: listener_id,
             key: ListenerKey {
                 route: sam.0,
