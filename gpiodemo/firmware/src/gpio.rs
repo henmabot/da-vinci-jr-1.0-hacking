@@ -1,7 +1,7 @@
 pub use da_vinci_protocol::PinCapabilities as Capabilities;
 use da_vinci_protocol::{
-    DecodedRequest, Direction, Level, Packet, Query, QueryValue, Response, ResponseError,
-    TargetError,
+    DecodedRequest, Direction, Level, Packet, Query, QueryValue, RequestId, Response,
+    ResponseError, TargetError,
 };
 
 pub const MAX_PINS: usize = 128;
@@ -156,7 +156,7 @@ enum PinState {
     Configured {
         direction: Direction,
         pull_up: bool,
-        listener: Option<u16>,
+        listener: Option<RequestId>,
         previous: Level,
     },
 }
@@ -170,7 +170,7 @@ enum BulkKind {
 
 #[derive(Clone, Copy)]
 struct BulkResponse {
-    id: u16,
+    id: RequestId,
     next: usize,
     kind: BulkKind,
 }
@@ -278,7 +278,7 @@ impl Firmware {
 
     fn begin_bulk<G: GpioHal>(
         &mut self,
-        id: u16,
+        id: RequestId,
         kind: BulkKind,
         gpio: &G,
     ) -> Packet<FirmwareResponse> {
@@ -531,7 +531,7 @@ impl Firmware {
         map: &PinMap,
         target: Target,
         enabled: bool,
-        id: u16,
+        id: RequestId,
         gpio: &G,
     ) -> FirmwareResponse {
         if let Target::Pin(pin) = target
@@ -564,7 +564,7 @@ impl Firmware {
         map: &PinMap,
         pin: PinId,
         enabled: bool,
-        id: u16,
+        id: RequestId,
         gpio: &G,
     ) {
         let PinState::Configured {
@@ -750,7 +750,10 @@ mod tests {
     }
 
     fn request(id: u16, body: Request<&'static [u8]>) -> Packet<DecodedRequest<'static>> {
-        Packet { id, body }
+        Packet {
+            id: RequestId::new(id).unwrap(),
+            body,
+        }
     }
 
     fn firmware() -> Firmware {
@@ -806,7 +809,7 @@ mod tests {
         assert_eq!(
             first,
             Packet {
-                id: 10,
+                id: RequestId::new(10).unwrap(),
                 body: Response::MapBank {
                     bank: b"PIO0".as_slice(),
                 },
@@ -815,7 +818,7 @@ mod tests {
         assert_eq!(
             firmware.poll_bulk(&gpio),
             Some(Packet {
-                id: 10,
+                id: RequestId::new(10).unwrap(),
                 body: Response::MapBank {
                     bank: b"PORTX".as_slice(),
                 },
@@ -826,7 +829,7 @@ mod tests {
             assert_eq!(
                 firmware.poll_bulk(&gpio),
                 Some(Packet {
-                    id: 10,
+                    id: RequestId::new(10).unwrap(),
                     body: Response::MapPin {
                         target: info.token.as_bytes(),
                         package_pin: info.package_pin,
@@ -1022,7 +1025,7 @@ mod tests {
         assert_eq!(
             firmware.handle(request(20, Request::Get { target: b"ALL" }), &mut gpio),
             Packet {
-                id: 20,
+                id: RequestId::new(20).unwrap(),
                 body: Response::Value {
                     target: b"PIO0_0".as_slice(),
                     level: Level::Low,
@@ -1032,7 +1035,7 @@ mod tests {
         assert_eq!(
             firmware.poll_bulk(&gpio),
             Some(Packet {
-                id: 20,
+                id: RequestId::new(20).unwrap(),
                 body: Response::Value {
                     target: b"PX08".as_slice(),
                     level: Level::High,
@@ -1042,7 +1045,7 @@ mod tests {
         assert_eq!(
             firmware.poll_bulk(&gpio),
             Some(Packet {
-                id: 20,
+                id: RequestId::new(20).unwrap(),
                 body: Response::Ack,
             })
         );
@@ -1065,16 +1068,17 @@ mod tests {
                 value: QueryValue::Unset,
             }
         );
-        assert!(matches!(
+        assert_eq!(
             firmware.poll_bulk(&gpio),
             Some(Packet {
-                id: 21,
+                id: RequestId::new(21).unwrap(),
                 body: Response::State {
-                    target: b"PX08",
-                    ..
+                    target: b"PX08".as_slice(),
+                    what: Query::Direction,
+                    value: QueryValue::Direction(Direction::Input),
                 },
             })
-        ));
+        );
         assert_eq!(firmware.poll_bulk(&gpio).unwrap().body, Response::Ack);
     }
 
@@ -1116,7 +1120,7 @@ mod tests {
         assert_eq!(
             firmware.poll_listener(&gpio),
             Some(Packet {
-                id: 110,
+                id: RequestId::new(110).unwrap(),
                 body: Response::Value {
                     target: b"PIO0_0".as_slice(),
                     level: Level::High,
@@ -1127,7 +1131,7 @@ mod tests {
         assert_eq!(
             firmware.poll_listener(&gpio),
             Some(Packet {
-                id: 111,
+                id: RequestId::new(111).unwrap(),
                 body: Response::Value {
                     target: b"PX08".as_slice(),
                     level: Level::High,

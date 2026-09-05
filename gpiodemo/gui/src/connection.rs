@@ -8,8 +8,8 @@ use std::{
 };
 
 use da_vinci_protocol::{
-    DecodeError, DecodeErrorKind, Direction, Level, LineBuffer, LineError, MAX_PACKET_ID,
-    MAX_PACKET_LEN, Packet, PinCapabilities, Query, QueryValue, Request as ProtocolRequest,
+    DecodeError, DecodeErrorKind, Direction, Level, LineBuffer, LineError, MAX_PACKET_LEN, Packet,
+    PinCapabilities, Query, QueryValue, Request as ProtocolRequest, RequestId,
     Response as ProtocolResponse, ResponseError as ProtocolResponseError, decode_response,
     decode_response_envelope, encode_request,
 };
@@ -77,7 +77,7 @@ pub(super) enum Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ListenerValue {
     line: WireLine,
-    id: u16,
+    id: RequestId,
     pub(super) pin: PinKey,
     pub(super) level: Level,
     pub(super) coalesced: u32,
@@ -172,7 +172,7 @@ struct Pending {
 struct RoutePin {
     info: PinInfo,
     input: bool,
-    listener: Option<u16>,
+    listener: Option<RequestId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -274,8 +274,8 @@ impl RouteState {
 }
 
 pub(super) struct Connection {
-    next_id: u16,
-    pending: [Option<Pending>; MAX_PACKET_ID as usize + 1],
+    next_id: RequestId,
+    pending: [Option<Pending>; RequestId::COUNT],
     routes: Vec<RouteState>,
     commands: Sender<IoCommand>,
     events: Receiver<IoEvent>,
@@ -287,7 +287,7 @@ impl Connection {
         let (event_tx, event_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         thread::spawn(move || io_worker(command_rx, event_tx));
         Self {
-            next_id: 1,
+            next_id: RequestId::FIRST,
             pending: array::from_fn(|_| None),
             routes: route_names
                 .iter()
@@ -469,7 +469,11 @@ impl Connection {
         }
     }
 
-    fn prepare(&mut self, route: RouteKey, request: Request) -> Result<(u16, Vec<u8>), String> {
+    fn prepare(
+        &mut self,
+        route: RouteKey,
+        request: Request,
+    ) -> Result<(RequestId, Vec<u8>), String> {
         if route.0 >= self.routes.len() {
             return Err("Unknown route key".into());
         }
@@ -484,7 +488,7 @@ impl Connection {
             });
         }
 
-        let id = self.allocate_id()?;
+        let id = self.allocate_request_id()?;
         let destination = self.routes[route.0].name.clone();
         let wire_request = request.try_map_target(|target| self.target_token(route, target))?;
         let mut buffer = [0u8; MAX_PACKET_LEN];
@@ -501,7 +505,7 @@ impl Connection {
         if matches!(request, Request::Map) {
             self.routes[route.0].discovery = Some(MapBuilder::new(route));
         }
-        self.pending[id as usize] = Some(Pending {
+        self.pending[id.slot()] = Some(Pending {
             route,
             request,
             completion: completion(request),
@@ -524,11 +528,11 @@ impl Connection {
         }
     }
 
-    fn allocate_id(&mut self) -> Result<u16, String> {
-        for _ in 0..MAX_PACKET_ID {
+    fn allocate_request_id(&mut self) -> Result<RequestId, String> {
+        for _ in RequestId::MIN..=RequestId::MAX {
             let id = self.next_id;
-            self.next_id = if id == MAX_PACKET_ID { 1 } else { id + 1 };
-            if self.pending[id as usize].is_none() {
+            self.next_id = id.next();
+            if self.pending[id.slot()].is_none() {
                 return Ok(id);
             }
         }
@@ -537,7 +541,7 @@ impl Connection {
 
     fn received(&mut self, incoming: OwnedResponse) -> Result<DeviceEvent, String> {
         let id = incoming.packet.id;
-        let Some(pending) = self.pending[id as usize] else {
+        let Some(pending) = self.pending[id.slot()] else {
             return Ok(DeviceEvent::Untracked);
         };
         let routing_error = matches!(
@@ -551,7 +555,8 @@ impl Connection {
         let expected = self.route_name(pending.route);
         if !routing_error && incoming.source != expected {
             return Err(format!(
-                "Response {id:03} came from {}, expected {expected}",
+                "Response {:03} came from {}, expected {expected}",
+                id.get(),
                 incoming.source
             ));
         }
@@ -655,15 +660,18 @@ impl Connection {
         }
     }
 
-    fn require_map(&mut self, pending: Pending, id: u16) -> Result<&mut MapBuilder, String> {
+    fn require_map(&mut self, pending: Pending, id: RequestId) -> Result<&mut MapBuilder, String> {
         if pending.request != Request::Map || pending.completion != Completion::Stream {
             self.retire(id);
-            return Err(format!("Unexpected MAP response for request {id:03}"));
+            return Err(format!(
+                "Unexpected MAP response for request {:03}",
+                id.get()
+            ));
         }
         self.routes[pending.route.0]
             .discovery
             .as_mut()
-            .ok_or_else(|| format!("MAP response for {id:03} has no active discovery"))
+            .ok_or_else(|| format!("MAP response for {:03} has no active discovery", id.get()))
     }
 
     fn resolve_pin(&self, route: RouteKey, token: &str) -> Result<PinKey, String> {
@@ -698,12 +706,15 @@ impl Connection {
         })
     }
 
-    fn ack(&mut self, id: u16, pending: Pending) -> Result<DeviceEvent, String> {
+    fn ack(&mut self, id: RequestId, pending: Pending) -> Result<DeviceEvent, String> {
         match pending.request {
             Request::Map => {
                 let Some(builder) = self.routes[pending.route.0].discovery.take() else {
                     self.retire(id);
-                    return Err(format!("MAP {id:03} completed without discovery state"));
+                    return Err(format!(
+                        "MAP {:03} completed without discovery state",
+                        id.get()
+                    ));
                 };
                 self.routes[pending.route.0].map = Some(builder.finish());
                 self.complete(id, true, false);
@@ -747,8 +758,8 @@ impl Connection {
         })
     }
 
-    fn complete(&mut self, id: u16, terminal_ack: bool, listener_active: bool) {
-        let Some(pending) = self.pending[id as usize] else {
+    fn complete(&mut self, id: RequestId, terminal_ack: bool, listener_active: bool) {
+        let Some(pending) = self.pending[id.slot()] else {
             return;
         };
         let done = match pending.completion {
@@ -757,7 +768,7 @@ impl Connection {
             Completion::Listener => terminal_ack && !listener_active,
         };
         if done {
-            self.pending[id as usize] = None;
+            self.pending[id.slot()] = None;
         }
     }
 
@@ -777,7 +788,7 @@ impl Connection {
         }
     }
 
-    fn listener_ids(&self, route: RouteKey, target: Target) -> Vec<u16> {
+    fn listener_ids(&self, route: RouteKey, target: Target) -> Vec<RequestId> {
         let Some(map) = self.routes[route.0].map.as_ref() else {
             return Vec::new();
         };
@@ -789,7 +800,7 @@ impl Connection {
             .collect()
     }
 
-    fn listener_is_active(&self, pin: PinKey, id: u16) -> bool {
+    fn listener_is_active(&self, pin: PinKey, id: RequestId) -> bool {
         self.routes
             .get(pin.route.0)
             .and_then(|route| route.map.as_ref())
@@ -797,7 +808,7 @@ impl Connection {
             .is_some_and(|pin| pin.listener == Some(id))
     }
 
-    fn listener_id_active(&self, id: u16) -> bool {
+    fn listener_id_active(&self, id: RequestId) -> bool {
         self.routes.iter().any(|route| {
             route
                 .map
@@ -806,14 +817,14 @@ impl Connection {
         })
     }
 
-    fn release_listener(&mut self, id: u16) {
+    fn release_listener(&mut self, id: RequestId) {
         if !self.listener_id_active(id) {
-            self.pending[id as usize] = None;
+            self.pending[id.slot()] = None;
         }
     }
 
-    fn retire(&mut self, id: u16) {
-        let pending = self.pending[id as usize];
+    fn retire(&mut self, id: RequestId) {
+        let pending = self.pending[id.slot()];
         for route in &mut self.routes {
             if let Some(map) = &mut route.map {
                 for pin in &mut map.pins {
@@ -828,17 +839,17 @@ impl Connection {
         {
             self.routes[pending.route.0].discovery = None;
         }
-        self.pending[id as usize] = None;
+        self.pending[id.slot()] = None;
         self.sync_listeners();
     }
 
-    fn cancel(&mut self, id: u16) {
-        if let Some(pending) = self.pending[id as usize]
+    fn cancel(&mut self, id: RequestId) {
+        if let Some(pending) = self.pending[id.slot()]
             && pending.request == Request::Map
         {
             self.routes[pending.route.0].discovery = None;
         }
-        self.pending[id as usize] = None;
+        self.pending[id.slot()] = None;
     }
 
     fn reset_route(&mut self, route: RouteKey) {
@@ -934,7 +945,7 @@ fn completion(request: Request) -> Completion {
 struct ListenerPin {
     key: PinKey,
     token: Box<[u8]>,
-    id: u16,
+    id: RequestId,
 }
 
 #[derive(Clone)]
@@ -1164,7 +1175,7 @@ fn own_response(
 fn active_listener(
     routes: &[ListenerRoute],
     source: &[u8],
-    id: u16,
+    id: RequestId,
     target: &[u8],
 ) -> Option<PinKey> {
     routes
@@ -1176,7 +1187,7 @@ fn active_listener(
         .map(|pin| pin.key)
 }
 
-fn listener_is_configured(routes: &[ListenerRoute], key: PinKey, id: u16) -> bool {
+fn listener_is_configured(routes: &[ListenerRoute], key: PinKey, id: RequestId) -> bool {
     routes
         .iter()
         .any(|route| route.pins.iter().any(|pin| pin.key == key && pin.id == id))
@@ -1186,7 +1197,7 @@ fn coalesce_listener_update(
     updates: &mut [Vec<Option<ListenerValue>>],
     pin: PinKey,
     line: WireLine,
-    id: u16,
+    id: RequestId,
     level: Level,
 ) {
     let slot = &mut updates[pin.route.0][pin.index];
@@ -1341,7 +1352,11 @@ mod tests {
         (connection, sam, lpc, pa00, lpc23, pioa)
     }
 
-    fn incoming(source: &str, id: u16, body: WireResponse) -> OwnedResponse {
+    fn request_id(raw: u16) -> RequestId {
+        RequestId::new(raw).unwrap()
+    }
+
+    fn incoming(source: &str, id: RequestId, body: WireResponse) -> OwnedResponse {
         OwnedResponse {
             source: source.into(),
             packet: Packet { id, body },
@@ -1367,8 +1382,8 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(sam_id, 1);
-        assert_eq!(lpc_id, 2);
+        assert_eq!(sam_id, request_id(1));
+        assert_eq!(lpc_id, request_id(2));
         assert_eq!(sam_wire, b"001 SAM GET PA00 OK?\n");
         assert_eq!(lpc_wire, b"002 LPC GET PIO2_3 OK?\n");
     }
@@ -1383,14 +1398,14 @@ mod tests {
                 .unwrap_err()
                 .contains("expected SAM")
         );
-        assert!(connection.pending[id as usize].is_some());
+        assert!(connection.pending[id.slot()].is_some());
         assert_eq!(
             connection
                 .received(incoming("SAM", id, WireResponse::Hello))
                 .unwrap(),
             DeviceEvent::Hello { route: sam }
         );
-        assert!(connection.pending[id as usize].is_none());
+        assert!(connection.pending[id.slot()].is_none());
     }
 
     #[test]
@@ -1416,7 +1431,7 @@ mod tests {
                 },
             }
         );
-        assert!(connection.pending[id as usize].is_none());
+        assert!(connection.pending[id.slot()].is_none());
     }
 
     #[test]
@@ -1454,7 +1469,7 @@ mod tests {
                 DeviceEvent::Untracked
             );
             assert!(connection.routes[sam.0].map.is_none());
-            assert!(connection.pending[id as usize].is_some());
+            assert!(connection.pending[id.slot()].is_some());
         }
 
         assert_eq!(
@@ -1463,7 +1478,7 @@ mod tests {
                 .unwrap(),
             DeviceEvent::MapReady { route: sam }
         );
-        assert!(connection.pending[id as usize].is_none());
+        assert!(connection.pending[id.slot()].is_none());
         assert_eq!(connection.banks(sam).count(), 2);
         assert_eq!(connection.pins(sam).count(), 2);
         let led = connection.pin_key(sam, "LED_A").unwrap();
@@ -1499,7 +1514,7 @@ mod tests {
             panic!("expected malformed response event");
         };
         assert!(event.unwrap_err().contains("Malformed response"));
-        assert!(connection.pending[id as usize].is_none());
+        assert!(connection.pending[id.slot()].is_none());
         assert!(connection.routes[sam.0].discovery.is_none());
     }
 
@@ -1533,7 +1548,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.contains("unknown bank MISSING"));
-        assert!(connection.pending[id as usize].is_none());
+        assert!(connection.pending[id.slot()].is_none());
         assert!(connection.routes[sam.0].discovery.is_none());
         assert!(connection.routes[sam.0].map.is_none());
     }
@@ -1564,7 +1579,7 @@ mod tests {
             connection.prepare(sam, Request::Hello).unwrap_err(),
             "SAM pin-map discovery is still in progress"
         );
-        assert!(connection.pending[map_id as usize].is_some());
+        assert!(connection.pending[map_id.slot()].is_some());
         assert!(connection.routes[sam.0].discovery.is_some());
     }
 
@@ -1588,7 +1603,7 @@ mod tests {
         connection
             .received(incoming("SAM", listen_id, WireResponse::Ack))
             .unwrap();
-        assert!(connection.pending[listen_id as usize].is_some());
+        assert!(connection.pending[listen_id.slot()].is_some());
         assert_eq!(
             connection
                 .received(incoming(
@@ -1605,7 +1620,7 @@ mod tests {
                 level: Level::High,
             }
         );
-        assert!(connection.pending[listen_id as usize].is_some());
+        assert!(connection.pending[listen_id.slot()].is_some());
 
         let (get_id, _) = connection
             .prepare(
@@ -1625,11 +1640,11 @@ mod tests {
                 },
             ))
             .unwrap();
-        assert!(connection.pending[get_id as usize].is_some());
+        assert!(connection.pending[get_id.slot()].is_some());
         connection
             .received(incoming("SAM", get_id, WireResponse::Ack))
             .unwrap();
-        assert!(connection.pending[get_id as usize].is_none());
+        assert!(connection.pending[get_id.slot()].is_none());
     }
 
     #[test]
@@ -1642,7 +1657,7 @@ mod tests {
                 pins: vec![ListenerPin {
                     key: pa00,
                     token: b"PA00".as_slice().into(),
-                    id: 8,
+                    id: request_id(8),
                 }],
             },
             ListenerRoute {
@@ -1651,34 +1666,43 @@ mod tests {
                 pins: vec![ListenerPin {
                     key: lpc23,
                     token: b"PIO2_3".as_slice().into(),
-                    id: 9,
+                    id: request_id(9),
                 }],
             },
         ];
         let mut updates = vec![vec![None; 2], vec![None; 1]];
-        assert_eq!(active_listener(&routes, b"SAM", 8, b"PA00"), Some(pa00));
-        assert_eq!(active_listener(&routes, b"LPC", 9, b"PIO2_3"), Some(lpc23));
-        assert_eq!(active_listener(&routes, b"SAM", 9, b"PIO2_3"), None);
+        assert_eq!(
+            active_listener(&routes, b"SAM", request_id(8), b"PA00"),
+            Some(pa00)
+        );
+        assert_eq!(
+            active_listener(&routes, b"LPC", request_id(9), b"PIO2_3"),
+            Some(lpc23)
+        );
+        assert_eq!(
+            active_listener(&routes, b"SAM", request_id(9), b"PIO2_3"),
+            None
+        );
 
         coalesce_listener_update(
             &mut updates,
             pa00,
             WireLine::new(b"008 SAM HYG PA00 LOW <3"),
-            8,
+            request_id(8),
             Level::Low,
         );
         coalesce_listener_update(
             &mut updates,
             pa00,
             WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
-            8,
+            request_id(8),
             Level::High,
         );
         coalesce_listener_update(
             &mut updates,
             lpc23,
             WireLine::new(b"009 LPC HYG PIO2_3 HIGH <3"),
-            9,
+            request_id(9),
             Level::High,
         );
         assert_eq!(updates[sam.0][pa00.index].unwrap().coalesced, 1);
@@ -1700,7 +1724,7 @@ mod tests {
                 pins: vec![ListenerPin {
                     key: pin,
                     token: b"PA00".as_slice().into(),
-                    id: 8,
+                    id: request_id(8),
                 }],
             }]),
             &mut state,
@@ -1710,7 +1734,7 @@ mod tests {
             &mut state.listener_updates,
             pin,
             WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
-            8,
+            request_id(8),
             Level::High,
         );
         handle_io_command(
@@ -1720,7 +1744,7 @@ mod tests {
                 pins: vec![ListenerPin {
                     key: pin,
                     token: b"PA00".as_slice().into(),
-                    id: 9,
+                    id: request_id(9),
                 }],
             }]),
             &mut state,
@@ -1744,7 +1768,7 @@ mod tests {
                 pins: vec![ListenerPin {
                     key: first,
                     token: b"PA00".as_slice().into(),
-                    id: 8,
+                    id: request_id(8),
                 }],
             }]),
             &mut state,
@@ -1754,7 +1778,7 @@ mod tests {
             &mut state.listener_updates,
             first,
             WireLine::new(b"008 SAM HYG PA00 HIGH <3"),
-            8,
+            request_id(8),
             Level::High,
         );
 
@@ -1766,12 +1790,12 @@ mod tests {
                     ListenerPin {
                         key: first,
                         token: b"PA00".as_slice().into(),
-                        id: 8,
+                        id: request_id(8),
                     },
                     ListenerPin {
                         key: second,
                         token: b"PA01".as_slice().into(),
-                        id: 9,
+                        id: request_id(9),
                     },
                 ],
             }]),
@@ -1804,15 +1828,15 @@ mod tests {
         connection
             .received(incoming("SAM", listener, WireResponse::Ack))
             .unwrap();
-        for _ in 2..=MAX_PACKET_ID {
+        for _ in 2..=RequestId::MAX {
             let (id, _) = connection.prepare(sam, Request::Hello).unwrap();
             connection
                 .received(incoming("SAM", id, WireResponse::Hello))
                 .unwrap();
         }
         let (id, _) = connection.prepare(sam, Request::Hello).unwrap();
-        assert_eq!(id, 2);
-        assert!(connection.pending[listener as usize].is_some());
+        assert_eq!(id, request_id(2));
+        assert!(connection.pending[listener.slot()].is_some());
     }
 
     #[test]

@@ -1,4 +1,6 @@
-use da_vinci_protocol::{MAX_PACKET_LEN, Packet, RequestEnvelope, Response, ResponseError};
+use da_vinci_protocol::{
+    MAX_PACKET_LEN, Packet, RequestEnvelope, RequestId, Response, ResponseError,
+};
 
 const ROUTE_QUEUE_CAPACITY: usize = 2;
 
@@ -40,7 +42,7 @@ impl<'a> Route<'a> {
         self.destinations.contains(&destination)
     }
 
-    fn forward(&mut self, id: u16, frame: &[u8]) -> Result<(), RouteFailure> {
+    fn forward(&mut self, id: RequestId, frame: &[u8]) -> Result<(), RouteFailure> {
         if self.down {
             return Err(RouteFailure::Down);
         }
@@ -57,7 +59,7 @@ impl<'a> Route<'a> {
         self.queue.push(id, frame).map_err(|_| RouteFailure::Busy)
     }
 
-    fn poll_send(&mut self) -> Option<u16> {
+    fn poll_send(&mut self) -> Option<RequestId> {
         let queued = *self.queue.front()?;
         if self.down {
             self.queue.pop();
@@ -203,14 +205,14 @@ impl<'a, const N: usize> Router<'a, N> {
 
 #[derive(Clone, Copy)]
 struct QueuedFrame {
-    id: u16,
+    id: RequestId,
     bytes: [u8; MAX_PACKET_LEN],
     len: usize,
 }
 
 impl QueuedFrame {
     const EMPTY: Self = Self {
-        id: 0,
+        id: RequestId::FIRST,
         bytes: [0; MAX_PACKET_LEN],
         len: 0,
     };
@@ -239,7 +241,7 @@ impl FrameQueue {
         self.len == 0
     }
 
-    fn push(&mut self, id: u16, frame: &[u8]) -> Result<(), ()> {
+    fn push(&mut self, id: RequestId, frame: &[u8]) -> Result<(), ()> {
         if self.len == ROUTE_QUEUE_CAPACITY || frame.len() > MAX_PACKET_LEN {
             return Err(());
         }
@@ -341,6 +343,10 @@ mod tests {
         decode_request_envelope(frame).unwrap()
     }
 
+    fn request_id(raw: u16) -> RequestId {
+        RequestId::new(raw).unwrap()
+    }
+
     fn dispatch<'a, const N: usize>(
         router: &mut Router<'_, N>,
         frame: &'a [u8],
@@ -357,7 +363,7 @@ mod tests {
         let frame = b"010 SAM HAI\n";
         let response = router
             .dispatch(frame, envelope(frame), |packet| {
-                assert_eq!(packet.id, 10);
+                assert_eq!(packet.id, request_id(10));
                 assert_eq!(packet.body, b"HAI");
                 Packet {
                     id: packet.id,
@@ -368,7 +374,7 @@ mod tests {
         assert_eq!(
             response,
             Packet {
-                id: 10,
+                id: request_id(10),
                 body: Response::Hello
             }
         );
@@ -422,7 +428,7 @@ mod tests {
         assert_eq!(
             dispatch(&mut router, busy),
             Some(Packet {
-                id: 33,
+                id: request_id(33),
                 body: Response::Error(ResponseError::RouteBusy {
                     next_hop: b"LPC".as_slice(),
                 }),
@@ -447,7 +453,7 @@ mod tests {
         assert_eq!(
             dispatch(&mut router, frame),
             Some(Packet {
-                id: 41,
+                id: request_id(41),
                 body: Response::Error(ResponseError::RouteDown {
                     next_hop: b"LPC".as_slice(),
                 }),
@@ -456,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_frame_that_discovers_link_failure_returns_its_original_id() {
+    fn queued_frame_that_discovers_link_failure_returns_its_original_request_id() {
         let (mut link, control) = FakeLink::new(SendMode::Blocked);
         let mut router = Router::new(b"SAM", [Route::new(b"LPC", &[b"LPC"], &mut link)]);
         let frame = b"051 LPC HAI\n";
@@ -465,7 +471,7 @@ mod tests {
         assert_eq!(
             router.poll_routes(),
             Some(Packet {
-                id: 51,
+                id: request_id(51),
                 body: Response::Error(ResponseError::RouteDown {
                     next_hop: b"LPC".as_slice(),
                 }),

@@ -7,7 +7,39 @@ use core::{
 
 pub const WIRE_PIN_COUNT: u8 = 117;
 pub const MAX_PACKET_LEN: usize = 64;
-pub const MAX_PACKET_ID: u16 = 999;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RequestId(u16);
+
+impl RequestId {
+    pub const MIN: u16 = 1;
+    pub const MAX: u16 = 999;
+    pub const COUNT: usize = (Self::MAX - Self::MIN + 1) as usize;
+    pub const FIRST: Self = Self(Self::MIN);
+
+    pub const fn new(raw: u16) -> Option<Self> {
+        if raw >= Self::MIN && raw <= Self::MAX {
+            Some(Self(raw))
+        } else {
+            None
+        }
+    }
+
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+
+    pub const fn slot(self) -> usize {
+        (self.0 - Self::MIN) as usize
+    }
+
+    pub const fn next(self) -> Self {
+        if self.0 == Self::MAX {
+            Self(Self::MIN)
+        } else {
+            Self(self.0 + 1)
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PinTable<T>([T; WIRE_PIN_COUNT as usize]);
@@ -114,20 +146,20 @@ impl LineBuffer {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Packet<T> {
-    pub id: u16,
+    pub id: RequestId,
     pub body: T,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestEnvelope<'a> {
-    pub id: u16,
+    pub id: RequestId,
     pub destination: &'a [u8],
     pub body: &'a [u8],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseEnvelope<'a> {
-    pub id: u16,
+    pub id: RequestId,
     pub source: &'a [u8],
     pub body: &'a [u8],
 }
@@ -686,14 +718,13 @@ pub enum DecodeErrorKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecodeError {
-    pub id: Option<u16>,
+    pub id: Option<RequestId>,
     pub kind: DecodeErrorKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EncodeError {
     OutputTooSmall,
-    InvalidPacketId,
     InvalidRouteToken,
     InvalidTargetToken,
     InvalidIdentity,
@@ -1155,7 +1186,7 @@ fn parse_enabled(token: &[u8]) -> Option<bool> {
     }
 }
 
-fn decode_envelope(line: &[u8]) -> Result<(u16, &[u8], &[u8]), DecodeError> {
+fn decode_envelope(line: &[u8]) -> Result<(RequestId, &[u8], &[u8]), DecodeError> {
     let (id_token, rest) = next_token(line).ok_or(DecodeError {
         id: None,
         kind: DecodeErrorKind::Malformed,
@@ -1180,7 +1211,7 @@ fn decode_envelope(line: &[u8]) -> Result<(u16, &[u8], &[u8]), DecodeError> {
 }
 
 fn encode_envelope(
-    id: u16,
+    id: RequestId,
     route: &[u8],
     body: &[u8],
     out: &mut [u8],
@@ -1226,11 +1257,11 @@ fn valid_identity(identity: &[u8]) -> bool {
     !identity.is_empty() && identity.split(|byte| *byte == b' ').all(valid_route_token)
 }
 
-fn parse_packet_id(token: &[u8]) -> Option<u16> {
+fn parse_packet_id(token: &[u8]) -> Option<RequestId> {
     if token.is_empty() || token.len() > 3 || !token.iter().all(u8::is_ascii_digit) {
         return None;
     }
-    core::str::from_utf8(token).ok()?.parse().ok()
+    RequestId::new(core::str::from_utf8(token).ok()?.parse().ok()?)
 }
 
 struct Writer<'a> {
@@ -1258,11 +1289,8 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    fn id(&mut self, value: u16) -> Result<(), EncodeError> {
-        if value > MAX_PACKET_ID {
-            return Err(EncodeError::InvalidPacketId);
-        }
-        self.decimal3(value)
+    fn id(&mut self, value: RequestId) -> Result<(), EncodeError> {
+        self.decimal3(value.get())
     }
 
     fn route(&mut self, route: &[u8]) -> Result<(), EncodeError> {
@@ -1308,7 +1336,11 @@ mod tests {
     use super::*;
     use std::string::ToString;
 
-    fn encoded_request(id: u16, body: Request<&'static [u8]>) -> [u8; MAX_PACKET_LEN] {
+    fn id(raw: u16) -> RequestId {
+        RequestId::new(raw).unwrap()
+    }
+
+    fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> [u8; MAX_PACKET_LEN] {
         let mut out = [0u8; MAX_PACKET_LEN];
         let len = encode_request(Packet { id, body }, b"SAM", &mut out).unwrap();
         assert_eq!(decoded_request(&out[..len]), Ok(Packet { id, body }));
@@ -1367,7 +1399,7 @@ mod tests {
         assert_eq!(
             envelope,
             RequestEnvelope {
-                id: 1,
+                id: id(1),
                 destination: b"SAM",
                 body: b"HAI",
             }
@@ -1378,7 +1410,7 @@ mod tests {
         assert_eq!(
             decode_request_envelope(b"002 LPC GET PIO2_3 OK?"),
             Ok(RequestEnvelope {
-                id: 2,
+                id: id(2),
                 destination: b"LPC",
                 body: b"GET PIO2_3 OK?",
             })
@@ -1386,7 +1418,7 @@ mod tests {
         assert_eq!(
             decode_request_envelope(b"003 ABC WAT opaque body"),
             Ok(RequestEnvelope {
-                id: 3,
+                id: id(3),
                 destination: b"ABC",
                 body: b"WAT opaque body",
             })
@@ -1394,7 +1426,7 @@ mod tests {
         assert_eq!(
             decode_response_envelope(b"002 LPC HYG PIO2_3 HIGH <3"),
             Ok(ResponseEnvelope {
-                id: 2,
+                id: id(2),
                 source: b"LPC",
                 body: b"HYG PIO2_3 HIGH <3",
             })
@@ -1405,7 +1437,7 @@ mod tests {
     fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
         let mut out = [0; MAX_PACKET_LEN];
         let request = RequestEnvelope {
-            id: 999,
+            id: id(999),
             destination: b"ABC",
             body: b"HAI",
         };
@@ -1414,7 +1446,7 @@ mod tests {
         assert_eq!(decode_request_envelope(&out[..len]), Ok(request));
 
         let response = ResponseEnvelope {
-            id: 7,
+            id: id(7),
             source: b"SAM",
             body: b"HII <3",
         };
@@ -1426,7 +1458,7 @@ mod tests {
             assert_eq!(
                 encode_request_envelope(
                     RequestEnvelope {
-                        id: 1,
+                        id: id(1),
                         destination: route,
                         body: b"HAI",
                     },
@@ -1536,7 +1568,7 @@ mod tests {
         ];
 
         for (body, expected) in cases {
-            let out = encoded_request(1, body);
+            let out = encoded_request(id(1), body);
             assert_eq!(&out[..expected.len()], expected.as_bytes());
         }
     }
@@ -1650,7 +1682,7 @@ mod tests {
         ];
 
         for (body, expected) in cases {
-            let packet = Packet { id: 8, body };
+            let packet = Packet { id: id(8), body };
             let mut out = [0u8; MAX_PACKET_LEN];
             let len = encode_response(packet, b"SAM", &mut out).unwrap();
             assert_eq!(&out[..len], expected.as_bytes());
@@ -1668,7 +1700,7 @@ mod tests {
             assert_eq!(
                 decoded_response(line),
                 Err(DecodeError {
-                    id: Some(8),
+                    id: Some(id(8)),
                     kind: DecodeErrorKind::Malformed,
                 })
             );
@@ -1680,14 +1712,14 @@ mod tests {
         assert_eq!(
             decoded_request(b"007 SAM DIR PA00 SIDEWAYS OK?\n"),
             Err(DecodeError {
-                id: Some(7),
+                id: Some(id(7)),
                 kind: DecodeErrorKind::Malformed,
             })
         );
         assert_eq!(
             decoded_request(b"007 SAM WAT PA00\n"),
             Err(DecodeError {
-                id: Some(7),
+                id: Some(id(7)),
                 kind: DecodeErrorKind::UnknownCommand,
             })
         );
@@ -1702,10 +1734,17 @@ mod tests {
 
     #[test]
     fn packet_ids_remain_decimal_but_numeric_gpio_targets_are_rejected() {
+        assert_eq!(RequestId::new(0), None);
+        assert_eq!(RequestId::new(1), Some(RequestId::FIRST));
+        assert_eq!(RequestId::new(999).unwrap().next(), RequestId::FIRST);
+        assert_eq!(RequestId::new(1000), None);
+        assert_eq!(RequestId::new(1).unwrap().slot(), 0);
+        assert_eq!(RequestId::new(999).unwrap().slot(), RequestId::COUNT - 1);
+        assert!(decoded_request(b"000 SAM HAI").is_err());
         assert_eq!(
             decoded_request(b"9 SAM GET PE05 OK?"),
             Ok(Packet {
-                id: 9,
+                id: id(9),
                 body: Request::Get {
                     target: b"PE05".as_slice(),
                 },
@@ -1716,7 +1755,7 @@ mod tests {
         assert_eq!(
             decoded_request(b"001 SAM GET PE06 OK?"),
             Ok(Packet {
-                id: 1,
+                id: id(1),
                 body: Request::Get {
                     target: b"PE06".as_slice(),
                 },
@@ -1725,7 +1764,7 @@ mod tests {
         assert_eq!(
             decoded_request(b"002 LPC GET PIO2_3 OK?"),
             Ok(Packet {
-                id: 2,
+                id: id(2),
                 body: Request::Get {
                     target: b"PIO2_3".as_slice(),
                 },
@@ -1736,7 +1775,7 @@ mod tests {
     #[test]
     fn typed_codec_round_trips_non_sam_targets_and_identity() {
         let request = Packet {
-            id: 21,
+            id: id(21),
             body: Request::Set {
                 target: b"PIO2_3".as_slice(),
                 level: Level::High,
@@ -1748,7 +1787,7 @@ mod tests {
         assert_eq!(decoded_request(&out[..len]), Ok(request));
 
         let response = Packet {
-            id: 22,
+            id: id(22),
             body: Response::Value {
                 target: b"PIO2_3".as_slice(),
                 level: Level::Low,
@@ -1759,7 +1798,7 @@ mod tests {
         assert_eq!(decoded_response(&out[..len]), Ok(response));
 
         let status = Packet {
-            id: 23,
+            id: id(23),
             body: Response::<&[u8], &[u8]>::Status {
                 identity: b"LPC1115 GPIO",
             },
