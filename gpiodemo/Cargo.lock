@@ -740,6 +740,7 @@ dependencies = [
  "cortex-m-rt",
  "da-vinci-protocol",
  "lpc11xx",
+ "nb 0.1.3",
  "panic-halt",
  "usbd-serial",
 ]

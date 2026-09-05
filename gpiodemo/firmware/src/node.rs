@@ -159,12 +159,15 @@ fn decode_error_response<T>(error: DecodeError) -> Option<Packet<Response<T, &'s
 mod tests {
     extern crate std;
 
-    use std::vec::Vec;
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc, vec::Vec};
 
     use da_vinci_protocol::Level;
 
     use super::*;
-    use crate::{BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap};
+    use crate::{
+        BankId, BankInfo, Capabilities, PinId, PinInfo, PinMap,
+        router::{FrameLink, LinkError},
+    };
 
     const BANK: BankId = BankId::new(0);
     static BANKS: [BankInfo; 1] = [BankInfo::new("PIO2")];
@@ -251,6 +254,62 @@ mod tests {
         assert_eq!(
             bytes.output,
             b"101 LPC HII <3\n102 LPC IAM LPC1115 GPIO <3\n103 LPC OKA <3\n104 LPC UMM NO_ROUTE XYZ <3\n"
+        );
+    }
+
+    struct FakeFrameLink {
+        sent: Rc<RefCell<Vec<Vec<u8>>>>,
+        incoming: Rc<RefCell<VecDeque<Vec<u8>>>>,
+    }
+
+    impl FrameLink for FakeFrameLink {
+        fn try_send(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+            self.sent.borrow_mut().push(frame.to_vec());
+            Ok(())
+        }
+
+        fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, LinkError> {
+            let Some(frame) = self.incoming.borrow_mut().pop_front() else {
+                return Ok(None);
+            };
+            out[..frame.len()].copy_from_slice(&frame);
+            Ok(Some(frame.len()))
+        }
+    }
+
+    #[test]
+    fn routed_frames_are_opaque_and_preserve_ids_both_directions() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let incoming = Rc::new(RefCell::new(VecDeque::new()));
+        let mut link = FakeFrameLink {
+            sent: Rc::clone(&sent),
+            incoming: Rc::clone(&incoming),
+        };
+        let route = Route::new(b"LPC", &[b"LPC"], &mut link);
+        let mut node = Node::new(b"SAM4E8E GPIO", b"SAM", [route]);
+        let mut bytes = FakeBytes::new(b"200 LPC HAI\n201 SAM HAI\n");
+        let mut gpio = FakeGpio { bank: 0 };
+
+        for _ in 0..12 {
+            node.poll(&mut bytes, &mut gpio).unwrap();
+        }
+
+        assert_eq!(&*sent.borrow(), &[b"200 LPC HAI\n".to_vec()]);
+        assert_eq!(bytes.output, b"201 SAM HII <3\n");
+
+        incoming
+            .borrow_mut()
+            .push_back(b"200 LPC HII <3\n".to_vec());
+        incoming
+            .borrow_mut()
+            .push_back(b"230 LPC HYG PIO2_3 HIGH <3\n".to_vec());
+        for _ in 0..12 {
+            node.poll(&mut bytes, &mut gpio).unwrap();
+        }
+
+        assert_eq!(
+            bytes.output,
+            b"201 SAM HII <3\n200 LPC HII <3\n230 LPC HYG PIO2_3 HIGH <3\n"
         );
     }
 }

@@ -1,3 +1,4 @@
+use crate::router::{FrameLink, LinkError};
 use da_vinci_protocol::{LineBuffer, LineError, MAX_PACKET_LEN};
 
 const RX_CAPACITY: usize = MAX_PACKET_LEN * 4;
@@ -11,6 +12,52 @@ pub enum ByteError {
 pub trait NonBlockingBytes {
     fn try_read(&mut self, out: &mut [u8]) -> Result<usize, ByteError>;
     fn try_write(&mut self, bytes: &[u8]) -> Result<usize, ByteError>;
+}
+pub struct FramedLink<B> {
+    bytes: B,
+    transport: FramedTransport,
+    frame: [u8; MAX_PACKET_LEN],
+}
+
+impl<B> FramedLink<B> {
+    pub const fn new(bytes: B) -> Self {
+        Self {
+            bytes,
+            transport: FramedTransport::new(),
+            frame: [0; MAX_PACKET_LEN],
+        }
+    }
+}
+
+impl<B: NonBlockingBytes> FrameLink for FramedLink<B> {
+    fn try_send(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+        self.transport.poll(&mut self.bytes).map_err(link_error)?;
+        self.transport.enqueue(frame).map_err(|error| match error {
+            QueueError::Busy => LinkError::WouldBlock,
+            QueueError::TooLong => LinkError::Down,
+        })?;
+        self.transport.poll(&mut self.bytes).map_err(link_error)
+    }
+
+    fn try_receive(&mut self, out: &mut [u8]) -> Result<Option<usize>, LinkError> {
+        self.transport.poll(&mut self.bytes).map_err(link_error)?;
+        let len = match self.transport.next_frame(&mut self.frame) {
+            Ok(Some(len)) => len,
+            Ok(None) | Err(_) => return Ok(None),
+        };
+        if len > out.len() {
+            return Err(LinkError::Down);
+        }
+        out[..len].copy_from_slice(&self.frame[..len]);
+        Ok(Some(len))
+    }
+}
+
+const fn link_error(error: ByteError) -> LinkError {
+    match error {
+        ByteError::WouldBlock => LinkError::WouldBlock,
+        ByteError::Down => LinkError::Down,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,5 +329,64 @@ mod tests {
         );
         assert_eq!(transport.enqueue(b"one\n"), Ok(()));
         assert_eq!(transport.enqueue(b"two\n"), Err(QueueError::Busy));
+    }
+}
+
+#[cfg(test)]
+mod framed_link_tests {
+    extern crate std;
+
+    use std::{collections::VecDeque, vec::Vec};
+
+    use super::*;
+
+    struct Bytes {
+        reads: VecDeque<Vec<u8>>,
+        writes: Vec<u8>,
+        write_limit: usize,
+    }
+
+    impl NonBlockingBytes for Bytes {
+        fn try_read(&mut self, out: &mut [u8]) -> Result<usize, ByteError> {
+            let Some(mut input) = self.reads.pop_front() else {
+                return Err(ByteError::WouldBlock);
+            };
+            let len = input.len().min(out.len());
+            out[..len].copy_from_slice(&input[..len]);
+            if len != input.len() {
+                input.drain(..len);
+                self.reads.push_front(input);
+            }
+            Ok(len)
+        }
+
+        fn try_write(&mut self, bytes: &[u8]) -> Result<usize, ByteError> {
+            let len = bytes.len().min(self.write_limit);
+            self.writes.extend_from_slice(&bytes[..len]);
+            Ok(len)
+        }
+    }
+
+    #[test]
+    fn framed_link_owns_partial_uart_tx_and_line_rx() {
+        let bytes = Bytes {
+            reads: [b"200 LPC HII ".to_vec(), b"<3\n".to_vec()].into(),
+            writes: Vec::new(),
+            write_limit: 3,
+        };
+        let mut link = FramedLink::new(bytes);
+
+        assert_eq!(link.try_send(b"200 LPC HAI\n"), Ok(()));
+
+        let mut received = [0; MAX_PACKET_LEN];
+        let mut response = None;
+        for _ in 0..8 {
+            if let Some(len) = link.try_receive(&mut received).unwrap() {
+                response = Some(received[..len].to_vec());
+            }
+        }
+
+        assert_eq!(link.bytes.writes, b"200 LPC HAI\n");
+        assert_eq!(response, Some(b"200 LPC HII <3\n".to_vec()));
     }
 }

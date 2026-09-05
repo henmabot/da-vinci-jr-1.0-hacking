@@ -41,7 +41,7 @@ The LPC1115 target passes compile and protocol tests, but no one has electricall
 
 Until hardware measurements identify printer-specific loads, the LPC pin map advertises all other pads as input-only and disables pull-up control. This is stricter than the MCU electrical capability. It prevents the controller from claiming that an unknown board net is safe to drive or bias. PIO0_4 and PIO0_5 are special open-drain/I2C pads, so their adapter selects Standard-I/O mode instead of ordinary push-pull configuration.
 
-The LPC firmware assumes the reset-default 12 MHz internal RC oscillator and configures its upstream UART for approximately 115200 baud. Hardware measurements can require different clock or baud settings. The code does not claim physical validation of the SAM-to-LPC link.
+The LPC firmware assumes the reset-default 12 MHz internal RC oscillator and configures its upstream UART for approximately 115200 baud. The SAM target configures UART1 on PA5/PA6 at 115200 baud and routes `LPC` frames through that link. Compile-time and fake-link tests cover this path, but the code does not claim physical validation of the SAM-to-LPC connection. Hardware measurements can require different clock or baud settings.
 
 ## Protocol
 

@@ -698,7 +698,7 @@ mod tests {
     use core::cell::Cell;
 
     use super::*;
-    use crate::sam::{BANK_B, BANK_C, SAM_IDENTITY, SAM_PIN_MAP};
+    use crate::sam::{BANK_A, BANK_B, BANK_C, SAM_IDENTITY, SAM_PIN_MAP};
     use da_vinci_protocol::Request;
 
     const BANK_0: BankId = BankId::new(0);
@@ -795,6 +795,14 @@ mod tests {
             panic!("PB12 must resolve to a pin");
         };
         assert_eq!(SAM_PIN_MAP.pin(pb12).package_pin, Some(87));
+
+        for token in [b"PA05".as_slice(), b"PA06"] {
+            let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {
+                panic!("reserved SAM UART target must still be present in metadata");
+            };
+            assert!(!SAM_PIN_MAP.pin(pin).capabilities.available());
+            assert_eq!(SAM_PIN_MAP.pin(pin).bank, BANK_A);
+        }
 
         for token in [b"PB08".as_slice(), b"PB09", b"PB10", b"PB11"] {
             let Target::Pin(pin) = SAM_PIN_MAP.resolve(token).unwrap() else {

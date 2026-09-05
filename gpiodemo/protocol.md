@@ -53,7 +53,7 @@ The current SAM node exposes these native names:
 - `PD00` through `PD31` in `PIOD`.
 - `PE00` through `PE05` in `PIOE`.
 
-Numeric GPIO IDs are not valid targets. SAM pins PB08 through PB11 are reserved by the board and report `UNAVAILABLE` for individual operations. Grouped operations skip unavailable pins.
+Numeric GPIO IDs are not valid targets. UART1 reserves SAM pins PA05 and PA06 for the LPC link. The board/USB path reserves PB08 through PB11. These pins report `UNAVAILABLE` for individual GPIO operations. Grouped operations skip unavailable pins.
 
 Pins begin in the `UNSET` state. `DIR` initializes a pin. Commands whose meaning depends on an initialized direction do not implicitly initialize it.
 
@@ -181,8 +181,8 @@ Uninitialized individual read:
 Unknown route:
 
 ```text
-054 LPC HAI
-054 SAM UMM NO_ROUTE LPC <3
+054 XYZ HAI
+054 SAM UMM NO_ROUTE XYZ <3
 ```
 
 The response source identifies the node that failed the route lookup. In this example, that node is `SAM`. The `NO_ROUTE` argument preserves the unresolved destination.
@@ -192,6 +192,8 @@ The response source identifies the node that failed the route lookup. In this ex
 A node can configure one or more downstream next hops. One next hop can serve several destination names. The router selects a next hop from the request destination and forwards the complete request frame without changing its ID, destination, or command body.
 
 Downstream responses and listener events travel upstream as complete frames. Intermediate nodes do not rewrite their IDs or source names.
+
+The current SAM firmware configures one downstream route named `LPC` over SAM UART1. The router forwards a request such as `054 LPC HAI` unchanged. An LPC reply such as `054 LPC HII <3` returns to the host unchanged with the same host-allocated ID.
 
 If a link temporarily cannot make progress, the router keeps accepted frames in a fixed-capacity queue. Temporary flow control does not mean that the route is down. When that queue is full, a new request fails locally:
 
