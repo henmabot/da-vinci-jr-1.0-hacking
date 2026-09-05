@@ -159,7 +159,7 @@ impl App {
         let has_upper_half = self
             .session
             .pins(route)
-            .any(|(_, info)| info.bank == bank && info.bit >= 16);
+            .any(|(_, info)| *info.bank() == bank && info.bit() >= 16);
         if has_upper_half {
             responsive(move |size| {
                 responsive_pin_columns(
@@ -191,9 +191,9 @@ impl App {
         }
         column = column.push(pin_header());
         for (pin, info) in self.session.pins(self.selected_route_key()) {
-            if info.bank != bank
-                || info.bit < start_bit
-                || end_bit.is_some_and(|end| info.bit >= end)
+            if *info.bank() != bank
+                || info.bit() < start_bit
+                || end_bit.is_some_and(|end| info.bit() >= end)
             {
                 continue;
             }
@@ -207,7 +207,7 @@ impl App {
             return text("Unknown pin").into();
         };
         let name = pin_cell(text(info.to_string()).size(12), PIN_NAME_SHARE);
-        if !info.capabilities.available() {
+        if !info.capabilities().available() {
             return row![
                 name,
                 pin_cell(text("RESERVED").size(11), PIN_MODE_SHARE),
@@ -240,7 +240,7 @@ impl App {
             .into()
         } else {
             pick_list(
-                Mode::available_for(info.capabilities),
+                Mode::available_for(info.capabilities()),
                 state.mode,
                 move |mode| Message::ModeSelected(pin, mode),
             )
@@ -252,11 +252,11 @@ impl App {
         };
 
         let rw: Element<'_, Message> =
-            if state.mode.is_some_and(Mode::is_input) && info.capabilities.input() {
+            if state.mode.is_some_and(Mode::is_input) && info.capabilities().input() {
                 native_button("Read")
                     .on_press_maybe((!state.value_pending).then_some(Message::Read(pin)))
                     .into()
-            } else if state.mode == Some(Mode::Output) && info.capabilities.output() {
+            } else if state.mode == Some(Mode::Output) && info.capabilities().output() {
                 let label = if state.level == Some(Level::High) {
                     "Write LOW"
                 } else {
@@ -270,7 +270,7 @@ impl App {
             };
 
         let listen: Element<'_, Message> =
-            if state.mode.is_some_and(Mode::is_input) && info.capabilities.input() {
+            if state.mode.is_some_and(Mode::is_input) && info.capabilities().input() {
                 let label = if matches!(
                     state.listener,
                     ListenerState::On { .. } | ListenerState::Disabling { .. }

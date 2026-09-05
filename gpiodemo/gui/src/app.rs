@@ -490,7 +490,7 @@ impl App {
         let pins = self.session.target_pins(route, self.bulk_scope.target);
         Mode::available_for_any(
             pins.into_iter()
-                .filter_map(|pin| self.session.pin_info(pin).map(|info| info.capabilities)),
+                .filter_map(|pin| self.session.pin_info(pin).map(|info| info.capabilities())),
         )
     }
 

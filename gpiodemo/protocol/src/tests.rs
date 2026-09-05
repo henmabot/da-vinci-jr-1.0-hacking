@@ -1,5 +1,6 @@
 extern crate std;
 use super::*;
+use std::string::ToString;
 
 fn id(raw: u16) -> RequestId {
     RequestId::new(raw).unwrap()
@@ -42,6 +43,11 @@ fn pin_descriptor_maps_only_identifier_domains() {
     assert_eq!(PIN.bank(), &2);
     assert_eq!(PIN.bit(), 7);
     assert_eq!(PIN.capabilities(), PinCapabilities::GPIO);
+    assert_eq!(PIN.to_string(), "PA00 (102)");
+    assert_eq!(
+        PinDescriptor::new("PIO2_3", None, 0u8, 3, PinCapabilities::INPUT).to_string(),
+        "PIO2_3"
+    );
 
     let mapped = PIN
         .try_map::<_, _, core::convert::Infallible>(

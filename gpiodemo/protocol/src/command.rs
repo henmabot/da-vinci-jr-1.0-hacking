@@ -180,6 +180,15 @@ pub struct PinDescriptor<T, B> {
     capabilities: PinCapabilities,
 }
 
+impl<T: fmt::Display, B> fmt::Display for PinDescriptor<T, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.package_pin {
+            Some(package_pin) => write!(f, "{} ({package_pin})", self.target),
+            None => write!(f, "{}", self.target),
+        }
+    }
+}
+
 impl<T, B> PinDescriptor<T, B> {
     pub const fn new(
         target: T,

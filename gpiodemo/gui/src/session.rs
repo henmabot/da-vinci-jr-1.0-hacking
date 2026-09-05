@@ -2,8 +2,9 @@ use std::{array, fmt};
 
 use da_vinci_protocol::{
     Command, DecodeError, DecodedResponse, Direction, Frame, Level, MAX_PACKET_LEN, Message,
-    Packet, PinCapabilities, Query, QueryValue, RawMessage, Request as ProtocolRequest, RequestId,
-    Response as ProtocolResponse, ResponseError as ProtocolResponseError, Toggle,
+    Packet, PinCapabilities, PinDescriptor, Query, QueryValue, RawMessage,
+    Request as ProtocolRequest, RequestId, Response as ProtocolResponse,
+    ResponseError as ProtocolResponseError, Toggle,
 };
 
 use crate::io::{IoEvent, ListenerKey, ListenerPin, ListenerRoute, SerialIo};
@@ -51,23 +52,7 @@ pub(super) enum Target {
 pub(super) type Request = ProtocolRequest<Target>;
 pub(super) type ResponseError = ProtocolResponseError<PinKey, String>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PinInfo {
-    pub(super) token: String,
-    pub(super) package_pin: Option<u16>,
-    pub(super) bank: BankKey,
-    pub(super) bit: u8,
-    pub(super) capabilities: PinCapabilities,
-}
-
-impl fmt::Display for PinInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.package_pin {
-            Some(package_pin) => write!(f, "{} ({package_pin})", self.token),
-            None => f.write_str(&self.token),
-        }
-    }
-}
+pub(super) type PinInfo = PinDescriptor<String, BankKey>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Event {
@@ -327,7 +312,7 @@ impl MapBuilder {
     ) -> Result<(), String> {
         let token_text = String::from_utf8_lossy(token);
         let bank_text = String::from_utf8_lossy(bank_token);
-        if self.pins.iter().any(|pin| pin.token.as_bytes() == token) {
+        if self.pins.iter().any(|pin| pin.target().as_bytes() == token) {
             return Err(format!("Duplicate MAP pin {token_text}"));
         }
         let Some(bank_index) = self
@@ -342,20 +327,20 @@ impl MapBuilder {
         if self
             .pins
             .iter()
-            .any(|pin| pin.bank.index == bank_index && pin.bit == bit)
+            .any(|pin| pin.bank().index == bank_index && pin.bit() == bit)
         {
             return Err(format!("Duplicate MAP bank bit {bank_text}:{bit}"));
         }
-        self.pins.push(PinInfo {
-            token: token_text.into_owned(),
+        self.pins.push(PinInfo::new(
+            token_text.into_owned(),
             package_pin,
-            bank: BankKey {
+            BankKey {
                 route: self.route,
                 index: bank_index,
             },
             bit,
             capabilities,
-        });
+        ));
         Ok(())
     }
 
@@ -429,7 +414,7 @@ impl DeviceSession {
             .as_ref()?
             .pins
             .iter()
-            .position(|pin| pin.info.token == token)
+            .position(|pin| pin.info.target() == token)
             .map(|index| PinKey { route, index })
     }
 
@@ -492,7 +477,7 @@ impl DeviceSession {
         map.pins
             .iter()
             .enumerate()
-            .filter(|(index, pin)| target_contains(route, target, *index, pin.info.bank))
+            .filter(|(index, pin)| target_contains(route, target, *index, *pin.info.bank()))
             .map(|(index, _)| PinKey { route, index })
             .collect()
     }
@@ -511,7 +496,7 @@ impl DeviceSession {
         let Some(route_pin) = self.route_pin(pin) else {
             return Err("Unknown pin key".into());
         };
-        if !mode.supported_by(route_pin.info.capabilities)
+        if !mode.supported_by(route_pin.info.capabilities())
             || route_pin.state.target_mode.is_some()
             || route_pin.state.listener.is_pending()
         {
@@ -591,7 +576,7 @@ impl DeviceSession {
             let Some(route_pin) = self.route_pin(pin) else {
                 continue;
             };
-            if !route_pin.info.capabilities.available()
+            if !route_pin.info.capabilities().available()
                 || route_pin.state.mode.is_some()
                 || route_pin.state.target_mode.is_some()
             {
@@ -709,7 +694,7 @@ impl DeviceSession {
         for pin in self.target_pins(route, target) {
             let available = self
                 .route_pin(pin)
-                .is_some_and(|pin| pin.info.capabilities.available());
+                .is_some_and(|pin| pin.info.capabilities().available());
             if available && let Some(pin) = self.route_pin_mut(pin) {
                 pin.state.target_mode = Some(mode);
                 pin.state.level = None;
@@ -766,13 +751,13 @@ impl DeviceSession {
         let pins = pins
             .into_iter()
             .map(|(token, bank, bit, capabilities)| RoutePin {
-                info: PinInfo {
+                info: PinInfo::new(
                     token,
-                    package_pin: None,
-                    bank: BankKey { route, index: bank },
+                    None,
+                    BankKey { route, index: bank },
                     bit,
                     capabilities,
-                },
+                ),
                 state: PinState::UNSET,
             })
             .collect();
@@ -906,7 +891,7 @@ impl DeviceSession {
             Target::All => Ok("ALL".into()),
             Target::Pin(pin) if pin.route == route => self
                 .pin_info(pin)
-                .map(|info| info.token.clone())
+                .map(|info| info.target().clone())
                 .ok_or_else(|| "Unknown pin key".into()),
             Target::Bank(bank) if bank.route == route => self
                 .bank_token(bank)
@@ -1097,7 +1082,7 @@ impl DeviceSession {
             .and_then(|map| {
                 map.pins
                     .iter()
-                    .position(|pin| pin.info.token.as_bytes() == token)
+                    .position(|pin| pin.info.target().as_bytes() == token)
             })
             .map(|index| PinKey { route, index });
         pin.ok_or_else(|| {
@@ -1133,7 +1118,7 @@ impl DeviceSession {
                     follow_up = Some(request);
                 } else {
                     self.for_target_pins_mut(pending.route, target, |pin| {
-                        if pin.info.capabilities.supports_direction(direction) {
+                        if pin.info.capabilities().supports_direction(direction) {
                             pin.state.mode = Some(if direction == Direction::Input {
                                 Mode::Input
                             } else {
@@ -1258,7 +1243,7 @@ impl DeviceSession {
             return;
         };
         for (index, pin) in map.pins.iter_mut().enumerate() {
-            if target_contains(route, target, index, pin.info.bank) {
+            if target_contains(route, target, index, *pin.info.bank()) {
                 apply(pin);
             }
         }
@@ -1361,7 +1346,7 @@ impl DeviceSession {
                                     index,
                                 }
                                 .into(),
-                                token: pin.info.token.as_bytes().into(),
+                                token: pin.info.target().as_bytes().into(),
                                 id,
                             })
                         })
@@ -1449,29 +1434,29 @@ mod tests {
             banks: vec!["PIOA".into()],
             pins: vec![
                 RoutePin {
-                    info: PinInfo {
-                        token: "PA00".into(),
-                        package_pin: Some(102),
-                        bank: BankKey {
+                    info: PinInfo::new(
+                        "PA00".into(),
+                        Some(102),
+                        BankKey {
                             route: sam,
                             index: 0,
                         },
-                        bit: 0,
-                        capabilities: PinCapabilities::GPIO,
-                    },
+                        0,
+                        PinCapabilities::GPIO,
+                    ),
                     state: PinState::UNSET,
                 },
                 RoutePin {
-                    info: PinInfo {
-                        token: "PA01".into(),
-                        package_pin: Some(99),
-                        bank: BankKey {
+                    info: PinInfo::new(
+                        "PA01".into(),
+                        Some(99),
+                        BankKey {
                             route: sam,
                             index: 0,
                         },
-                        bit: 1,
-                        capabilities: PinCapabilities::GPIO,
-                    },
+                        1,
+                        PinCapabilities::GPIO,
+                    ),
                     state: PinState::UNSET,
                 },
             ],
@@ -1479,16 +1464,16 @@ mod tests {
         connection.routes[lpc.0].map = Some(RouteMap {
             banks: vec!["PIO2".into()],
             pins: vec![RoutePin {
-                info: PinInfo {
-                    token: "PIO2_3".into(),
-                    package_pin: Some(38),
-                    bank: BankKey {
+                info: PinInfo::new(
+                    "PIO2_3".into(),
+                    Some(38),
+                    BankKey {
                         route: lpc,
                         index: 0,
                     },
-                    bit: 3,
-                    capabilities: PinCapabilities::INPUT,
-                },
+                    3,
+                    PinCapabilities::INPUT,
+                ),
                 state: PinState::UNSET,
             }],
         });
@@ -1634,8 +1619,8 @@ mod tests {
         assert_eq!(connection.banks(sam).count(), 2);
         assert_eq!(connection.pins(sam).count(), 2);
         let led = connection.pin_key(sam, "LED_A").unwrap();
-        assert_eq!(connection.pin_info(led).unwrap().package_pin, Some(48));
-        assert!(connection.pin_info(led).unwrap().capabilities.output());
+        assert_eq!(connection.pin_info(led).unwrap().package_pin(), Some(48));
+        assert!(connection.pin_info(led).unwrap().capabilities().output());
     }
 
     #[test]
