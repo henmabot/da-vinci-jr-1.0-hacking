@@ -1,13 +1,29 @@
 name: Build
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install verification tools
+        run: |
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends just
+          rustup target add thumbv7em-none-eabi thumbv6m-none-eabi
+
+      - name: Verify workspace and firmware targets
+        run: just verify
+
   gui-macos:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,6 +39,7 @@ jobs:
           if-no-files-found: error
 
   build:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

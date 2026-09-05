@@ -32,10 +32,10 @@ gui-release:
 
 check:
     cargo fmt --manifest-path {{ manifest }} --all -- --check
-    cargo test --manifest-path {{ manifest }} -p da-vinci-protocol
-    cargo test --manifest-path {{ manifest }} -p da-vinci-firmware --all-features
-    cargo test --manifest-path {{ manifest }} -p da-vinci-gui
+    cargo test --manifest-path {{ manifest }} --workspace --all-features
     cargo clippy --manifest-path {{ manifest }} --workspace --all-targets --all-features -- -D warnings
+
+verify: check
     cargo build --manifest-path {{ manifest }} -p da-vinci-firmware --bin da-vinci-firmware --no-default-features --features sam4e8e --profile firmware --target {{ sam_target }}
     cargo build --manifest-path {{ manifest }} -p da-vinci-firmware --bin da-vinci-lpc1115 --no-default-features --features lpc1115 --profile firmware --target {{ lpc_target }}
     cargo clippy --manifest-path {{ manifest }} -p da-vinci-firmware --bin da-vinci-firmware --no-default-features --features sam4e8e --profile firmware --target {{ sam_target }} -- -D warnings
