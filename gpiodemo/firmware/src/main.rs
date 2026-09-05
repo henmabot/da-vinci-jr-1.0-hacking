@@ -15,13 +15,14 @@ mod board {
     };
     use cortex_m_rt::entry;
     use da_vinci_firmware::{
-        Firmware, Gpio,
+        BankId, Firmware, GpioHal, PinId,
         router::Router,
+        sam::{SAM_IDENTITY, SAM_PIN_MAP},
         transport::{ByteError, FramedTransport, NonBlockingBytes},
     };
     use da_vinci_protocol::{
-        DecodeError, DecodeErrorKind, Level, MAX_PACKET_LEN, Packet, Pin, PinTarget, Port, Request,
-        Response, ResponseError, decode_request, decode_request_envelope, encode_response,
+        DecodeError, DecodeErrorKind, Level, MAX_PACKET_LEN, Packet, Response, ResponseError,
+        decode_request, decode_request_envelope, encode_response,
     };
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
@@ -31,42 +32,48 @@ mod board {
 
     struct SamGpio;
 
-    macro_rules! with_port {
+    macro_rules! with_pin {
         ($pin:expr, |$port:ident, $mask:ident| $body:block) => {{
-            let $mask = 1u32 << $pin.bit();
-            // SAFETY: Firmware is the only SamGpio caller and only passes validated protocol pins.
+            let info = SAM_PIN_MAP.pin($pin);
+            let $mask = 1u32 << info.bit;
+            // SAFETY: Firmware is the only SamGpio caller and only passes IDs from SAM_PIN_MAP.
             // Reserved clock/USB pins never reach this adapter,
             // and the firmware loop is single-threaded, so these MMIO registers are not aliased.
             unsafe {
-                match $pin.port() {
-                    Port::A => {
+                match info.bank.index() {
+                    0 => {
                         let $port = &*pac::PIOA::ptr();
                         $body
                     }
-                    Port::B => {
+                    1 => {
                         let $port = &*pac::PIOB::ptr();
                         $body
                     }
-                    Port::C => {
+                    2 => {
                         let $port = &*pac::PIOC::ptr();
                         $body
                     }
-                    Port::D => {
+                    3 => {
                         let $port = &*pac::PIOD::ptr();
                         $body
                     }
-                    Port::E => {
+                    4 => {
                         let $port = &*pac::PIOE::ptr();
                         $body
                     }
+                    _ => unreachable!("SAM pin map contains only PIOA-E"),
                 }
             }
         }};
     }
 
-    impl Gpio for SamGpio {
-        fn input(&mut self, pin: Pin, pullup: bool) {
-            with_port!(pin, |port, mask| {
+    impl GpioHal for SamGpio {
+        fn pin_map(&self) -> &'static da_vinci_firmware::PinMap {
+            &SAM_PIN_MAP
+        }
+
+        fn input(&mut self, pin: PinId, pullup: bool) {
+            with_pin!(pin, |port, mask| {
                 if pullup {
                     port.ppddr.write_with_zero(|w| w.bits(mask));
                     port.puer.write_with_zero(|w| w.bits(mask));
@@ -79,8 +86,8 @@ mod board {
             });
         }
 
-        fn output(&mut self, pin: Pin, level: Level) {
-            with_port!(pin, |port, mask| {
+        fn output(&mut self, pin: PinId, level: Level) {
+            with_pin!(pin, |port, mask| {
                 port.pudr.write_with_zero(|w| w.bits(mask));
                 port.ppddr.write_with_zero(|w| w.bits(mask));
                 if level == Level::High {
@@ -94,8 +101,8 @@ mod board {
             });
         }
 
-        fn write(&mut self, pin: Pin, level: Level) {
-            with_port!(pin, |port, mask| {
+        fn write(&mut self, pin: PinId, level: Level) {
+            with_pin!(pin, |port, mask| {
                 if level == Level::High {
                     port.sodr.write_with_zero(|w| w.bits(mask));
                 } else {
@@ -104,16 +111,17 @@ mod board {
             });
         }
 
-        fn read_port(&self, target: Port) -> u32 {
+        fn read_bank(&self, bank: BankId) -> u32 {
             // SAFETY: Firmware is the only SamGpio caller, the loop is single-threaded,
             // and reading PDSR does not mutate or alias the PIO registers.
             unsafe {
-                match target {
-                    Port::A => (&*pac::PIOA::ptr()).pdsr.read().bits(),
-                    Port::B => (&*pac::PIOB::ptr()).pdsr.read().bits(),
-                    Port::C => (&*pac::PIOC::ptr()).pdsr.read().bits(),
-                    Port::D => (&*pac::PIOD::ptr()).pdsr.read().bits(),
-                    Port::E => (&*pac::PIOE::ptr()).pdsr.read().bits(),
+                match bank.index() {
+                    0 => (&*pac::PIOA::ptr()).pdsr.read().bits(),
+                    1 => (&*pac::PIOB::ptr()).pdsr.read().bits(),
+                    2 => (&*pac::PIOC::ptr()).pdsr.read().bits(),
+                    3 => (&*pac::PIOD::ptr()).pdsr.read().bits(),
+                    4 => (&*pac::PIOE::ptr()).pdsr.read().bits(),
+                    _ => unreachable!("SAM pin map contains only PIOA-E"),
                 }
             }
         }
@@ -175,7 +183,7 @@ mod board {
             .device_class(USB_CLASS_CDC)
             .build();
 
-        let mut firmware = Firmware::new();
+        let mut firmware = Firmware::new(SAM_IDENTITY);
         let mut gpio = SamGpio;
         let mut router = Router::new(LOCAL_ROUTE, []);
         let mut transport = FramedTransport::new();
@@ -197,10 +205,10 @@ mod board {
                 match decode_request_envelope(&frame[..len]) {
                     Ok(envelope) => {
                         let response = router.dispatch(&frame[..len], envelope, |body| {
-                            decode_local_request(body)
+                            decode_request(body)
                                 .map(|packet| firmware.handle(packet, &mut gpio))
                                 .unwrap_or_else(|error| {
-                                    decode_error_response::<[u8; 4]>(error)
+                                    decode_error_response::<&[u8]>(error)
                                         .expect("local command decode errors keep their ID")
                                 })
                         });
@@ -236,19 +244,6 @@ mod board {
         transport
             .enqueue(&frame[..len])
             .expect("response queued only while transport TX is idle");
-    }
-
-    fn decode_local_request(
-        packet: Packet<&[u8]>,
-    ) -> Result<Packet<Request<PinTarget>>, DecodeError> {
-        let id = packet.id;
-        let body = decode_request(packet)?.body.try_map_target(|target| {
-            PinTarget::try_from(target).map_err(|_| DecodeError {
-                id: Some(id),
-                kind: DecodeErrorKind::Malformed,
-            })
-        })?;
-        Ok(Packet { id, body })
     }
 
     fn decode_error_response<T>(error: DecodeError) -> Option<Packet<Response<T, &'static [u8]>>> {
