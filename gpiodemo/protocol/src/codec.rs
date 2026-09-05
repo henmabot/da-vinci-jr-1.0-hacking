@@ -1,7 +1,7 @@
 use crate::{
     command::{
-        Command, DecodedRequest, DecodedResponse, Direction, Level, Query, QueryValue, Request,
-        Response, ResponseError, TargetError, Toggle,
+        Command, DecodedRequest, DecodedResponse, Direction, Level, PinDescriptor, Query,
+        QueryValue, Request, Response, ResponseError, TargetError, Toggle,
     },
     framing::{Frame, MAX_PACKET_LEN},
     message::{Message, Packet, RawMessage, RequestId, parse_packet_id, valid_route_token},
@@ -287,11 +287,7 @@ fn decode_response(message: RawMessage<'_>) -> Result<Packet<DecodedResponse<'_>
                 let capabilities = next_as(&mut tokens, malformed())?;
                 expect_suffix(&mut tokens, suffix, malformed())?;
                 Response::MapPin {
-                    target,
-                    package_pin,
-                    bank,
-                    bit,
-                    capabilities,
+                    pin: PinDescriptor::new(target, package_pin, bank, bit, capabilities),
                 }
             }
             _ => return Err(malformed()),
@@ -490,27 +486,21 @@ fn encode_response_body<T: AsRef<[u8]>, D: AsRef<[u8]>>(
             writer.bytes(b"MAP BANK ")?;
             writer.target(bank.as_ref())?;
         }
-        Response::MapPin {
-            target,
-            package_pin,
-            bank,
-            bit,
-            capabilities,
-        } => {
+        Response::MapPin { pin } => {
             writer.bytes(b"MAP PIN ")?;
-            writer.target(target.as_ref())?;
+            writer.target(pin.target().as_ref())?;
             writer.bytes(b" ")?;
-            if let Some(package_pin) = package_pin {
+            if let Some(package_pin) = pin.package_pin() {
                 writer.decimal(package_pin)?;
             } else {
                 writer.bytes(b"-")?;
             }
             writer.bytes(b" ")?;
-            writer.target(bank.as_ref())?;
+            writer.target(pin.bank().as_ref())?;
             writer.bytes(b" ")?;
-            writer.decimal(u16::from(bit))?;
+            writer.decimal(u16::from(pin.bit()))?;
             writer.bytes(b" ")?;
-            writer.bytes(&[b'0' + capabilities.bits()])?;
+            writer.bytes(&[b'0' + pin.capabilities().bits()])?;
         }
         Response::Ack => writer.bytes(b"OKA")?,
         Response::Value { target, level } => {

@@ -60,6 +60,13 @@ fn pin_descriptor_maps_only_identifier_domains() {
     assert_eq!(mapped.package_pin(), PIN.package_pin());
     assert_eq!(mapped.bit(), PIN.bit());
     assert_eq!(mapped.capabilities(), PIN.capabilities());
+    let response = Response::MapPin { pin: PIN }
+        .try_map::<_, _, core::convert::Infallible>(
+            |target| Ok(target.as_bytes()),
+            |bank| Ok(usize::from(bank)),
+        )
+        .unwrap();
+    assert_eq!(response, Response::MapPin { pin: mapped });
 }
 
 fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> Frame {
@@ -403,31 +410,37 @@ fn response_wire_examples_use_symbolic_pins() {
         ),
         (
             Response::MapPin {
-                target: b"PA00".as_slice(),
-                package_pin: Some(102),
-                bank: b"PIOA".as_slice(),
-                bit: 0,
-                capabilities: PinCapabilities::GPIO,
+                pin: PinDescriptor::new(
+                    b"PA00".as_slice(),
+                    Some(102),
+                    b"PIOA".as_slice(),
+                    0,
+                    PinCapabilities::GPIO,
+                ),
             },
             "008 SAM MAP PIN PA00 102 PIOA 0 7 <3\n",
         ),
         (
             Response::MapPin {
-                target: b"PIO2_3".as_slice(),
-                package_pin: None,
-                bank: b"PIO2".as_slice(),
-                bit: 3,
-                capabilities: PinCapabilities::INPUT,
+                pin: PinDescriptor::new(
+                    b"PIO2_3".as_slice(),
+                    None,
+                    b"PIO2".as_slice(),
+                    3,
+                    PinCapabilities::INPUT,
+                ),
             },
             "008 SAM MAP PIN PIO2_3 - PIO2 3 1 <3\n",
         ),
         (
             Response::MapPin {
-                target: b"PIO0_4".as_slice(),
-                package_pin: Some(15),
-                bank: b"PIO0".as_slice(),
-                bit: 4,
-                capabilities: PinCapabilities::INPUT_OUTPUT,
+                pin: PinDescriptor::new(
+                    b"PIO0_4".as_slice(),
+                    Some(15),
+                    b"PIO0".as_slice(),
+                    4,
+                    PinCapabilities::INPUT_OUTPUT,
+                ),
             },
             "008 SAM MAP PIN PIO0_4 15 PIO0 4 3 <3\n",
         ),

@@ -374,11 +374,7 @@ pub enum Response<T, D> {
         bank: D,
     },
     MapPin {
-        target: T,
-        package_pin: Option<u16>,
-        bank: D,
-        bit: u8,
-        capabilities: PinCapabilities,
+        pin: PinDescriptor<T, D>,
     },
     Ack,
     Value {
@@ -399,6 +395,46 @@ pub enum Response<T, D> {
     Error(ResponseError<T, D>),
     Unknown,
     Bye,
+}
+
+impl<T, D> Response<T, D> {
+    pub fn try_map<T2, D2, E>(
+        self,
+        map_target: impl FnOnce(T) -> Result<T2, E>,
+        map_data: impl FnOnce(D) -> Result<D2, E>,
+    ) -> Result<Response<T2, D2>, E> {
+        Ok(match self {
+            Self::Hello => Response::Hello,
+            Self::Status { identity } => Response::Status {
+                identity: map_data(identity)?,
+            },
+            Self::MapBank { bank } => Response::MapBank {
+                bank: map_data(bank)?,
+            },
+            Self::MapPin { pin } => Response::MapPin {
+                pin: pin.try_map(map_target, map_data)?,
+            },
+            Self::Ack => Response::Ack,
+            Self::Value { target, level } => Response::Value {
+                target: map_target(target)?,
+                level,
+            },
+            Self::State {
+                target,
+                what,
+                value,
+            } => Response::State {
+                target: map_target(target)?,
+                what,
+                value,
+            },
+            Self::Version { version } => Response::Version { version },
+            Self::Help { command } => Response::Help { command },
+            Self::Error(error) => Response::Error(error.try_map(map_target, map_data)?),
+            Self::Unknown => Response::Unknown,
+            Self::Bye => Response::Bye,
+        })
+    }
 }
 
 pub type DecodedRequest<'a> = Request<&'a [u8]>;

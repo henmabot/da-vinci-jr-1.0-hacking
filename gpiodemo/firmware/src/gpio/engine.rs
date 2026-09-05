@@ -1,6 +1,6 @@
 use da_vinci_protocol::{
-    Command, DecodedRequest, Direction, Level, PROTOCOL_VERSION, Packet, Query, QueryValue,
-    RequestId, Response, ResponseError, TargetError, Toggle,
+    Command, DecodedRequest, Direction, Level, PROTOCOL_VERSION, Packet, PinDescriptor, Query,
+    QueryValue, RequestId, Response, ResponseError, TargetError, Toggle,
 };
 
 use super::{
@@ -184,11 +184,13 @@ impl Firmware {
                 }
             } else if let Some(info) = map.pins().get(next - map.banks().len()) {
                 Response::MapPin {
-                    target: info.target().as_bytes(),
-                    package_pin: info.package_pin(),
-                    bank: map.bank(*info.bank()).as_bytes(),
-                    bit: info.bit(),
-                    capabilities: info.capabilities(),
+                    pin: PinDescriptor::new(
+                        info.target().as_bytes(),
+                        info.package_pin(),
+                        map.bank(*info.bank()).as_bytes(),
+                        info.bit(),
+                        info.capabilities(),
+                    ),
                 }
             } else {
                 self.bulk = None;
@@ -691,11 +693,13 @@ mod tests {
                 Some(Packet {
                     id: RequestId::new(10).unwrap(),
                     body: Response::MapPin {
-                        target: info.target().as_bytes(),
-                        package_pin: info.package_pin(),
-                        bank: SYNTH_MAP.bank(*info.bank()).as_bytes(),
-                        bit: info.bit(),
-                        capabilities: info.capabilities(),
+                        pin: PinDescriptor::new(
+                            info.target().as_bytes(),
+                            info.package_pin(),
+                            SYNTH_MAP.bank(*info.bank()).as_bytes(),
+                            info.bit(),
+                            info.capabilities(),
+                        ),
                     },
                 }),
                 "pin record {index}"

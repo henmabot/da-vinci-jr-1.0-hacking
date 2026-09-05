@@ -982,17 +982,16 @@ impl DeviceSession {
                 }
                 Ok(DeviceEvent::Untracked)
             }
-            ProtocolResponse::MapPin {
-                target,
-                package_pin,
-                bank,
-                bit,
-                capabilities,
-            } => {
-                if let Err(error) = self
-                    .require_map(pending, id)
-                    .and_then(|map| map.pin(target, package_pin, bank, bit, capabilities))
-                {
+            ProtocolResponse::MapPin { pin } => {
+                if let Err(error) = self.require_map(pending, id).and_then(|map| {
+                    map.pin(
+                        pin.target(),
+                        pin.package_pin(),
+                        pin.bank(),
+                        pin.bit(),
+                        pin.capabilities(),
+                    )
+                }) {
                     self.retire(id);
                     return Err(error);
                 }
@@ -1585,18 +1584,10 @@ mod tests {
             ProtocolResponse::MapBank { bank: "GPIO0" },
             ProtocolResponse::MapBank { bank: "GPIO1" },
             ProtocolResponse::MapPin {
-                target: "P0_7",
-                package_pin: None,
-                bank: "GPIO0",
-                bit: 7,
-                capabilities: PinCapabilities::INPUT_PULLUP,
+                pin: PinDescriptor::new("P0_7", None, "GPIO0", 7, PinCapabilities::INPUT_PULLUP),
             },
             ProtocolResponse::MapPin {
-                target: "LED_A",
-                package_pin: Some(48),
-                bank: "GPIO1",
-                bit: 3,
-                capabilities: PinCapabilities::GPIO,
+                pin: PinDescriptor::new("LED_A", Some(48), "GPIO1", 3, PinCapabilities::GPIO),
             },
         ] {
             assert_eq!(
@@ -1717,11 +1708,7 @@ mod tests {
                 "SAM",
                 id,
                 ProtocolResponse::MapPin {
-                    target: "PA00",
-                    package_pin: Some(102),
-                    bank: "MISSING",
-                    bit: 0,
-                    capabilities: PinCapabilities::GPIO,
+                    pin: PinDescriptor::new("PA00", Some(102), "MISSING", 0, PinCapabilities::GPIO),
                 },
             ))
             .unwrap_err();
@@ -1785,11 +1772,7 @@ mod tests {
                 "SAM",
                 id,
                 ProtocolResponse::MapPin {
-                    target: "X0",
-                    package_pin: Some(7),
-                    bank: "GPIOX",
-                    bit: 0,
-                    capabilities: PinCapabilities::INPUT,
+                    pin: PinDescriptor::new("X0", Some(7), "GPIOX", 0, PinCapabilities::INPUT),
                 },
             ))
             .unwrap();
@@ -1824,11 +1807,7 @@ mod tests {
                 "SAM",
                 id,
                 ProtocolResponse::MapPin {
-                    target: "X0",
-                    package_pin: None,
-                    bank: "MISSING",
-                    bit: 0,
-                    capabilities: PinCapabilities::INPUT,
+                    pin: PinDescriptor::new("X0", None, "MISSING", 0, PinCapabilities::INPUT),
                 },
             ))
             .unwrap_err();
