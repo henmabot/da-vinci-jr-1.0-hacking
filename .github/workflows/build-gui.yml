@@ -23,6 +23,6 @@ jobs:
       - name: Upload desktop controller
         uses: actions/upload-artifact@v7
         with:
-          name: da-vinci-gui-macos
+          name: gpio-contorller-gui-macos
           path: gpiodemo/target/release/da-vinci-gui
           if-no-files-found: error
