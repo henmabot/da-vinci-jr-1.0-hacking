@@ -8,11 +8,16 @@ use std::{
 
 use da_vinci_protocol::{
     DecodeError, Level, LineBuffer, LineError, MAX_PACKET_ID, MAX_PACKET_LEN, Packet, Pin,
-    PinTable, PinTarget, Query, QueryValue, Request, Response, ResponseError, decode_response,
+    PinTable, PinTarget, Query, QueryValue, Request as ProtocolRequest,
+    Response as ProtocolResponse, ResponseError as ProtocolResponseError, decode_response,
     decode_response_envelope, encode_request,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
+
+pub(super) type Request = ProtocolRequest<PinTarget>;
+type Response = ProtocolResponse<Pin, String>;
+type ResponseError = ProtocolResponseError<Pin, String>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Event {
@@ -44,7 +49,7 @@ impl ListenerValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DeviceEvent {
     Hello,
-    Status,
+    Status(String),
     Ack(Request),
     PinValue {
         pin: Pin,
@@ -57,7 +62,7 @@ pub(super) enum DeviceEvent {
     },
     DeviceError {
         request: Request,
-        error: ResponseError<String>,
+        error: ResponseError,
     },
     Unknown {
         request: Request,
@@ -192,8 +197,16 @@ impl Connection {
     fn prepare(&mut self, request: Request) -> Result<(u16, Vec<u8>), String> {
         let id = self.allocate_id()?;
         let mut buffer = [0u8; MAX_PACKET_LEN];
-        let len = encode_request(Packet { id, body: request }, b"SAM", &mut buffer)
-            .expect("protocol request always fits fixed packet buffer");
+        let wire_request = request.map_target(|target| target.to_string());
+        let len = encode_request(
+            Packet {
+                id,
+                body: wire_request,
+            },
+            b"SAM",
+            &mut buffer,
+        )
+        .expect("protocol request always fits fixed packet buffer");
         self.pending[id as usize] = Some(request);
         Ok((id, buffer[..len].to_vec()))
     }
@@ -209,7 +222,7 @@ impl Connection {
         Err("All 999 request IDs are still in use".into())
     }
 
-    fn received(&mut self, packet: Packet<Response<String>>) -> DeviceEvent {
+    fn received(&mut self, packet: Packet<Response>) -> DeviceEvent {
         if packet.body == Response::Bye {
             self.clear();
             return DeviceEvent::Bye;
@@ -224,18 +237,22 @@ impl Connection {
                 self.pending[packet.id as usize] = None;
                 DeviceEvent::Hello
             }
-            Response::Status => {
+            Response::Status { identity } => {
                 self.pending[packet.id as usize] = None;
-                DeviceEvent::Status
+                DeviceEvent::Status(identity)
             }
             Response::Ack => self.ack(packet.id, request),
-            Response::Value { pin, level } => {
+            Response::Value { target: pin, level } => {
                 if self.listeners[pin] != Some(packet.id) && !is_grouped_get(request) {
                     self.pending[packet.id as usize] = None;
                 }
                 DeviceEvent::PinValue { pin, level }
             }
-            Response::State { pin, what, value } => {
+            Response::State {
+                target: pin,
+                what,
+                value,
+            } => {
                 if !is_grouped_query(request) {
                     self.pending[packet.id as usize] = None;
                 }
@@ -356,7 +373,7 @@ enum IoEvent {
     Disconnected(Option<String>),
     Line {
         line: WireLine,
-        packet: Result<Packet<Response<String>>, DecodeError>,
+        packet: Result<Packet<Response>, DecodeError>,
     },
     ListenerValues(Vec<ListenerValue>),
     Error(String),
@@ -482,7 +499,7 @@ fn route_line(
     match decode_owned_response(line) {
         Ok(Packet {
             id,
-            body: Response::Value { pin, level },
+            body: Response::Value { target: pin, level },
         }) if listeners[pin] == Some(id) => {
             coalesce_listener_update(listener_updates, pin, wire_line, id, level);
         }
@@ -501,40 +518,20 @@ fn route_line(
     }
 }
 
-fn decode_owned_response(line: &[u8]) -> Result<Packet<Response<String>>, DecodeError> {
+fn decode_owned_response(line: &[u8]) -> Result<Packet<Response>, DecodeError> {
     let envelope = decode_response_envelope(line)?;
     let packet = decode_response(Packet {
         id: envelope.id,
         body: envelope.body,
     })?;
-    let body = match packet.body {
-        Response::Hello => Response::Hello,
-        Response::Status => Response::Status,
-        Response::Ack => Response::Ack,
-        Response::Value { pin, level } => Response::Value { pin, level },
-        Response::State { pin, what, value } => Response::State { pin, what, value },
-        Response::Error(ResponseError::BadPacket) => Response::Error(ResponseError::BadPacket),
-        Response::Error(ResponseError::Pin { pin, reason }) => {
-            Response::Error(ResponseError::Pin { pin, reason })
-        }
-        Response::Error(ResponseError::NoRoute { destination }) => {
-            Response::Error(ResponseError::NoRoute {
-                destination: String::from_utf8_lossy(destination).into_owned(),
-            })
-        }
-        Response::Error(ResponseError::RouteBusy { next_hop }) => {
-            Response::Error(ResponseError::RouteBusy {
-                next_hop: String::from_utf8_lossy(next_hop).into_owned(),
-            })
-        }
-        Response::Error(ResponseError::RouteDown { next_hop }) => {
-            Response::Error(ResponseError::RouteDown {
-                next_hop: String::from_utf8_lossy(next_hop).into_owned(),
-            })
-        }
-        Response::Unknown => Response::Unknown,
-        Response::Bye => Response::Bye,
+    let malformed = || DecodeError {
+        id: Some(packet.id),
+        kind: da_vinci_protocol::DecodeErrorKind::Malformed,
     };
+    let body = packet.body.try_map(
+        |target| Pin::try_from(target).map_err(|_| malformed()),
+        |data| Ok::<_, DecodeError>(String::from_utf8_lossy(data).into_owned()),
+    )?;
     Ok(Packet {
         id: packet.id,
         body,
@@ -631,7 +628,7 @@ mod tests {
         Pin::from_wire_index(index).unwrap()
     }
 
-    fn response(id: u16, body: Response<String>) -> Packet<Response<String>> {
+    fn response(id: u16, body: Response) -> Packet<Response> {
         Packet { id, body }
     }
 
@@ -833,7 +830,7 @@ mod tests {
             connection.received(response(
                 listener,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::High,
                 },
             )),
@@ -857,7 +854,7 @@ mod tests {
             connection.received(response(
                 id,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::High,
                 },
             )),
@@ -892,7 +889,13 @@ mod tests {
         );
         for level in [Level::Low, Level::High] {
             assert_eq!(
-                connection.received(response(listener, Response::Value { pin: pin(5), level },)),
+                connection.received(response(
+                    listener,
+                    Response::Value {
+                        target: pin(5),
+                        level,
+                    },
+                )),
                 DeviceEvent::PinValue { pin: pin(5), level }
             );
         }
@@ -922,7 +925,7 @@ mod tests {
             connection.received(response(
                 first,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::High,
                 }
             )),
@@ -933,7 +936,7 @@ mod tests {
             connection.received(response(
                 first,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::Low,
                 }
             )),
@@ -965,7 +968,7 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::High,
                 }
             )),
@@ -994,7 +997,7 @@ mod tests {
             connection.received(response(
                 listener,
                 Response::Value {
-                    pin: pin(5),
+                    target: pin(5),
                     level: Level::High,
                 }
             )),
@@ -1015,7 +1018,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: pin(0),
+                    target: pin(0),
                     level: Level::High,
                 }
             )),
@@ -1025,7 +1028,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: pin(1),
+                    target: pin(1),
                     level: Level::Low,
                 }
             )),
@@ -1041,7 +1044,7 @@ mod tests {
             connection.received(response(
                 get,
                 Response::Value {
-                    pin: pin(2),
+                    target: pin(2),
                     level: Level::Low,
                 }
             )),
@@ -1059,7 +1062,7 @@ mod tests {
             connection.received(response(
                 query,
                 Response::State {
-                    pin: pin(0),
+                    target: pin(0),
                     what: Query::Direction,
                     value: QueryValue::Unset,
                 }
@@ -1112,7 +1115,7 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: pin(7),
+                    target: pin(7),
                     level: Level::High,
                 }
             )),
@@ -1131,7 +1134,7 @@ mod tests {
             connection.received(response(
                 on,
                 Response::Value {
-                    pin: pin(7),
+                    target: pin(7),
                     level: Level::Low,
                 }
             )),

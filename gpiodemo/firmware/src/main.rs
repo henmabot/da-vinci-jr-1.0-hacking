@@ -20,8 +20,8 @@ mod board {
         transport::{ByteError, FramedTransport, NonBlockingBytes},
     };
     use da_vinci_protocol::{
-        DecodeErrorKind, Level, MAX_PACKET_LEN, Packet, Pin, Port, Response, ResponseError,
-        decode_request, decode_request_envelope, encode_response,
+        DecodeError, DecodeErrorKind, Level, MAX_PACKET_LEN, Packet, Pin, PinTarget, Port, Request,
+        Response, ResponseError, decode_request, decode_request_envelope, encode_response,
     };
     use panic_halt as _;
     use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
@@ -197,10 +197,10 @@ mod board {
                 match decode_request_envelope(&frame[..len]) {
                     Ok(envelope) => {
                         let response = router.dispatch(&frame[..len], envelope, |body| {
-                            decode_request(body)
+                            decode_local_request(body)
                                 .map(|packet| firmware.handle(packet, &mut gpio))
                                 .unwrap_or_else(|error| {
-                                    decode_error_response(error)
+                                    decode_error_response::<[u8; 4]>(error)
                                         .expect("local command decode errors keep their ID")
                                 })
                         });
@@ -209,7 +209,7 @@ mod board {
                         }
                     }
                     Err(error) => {
-                        if let Some(response) = decode_error_response(error) {
+                        if let Some(response) = decode_error_response::<&[u8]>(error) {
                             queue_response(&mut transport, router.local_route(), response);
                         }
                     }
@@ -225,10 +225,10 @@ mod board {
         }
     }
 
-    fn queue_response<R: AsRef<[u8]>>(
+    fn queue_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
         transport: &mut FramedTransport,
         source: &[u8],
-        packet: Packet<Response<R>>,
+        packet: Packet<Response<T, D>>,
     ) {
         let mut frame = [0; MAX_PACKET_LEN];
         let len = encode_response(packet, source, &mut frame)
@@ -238,7 +238,20 @@ mod board {
             .expect("response queued only while transport TX is idle");
     }
 
-    fn decode_error_response(error: da_vinci_protocol::DecodeError) -> Option<Packet<Response>> {
+    fn decode_local_request(
+        packet: Packet<&[u8]>,
+    ) -> Result<Packet<Request<PinTarget>>, DecodeError> {
+        let id = packet.id;
+        let body = decode_request(packet)?.body.try_map_target(|target| {
+            PinTarget::try_from(target).map_err(|_| DecodeError {
+                id: Some(id),
+                kind: DecodeErrorKind::Malformed,
+            })
+        })?;
+        Ok(Packet { id, body })
+    }
+
+    fn decode_error_response<T>(error: DecodeError) -> Option<Packet<Response<T, &'static [u8]>>> {
         let id = error.id?;
         let body = match error.kind {
             DecodeErrorKind::Malformed => Response::Error(ResponseError::BadPacket),

@@ -4,9 +4,13 @@ pub mod router;
 pub mod transport;
 
 use da_vinci_protocol::{
-    Direction, Level, Packet, Pin, PinError, PinTable, PinTarget, Port, Query, QueryValue, Request,
-    Response, ResponseError, WIRE_PIN_COUNT,
+    Direction, Level, Packet, Pin, PinTable, PinTarget, Port, Query, QueryValue, Request, Response,
+    ResponseError, TargetError, WIRE_PIN_COUNT,
 };
+
+type FirmwareRequest = Request<PinTarget>;
+type FirmwareResponse = Response<[u8; 4], &'static [u8]>;
+const DEVICE_IDENTITY: &[u8] = b"SAM4E8E GPIO";
 
 pub trait Gpio {
     fn input(&mut self, pin: Pin, pullup: bool);
@@ -69,16 +73,22 @@ impl Firmware {
         }
     }
 
-    pub fn handle<G: Gpio>(&mut self, packet: Packet<Request>, gpio: &mut G) -> Packet<Response> {
+    pub fn handle<G: Gpio>(
+        &mut self,
+        packet: Packet<FirmwareRequest>,
+        gpio: &mut G,
+    ) -> Packet<FirmwareResponse> {
         let body = match packet.body {
             Request::Hello => Response::Hello,
-            Request::Status => Response::Status,
+            Request::Status => Response::Status {
+                identity: DEVICE_IDENTITY,
+            },
             Request::Direction { target, direction } => self.set_direction(target, direction, gpio),
             Request::Get {
                 target: PinTarget::Pin(pin),
             } => match self.initialized(pin) {
                 Ok(()) => Response::Value {
-                    pin,
+                    target: pin_token(pin),
                     level: gpio.read(pin),
                 },
                 Err(error) => error,
@@ -96,7 +106,7 @@ impl Firmware {
                 what,
             } => match supported(pin) {
                 Ok(()) => Response::State {
-                    pin,
+                    target: pin_token(pin),
                     what,
                     value: self.query(pin, what),
                 },
@@ -123,7 +133,7 @@ impl Firmware {
         target: PinTarget,
         kind: BulkKind,
         gpio: &G,
-    ) -> Packet<Response> {
+    ) -> Packet<FirmwareResponse> {
         self.bulk = Some(BulkResponse {
             id,
             target,
@@ -134,7 +144,7 @@ impl Firmware {
             .expect("new bulk response always yields a packet")
     }
 
-    pub fn poll_bulk<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
+    pub fn poll_bulk<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
         let BulkResponse {
             id,
             target,
@@ -155,12 +165,12 @@ impl Firmware {
                         continue;
                     }
                     Response::Value {
-                        pin,
+                        target: pin_token(pin),
                         level: gpio.read(pin),
                     }
                 }
                 BulkKind::States(what) => Response::State {
-                    pin,
+                    target: pin_token(pin),
                     what,
                     value: self.query(pin, what),
                 },
@@ -181,7 +191,7 @@ impl Firmware {
         })
     }
 
-    pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<Response>> {
+    pub fn poll_listener<G: Gpio>(&mut self, gpio: &G) -> Option<Packet<FirmwareResponse>> {
         let mut snapshots = [None; 5];
         for offset in 0..WIRE_PIN_COUNT {
             let index = (self.listener_cursor + offset) % WIRE_PIN_COUNT;
@@ -208,7 +218,10 @@ impl Firmware {
             self.listener_cursor = (index + 1) % WIRE_PIN_COUNT;
             return Some(Packet {
                 id: *listener,
-                body: Response::Value { pin, level: value },
+                body: Response::Value {
+                    target: pin_token(pin),
+                    level: value,
+                },
             });
         }
         None
@@ -219,7 +232,7 @@ impl Firmware {
         target: PinTarget,
         direction: Direction,
         gpio: &mut G,
-    ) -> Response {
+    ) -> FirmwareResponse {
         if let PinTarget::Pin(pin) = target
             && let Err(error) = supported(pin)
         {
@@ -252,7 +265,12 @@ impl Firmware {
         };
     }
 
-    fn set_level<G: Gpio>(&mut self, target: PinTarget, level: Level, gpio: &mut G) -> Response {
+    fn set_level<G: Gpio>(
+        &mut self,
+        target: PinTarget,
+        level: Level,
+        gpio: &mut G,
+    ) -> FirmwareResponse {
         if let PinTarget::Pin(pin) = target
             && let Err(error) = self.initialized(pin)
         {
@@ -275,7 +293,12 @@ impl Firmware {
         Response::Ack
     }
 
-    fn set_pullup<G: Gpio>(&mut self, target: PinTarget, enabled: bool, gpio: &mut G) -> Response {
+    fn set_pullup<G: Gpio>(
+        &mut self,
+        target: PinTarget,
+        enabled: bool,
+        gpio: &mut G,
+    ) -> FirmwareResponse {
         if let PinTarget::Pin(pin) = target
             && let Err(error) = self.initialized(pin)
         {
@@ -310,7 +333,7 @@ impl Firmware {
         enabled: bool,
         id: u16,
         gpio: &G,
-    ) -> Response {
+    ) -> FirmwareResponse {
         if let PinTarget::Pin(pin) = target
             && let Err(error) = self.initialized(pin)
         {
@@ -346,10 +369,10 @@ impl Firmware {
         }
     }
 
-    fn initialized(&self, pin: Pin) -> Result<(), Response> {
+    fn initialized(&self, pin: Pin) -> Result<(), FirmwareResponse> {
         supported(pin)?;
         if matches!(self.pins[pin], PinState::Unset) {
-            return Err(pin_error(pin, PinError::Unset));
+            return Err(pin_error(pin, TargetError::Unset));
         }
         Ok(())
     }
@@ -390,14 +413,27 @@ const fn port_slot(port: Port) -> usize {
     }
 }
 
-fn supported(pin: Pin) -> Result<(), Response> {
+fn supported(pin: Pin) -> Result<(), FirmwareResponse> {
     pin.is_available()
         .then_some(())
-        .ok_or_else(|| pin_error(pin, PinError::Unavailable))
+        .ok_or_else(|| pin_error(pin, TargetError::Unavailable))
 }
 
-fn pin_error(pin: Pin, reason: PinError) -> Response {
-    Response::Error(ResponseError::Pin { pin, reason })
+fn pin_error(pin: Pin, reason: TargetError) -> FirmwareResponse {
+    Response::Error(ResponseError::Target {
+        target: pin_token(pin),
+        reason,
+    })
+}
+
+fn pin_token(pin: Pin) -> [u8; 4] {
+    let bit = pin.bit();
+    [
+        b'P',
+        pin.port().letter() as u8,
+        b'0' + bit / 10,
+        b'0' + bit % 10,
+    ]
 }
 
 #[cfg(test)]
@@ -473,7 +509,7 @@ mod tests {
         Pin::from_wire_index(index).unwrap()
     }
 
-    fn packet(id: u16, body: Request) -> Packet<Request> {
+    fn packet(id: u16, body: FirmwareRequest) -> Packet<FirmwareRequest> {
         Packet { id, body }
     }
 
@@ -493,7 +529,7 @@ mod tests {
                     &mut gpio
                 )
                 .body,
-            pin_error(pin(0), PinError::Unset)
+            pin_error(pin(0), TargetError::Unset)
         );
 
         firmware.handle(
@@ -542,7 +578,7 @@ mod tests {
                 )
                 .body,
             Response::State {
-                pin: pin(0),
+                target: pin_token(pin(0)),
                 what: Query::Pullup,
                 value: QueryValue::Enabled(false),
             }
@@ -624,7 +660,7 @@ mod tests {
             Some(Packet {
                 id: 5,
                 body: Response::Value {
-                    pin: output,
+                    target: pin_token(output),
                     level: Level::High,
                 },
             })
@@ -654,7 +690,7 @@ mod tests {
             Some(Packet {
                 id: 5,
                 body: Response::Value {
-                    pin: output,
+                    target: pin_token(output),
                     level: Level::Low,
                 },
             })
@@ -751,7 +787,7 @@ mod tests {
             Some(Packet {
                 id: 27,
                 body: Response::Value {
-                    pin: pin(5),
+                    target: pin_token(pin(5)),
                     level: Level::High,
                 },
             })
@@ -836,7 +872,7 @@ mod tests {
             Some(Packet {
                 id: 11,
                 body: Response::Value {
-                    pin: first,
+                    target: pin_token(first),
                     level: Level::High,
                 },
             })
@@ -848,7 +884,7 @@ mod tests {
             Some(Packet {
                 id: 12,
                 body: Response::Value {
-                    pin: second,
+                    target: pin_token(second),
                     level: Level::High,
                 },
             })
@@ -872,7 +908,7 @@ mod tests {
                     &mut gpio,
                 )
                 .body,
-            pin_error(pin(40), PinError::Unavailable)
+            pin_error(pin(40), TargetError::Unavailable)
         );
         assert!(!gpio.inputs[40]);
     }
@@ -1002,7 +1038,7 @@ mod tests {
             Some(Packet {
                 id: 25,
                 body: Response::Value {
-                    pin: pin(47),
+                    target: pin_token(pin(47)),
                     level: Level::High,
                 },
             })
@@ -1040,7 +1076,7 @@ mod tests {
             Packet {
                 id: 30,
                 body: Response::Value {
-                    pin: pin(47),
+                    target: pin_token(pin(47)),
                     level: Level::High,
                 },
             }
@@ -1050,7 +1086,7 @@ mod tests {
             Some(Packet {
                 id: 30,
                 body: Response::Value {
-                    pin: pin(72),
+                    target: pin_token(pin(72)),
                     level: Level::Low,
                 },
             })
@@ -1081,7 +1117,7 @@ mod tests {
         assert_eq!(
             first.body,
             Response::State {
-                pin: pin(32),
+                target: pin_token(pin(32)),
                 what: Query::Direction,
                 value: QueryValue::Unset,
             }
@@ -1090,7 +1126,8 @@ mod tests {
         let mut seen = 1;
         loop {
             match firmware.poll_bulk(&gpio).unwrap().body {
-                Response::State { pin, .. } => {
+                Response::State { target, .. } => {
+                    let pin = Pin::try_from(target.as_slice()).unwrap();
                     assert_eq!(pin.port(), Port::B);
                     assert!(pin.is_available());
                     seen += 1;
@@ -1134,7 +1171,7 @@ mod tests {
                     &mut gpio
                 )
                 .body,
-            pin_error(pin(5), PinError::Unset)
+            pin_error(pin(5), TargetError::Unset)
         );
     }
 }

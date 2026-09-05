@@ -406,67 +406,175 @@ pub enum QueryValue {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Request {
+pub enum Request<T> {
     Hello,
     Status,
-    Direction {
-        target: PinTarget,
-        direction: Direction,
-    },
-    Get {
-        target: PinTarget,
-    },
-    Set {
-        target: PinTarget,
-        level: Level,
-    },
-    Pullup {
-        target: PinTarget,
-        enabled: bool,
-    },
-    Listen {
-        target: PinTarget,
-        enabled: bool,
-    },
-    Query {
-        target: PinTarget,
-        what: Query,
-    },
+    Direction { target: T, direction: Direction },
+    Get { target: T },
+    Set { target: T, level: Level },
+    Pullup { target: T, enabled: bool },
+    Listen { target: T, enabled: bool },
+    Query { target: T, what: Query },
     Bye,
 }
 
+impl<T> Request<T> {
+    pub fn map_target<U>(self, map: impl FnOnce(T) -> U) -> Request<U> {
+        match self {
+            Self::Hello => Request::Hello,
+            Self::Status => Request::Status,
+            Self::Direction { target, direction } => Request::Direction {
+                target: map(target),
+                direction,
+            },
+            Self::Get { target } => Request::Get {
+                target: map(target),
+            },
+            Self::Set { target, level } => Request::Set {
+                target: map(target),
+                level,
+            },
+            Self::Pullup { target, enabled } => Request::Pullup {
+                target: map(target),
+                enabled,
+            },
+            Self::Listen { target, enabled } => Request::Listen {
+                target: map(target),
+                enabled,
+            },
+            Self::Query { target, what } => Request::Query {
+                target: map(target),
+                what,
+            },
+            Self::Bye => Request::Bye,
+        }
+    }
+
+    pub fn try_map_target<U, E>(
+        self,
+        map: impl FnOnce(T) -> Result<U, E>,
+    ) -> Result<Request<U>, E> {
+        Ok(match self {
+            Self::Hello => Request::Hello,
+            Self::Status => Request::Status,
+            Self::Direction { target, direction } => Request::Direction {
+                target: map(target)?,
+                direction,
+            },
+            Self::Get { target } => Request::Get {
+                target: map(target)?,
+            },
+            Self::Set { target, level } => Request::Set {
+                target: map(target)?,
+                level,
+            },
+            Self::Pullup { target, enabled } => Request::Pullup {
+                target: map(target)?,
+                enabled,
+            },
+            Self::Listen { target, enabled } => Request::Listen {
+                target: map(target)?,
+                enabled,
+            },
+            Self::Query { target, what } => Request::Query {
+                target: map(target)?,
+                what,
+            },
+            Self::Bye => Request::Bye,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PinError {
+pub enum TargetError {
     Unset,
     Unavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResponseError<R = &'static [u8]> {
+pub enum ResponseError<T, D> {
     BadPacket,
-    Pin { pin: Pin, reason: PinError },
-    NoRoute { destination: R },
-    RouteBusy { next_hop: R },
-    RouteDown { next_hop: R },
+    Target { target: T, reason: TargetError },
+    NoRoute { destination: D },
+    RouteBusy { next_hop: D },
+    RouteDown { next_hop: D },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Response<R = &'static [u8]> {
+pub enum Response<T, D> {
     Hello,
-    Status,
+    Status {
+        identity: D,
+    },
     Ack,
     Value {
-        pin: Pin,
+        target: T,
         level: Level,
     },
     State {
-        pin: Pin,
+        target: T,
         what: Query,
         value: QueryValue,
     },
-    Error(ResponseError<R>),
+    Error(ResponseError<T, D>),
     Unknown,
     Bye,
+}
+
+pub type DecodedRequest<'a> = Request<&'a [u8]>;
+pub type DecodedResponse<'a> = Response<&'a [u8], &'a [u8]>;
+
+impl<T, D> Response<T, D> {
+    pub fn try_map<T2, D2, E>(
+        self,
+        map_target: impl FnOnce(T) -> Result<T2, E>,
+        map_data: impl FnOnce(D) -> Result<D2, E>,
+    ) -> Result<Response<T2, D2>, E> {
+        Ok(match self {
+            Self::Hello => Response::Hello,
+            Self::Status { identity } => Response::Status {
+                identity: map_data(identity)?,
+            },
+            Self::Ack => Response::Ack,
+            Self::Value { target, level } => Response::Value {
+                target: map_target(target)?,
+                level,
+            },
+            Self::State {
+                target,
+                what,
+                value,
+            } => Response::State {
+                target: map_target(target)?,
+                what,
+                value,
+            },
+            Self::Error(ResponseError::BadPacket) => Response::Error(ResponseError::BadPacket),
+            Self::Error(ResponseError::Target { target, reason }) => {
+                Response::Error(ResponseError::Target {
+                    target: map_target(target)?,
+                    reason,
+                })
+            }
+            Self::Error(ResponseError::NoRoute { destination }) => {
+                Response::Error(ResponseError::NoRoute {
+                    destination: map_data(destination)?,
+                })
+            }
+            Self::Error(ResponseError::RouteBusy { next_hop }) => {
+                Response::Error(ResponseError::RouteBusy {
+                    next_hop: map_data(next_hop)?,
+                })
+            }
+            Self::Error(ResponseError::RouteDown { next_hop }) => {
+                Response::Error(ResponseError::RouteDown {
+                    next_hop: map_data(next_hop)?,
+                })
+            }
+            Self::Unknown => Response::Unknown,
+            Self::Bye => Response::Bye,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -486,6 +594,8 @@ pub enum EncodeError {
     OutputTooSmall,
     InvalidPacketId,
     InvalidRouteToken,
+    InvalidTargetToken,
+    InvalidIdentity,
 }
 
 pub fn decode_request_envelope(line: &[u8]) -> Result<RequestEnvelope<'_>, DecodeError> {
@@ -516,7 +626,7 @@ pub fn encode_response_envelope(
     encode_envelope(envelope.id, envelope.source, envelope.body, out)
 }
 
-pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<Request>, DecodeError> {
+pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
     let id = packet.id;
     let mut tokens = packet
         .body
@@ -537,38 +647,38 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<Request>, DecodeEr
         b"HRU" if tokens.next().is_none() => Request::Status,
         b"BYE" if tokens.next().is_none() => Request::Bye,
         b"DIR" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let direction: Direction = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Direction { target, direction }
         }
         b"GET" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Get { target }
         }
         b"SET" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let level: Level = next_as(&mut tokens, malformed())?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Set { target, level }
         }
         b"PLL" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let enabled =
                 parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Pullup { target, enabled }
         }
         b"LSN" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let enabled =
                 parse_enabled(tokens.next().ok_or_else(malformed)?).ok_or_else(malformed)?;
             expect_suffix(&mut tokens, b"OK?", malformed())?;
             Request::Listen { target, enabled }
         }
         b"WYD" => {
-            let target: PinTarget = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let what: Query = next_as(&mut tokens, malformed())?;
             if tokens.next().is_some() {
                 return Err(malformed());
@@ -587,7 +697,7 @@ pub fn decode_request(packet: Packet<&[u8]>) -> Result<Packet<Request>, DecodeEr
     Ok(Packet { id, body })
 }
 
-pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>, DecodeError> {
+pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
     let id = packet.id;
     let mut tokens = packet
         .body
@@ -608,11 +718,8 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>,
             Response::Hello
         }
         b"IAM" => {
-            if tokens.next() != Some(b"SAM4E8E") || tokens.next() != Some(b"GPIO") {
-                return Err(malformed());
-            }
-            expect_suffix(&mut tokens, b"<3", malformed())?;
-            Response::Status
+            let identity = status_identity(packet.body).ok_or_else(malformed)?;
+            Response::Status { identity }
         }
         b"OKA" => {
             expect_suffix(&mut tokens, b"<3", malformed())?;
@@ -650,26 +757,26 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>,
                     }
                     ResponseError::RouteDown { next_hop }
                 }
-                Some(pin) => {
-                    let pin = Pin::try_from(pin).map_err(|_| malformed())?;
+                Some(target) if valid_target_token(target) => {
                     let reason = match tokens.next() {
-                        Some(b"UNSET") => PinError::Unset,
-                        Some(b"UNAVAILABLE") => PinError::Unavailable,
+                        Some(b"UNSET") => TargetError::Unset,
+                        Some(b"UNAVAILABLE") => TargetError::Unavailable,
                         _ => return Err(malformed()),
                     };
-                    ResponseError::Pin { pin, reason }
+                    ResponseError::Target { target, reason }
                 }
+                Some(_) => return Err(malformed()),
                 None => return Err(malformed()),
             };
             expect_suffix(&mut tokens, b"<3", malformed())?;
             Response::Error(error)
         }
         b"HYG" => {
-            let pin: Pin = next_as(&mut tokens, malformed())?;
+            let target = next_target(&mut tokens, malformed())?;
             let next = tokens.next().ok_or_else(malformed)?;
             if let Ok(level) = Level::try_from(next) {
                 expect_suffix(&mut tokens, b"<3", malformed())?;
-                Response::Value { pin, level }
+                Response::Value { target, level }
             } else {
                 let what = Query::try_from(next).map_err(|_| malformed())?;
                 let value_token = tokens.next().ok_or_else(malformed)?;
@@ -686,7 +793,11 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>,
                     },
                 };
                 expect_suffix(&mut tokens, b"<3", malformed())?;
-                Response::State { pin, what, value }
+                Response::State {
+                    target,
+                    what,
+                    value,
+                }
             }
         }
         _ => {
@@ -700,8 +811,8 @@ pub fn decode_response(packet: Packet<&[u8]>) -> Result<Packet<Response<&[u8]>>,
     Ok(Packet { id, body })
 }
 
-pub fn encode_request(
-    packet: Packet<Request>,
+pub fn encode_request<T: AsRef<[u8]>>(
+    packet: Packet<Request<T>>,
     destination: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
@@ -715,7 +826,7 @@ pub fn encode_request(
         Request::Status => writer.bytes(b" HRU\n")?,
         Request::Direction { target, direction } => {
             writer.bytes(b" DIR ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match direction {
                 Direction::Input => b" IN OK?\n",
                 Direction::Output => b" OUT OK?\n",
@@ -723,12 +834,12 @@ pub fn encode_request(
         }
         Request::Get { target } => {
             writer.bytes(b" GET ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(b" OK?\n")?;
         }
         Request::Set { target, level } => {
             writer.bytes(b" SET ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match level {
                 Level::Low => b" LOW OK?\n",
                 Level::High => b" HIGH OK?\n",
@@ -736,17 +847,17 @@ pub fn encode_request(
         }
         Request::Pullup { target, enabled } => {
             writer.bytes(b" PLL ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
         }
         Request::Listen { target, enabled } => {
             writer.bytes(b" LSN ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(if enabled { b" ON OK?\n" } else { b" OFF OK?\n" })?;
         }
         Request::Query { target, what } => {
             writer.bytes(b" WYD ")?;
-            writer.target(target)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match what {
                 Query::Direction => b" DIR\n",
                 Query::Pullup => b" PLL\n",
@@ -758,8 +869,8 @@ pub fn encode_request(
     Ok(writer.len())
 }
 
-pub fn encode_response<R: AsRef<[u8]>>(
-    packet: Packet<Response<R>>,
+pub fn encode_response<T: AsRef<[u8]>, D: AsRef<[u8]>>(
+    packet: Packet<Response<T, D>>,
     source: &[u8],
     out: &mut [u8],
 ) -> Result<usize, EncodeError> {
@@ -770,19 +881,30 @@ pub fn encode_response<R: AsRef<[u8]>>(
     writer.route(source)?;
     match packet.body {
         Response::Hello => writer.bytes(b" HII <3\n")?,
-        Response::Status => writer.bytes(b" IAM SAM4E8E GPIO <3\n")?,
+        Response::Status { identity } => {
+            if !valid_identity(identity.as_ref()) {
+                return Err(EncodeError::InvalidIdentity);
+            }
+            writer.bytes(b" IAM ")?;
+            writer.bytes(identity.as_ref())?;
+            writer.bytes(b" <3\n")?;
+        }
         Response::Ack => writer.bytes(b" OKA <3\n")?,
-        Response::Value { pin, level } => {
+        Response::Value { target, level } => {
             writer.bytes(b" HYG ")?;
-            writer.pin(pin)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match level {
                 Level::Low => b" LOW <3\n",
                 Level::High => b" HIGH <3\n",
             })?;
         }
-        Response::State { pin, what, value } => {
+        Response::State {
+            target,
+            what,
+            value,
+        } => {
             writer.bytes(b" HYG ")?;
-            writer.pin(pin)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match what {
                 Query::Direction => b" DIR ",
                 Query::Pullup => b" PLL ",
@@ -798,12 +920,12 @@ pub fn encode_response<R: AsRef<[u8]>>(
             writer.bytes(b" <3\n")?;
         }
         Response::Error(ResponseError::BadPacket) => writer.bytes(b" UMM BAD_PACKET <3\n")?,
-        Response::Error(ResponseError::Pin { pin, reason }) => {
+        Response::Error(ResponseError::Target { target, reason }) => {
             writer.bytes(b" UMM ")?;
-            writer.pin(pin)?;
+            writer.target(target.as_ref())?;
             writer.bytes(match reason {
-                PinError::Unset => b" UNSET <3\n",
-                PinError::Unavailable => b" UNAVAILABLE <3\n",
+                TargetError::Unset => b" UNSET <3\n",
+                TargetError::Unavailable => b" UNAVAILABLE <3\n",
             })?;
         }
         Response::Error(ResponseError::NoRoute { destination }) => {
@@ -835,6 +957,14 @@ where
     T: TryFrom<&'a [u8]>,
 {
     tokens.next().ok_or(error)?.try_into().map_err(|_| error)
+}
+
+fn next_target<'a>(
+    tokens: &mut impl Iterator<Item = &'a [u8]>,
+    error: DecodeError,
+) -> Result<&'a [u8], DecodeError> {
+    let target = tokens.next().ok_or(error)?;
+    valid_target_token(target).then_some(target).ok_or(error)
 }
 
 fn expect_suffix<'a>(
@@ -910,6 +1040,22 @@ fn valid_route_token(token: &[u8]) -> bool {
     !token.is_empty() && token.iter().all(u8::is_ascii_graphic)
 }
 
+fn valid_target_token(token: &[u8]) -> bool {
+    token.first().is_some_and(u8::is_ascii_uppercase)
+        && token
+            .iter()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+}
+
+fn status_identity(body: &[u8]) -> Option<&[u8]> {
+    let identity = body.strip_prefix(b"IAM ")?.strip_suffix(b" <3")?;
+    valid_identity(identity).then_some(identity)
+}
+
+fn valid_identity(identity: &[u8]) -> bool {
+    !identity.is_empty() && identity.split(|byte| *byte == b' ').all(valid_route_token)
+}
+
 fn parse_packet_id(token: &[u8]) -> Option<u16> {
     if token.is_empty() || token.len() > 3 || !token.iter().all(u8::is_ascii_digit) {
         return None;
@@ -956,24 +1102,11 @@ impl<'a> Writer<'a> {
         self.bytes(route)
     }
 
-    fn target(&mut self, target: PinTarget) -> Result<(), EncodeError> {
-        match target {
-            PinTarget::Pin(pin) => self.pin(pin),
-            PinTarget::Bank(port) => {
-                self.bytes(b"PIO")?;
-                self.bytes(&[port.letter() as u8])
-            }
-            PinTarget::All => self.bytes(b"ALL"),
+    fn target(&mut self, target: &[u8]) -> Result<(), EncodeError> {
+        if !valid_target_token(target) {
+            return Err(EncodeError::InvalidTargetToken);
         }
-    }
-
-    fn pin(&mut self, pin: Pin) -> Result<(), EncodeError> {
-        self.bytes(&[b'P', pin.port().letter() as u8])?;
-        self.decimal2(pin.bit())
-    }
-
-    fn decimal2(&mut self, value: u8) -> Result<(), EncodeError> {
-        self.bytes(&[b'0' + value / 10, b'0' + value % 10])
+        self.bytes(target)
     }
 
     fn decimal3(&mut self, value: u16) -> Result<(), EncodeError> {
@@ -991,14 +1124,14 @@ mod tests {
     use super::*;
     use std::string::ToString;
 
-    fn encoded_request(id: u16, body: Request) -> [u8; MAX_PACKET_LEN] {
+    fn encoded_request(id: u16, body: Request<&'static [u8]>) -> [u8; MAX_PACKET_LEN] {
         let mut out = [0u8; MAX_PACKET_LEN];
         let len = encode_request(Packet { id, body }, b"SAM", &mut out).unwrap();
         assert_eq!(decoded_request(&out[..len]), Ok(Packet { id, body }));
         out
     }
 
-    fn decoded_request(line: &[u8]) -> Result<Packet<Request>, DecodeError> {
+    fn decoded_request(line: &[u8]) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
         let envelope = decode_request_envelope(line)?;
         decode_request(Packet {
             id: envelope.id,
@@ -1006,7 +1139,7 @@ mod tests {
         })
     }
 
-    fn decoded_response(line: &[u8]) -> Result<Packet<Response<&[u8]>>, DecodeError> {
+    fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
         let envelope = decode_response_envelope(line)?;
         decode_response(Packet {
             id: envelope.id,
@@ -1127,89 +1260,89 @@ mod tests {
             (Request::Status, "001 SAM HRU\n"),
             (
                 Request::Direction {
-                    target: PinTarget::Pin(pin(0)),
+                    target: b"PA00".as_slice(),
                     direction: Direction::Input,
                 },
                 "001 SAM DIR PA00 IN OK?\n",
             ),
             (
                 Request::Direction {
-                    target: PinTarget::Pin(pin(116)),
+                    target: b"PE05".as_slice(),
                     direction: Direction::Output,
                 },
                 "001 SAM DIR PE05 OUT OK?\n",
             ),
             (
                 Request::Get {
-                    target: PinTarget::Pin(pin(5)),
+                    target: b"PA05".as_slice(),
                 },
                 "001 SAM GET PA05 OK?\n",
             ),
             (
                 Request::Set {
-                    target: PinTarget::Bank(Port::C),
+                    target: b"PIOC".as_slice(),
                     level: Level::High,
                 },
                 "001 SAM SET PIOC HIGH OK?\n",
             ),
             (
                 Request::Pullup {
-                    target: PinTarget::Bank(Port::B),
+                    target: b"PIOB".as_slice(),
                     enabled: false,
                 },
                 "001 SAM PLL PIOB OFF OK?\n",
             ),
             (
                 Request::Listen {
-                    target: PinTarget::Bank(Port::E),
+                    target: b"PIOE".as_slice(),
                     enabled: true,
                 },
                 "001 SAM LSN PIOE ON OK?\n",
             ),
             (
                 Request::Query {
-                    target: PinTarget::Pin(pin(72)),
+                    target: b"PC25".as_slice(),
                     what: Query::Direction,
                 },
                 "001 SAM WYD PC25 DIR\n",
             ),
             (
                 Request::Direction {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                     direction: Direction::Input,
                 },
                 "001 SAM DIR ALL IN OK?\n",
             ),
             (
                 Request::Get {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                 },
                 "001 SAM GET ALL OK?\n",
             ),
             (
                 Request::Set {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                     level: Level::High,
                 },
                 "001 SAM SET ALL HIGH OK?\n",
             ),
             (
                 Request::Pullup {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                     enabled: true,
                 },
                 "001 SAM PLL ALL ON OK?\n",
             ),
             (
                 Request::Listen {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                     enabled: true,
                 },
                 "001 SAM LSN ALL ON OK?\n",
             ),
             (
                 Request::Query {
-                    target: PinTarget::All,
+                    target: b"ALL".as_slice(),
                     what: Query::Listen,
                 },
                 "001 SAM WYD ALL LSN\n",
@@ -1227,18 +1360,23 @@ mod tests {
     fn response_wire_examples_use_symbolic_pins() {
         let cases = [
             (Response::Hello, "008 SAM HII <3\n"),
-            (Response::Status, "008 SAM IAM SAM4E8E GPIO <3\n"),
+            (
+                Response::Status {
+                    identity: b"SAM4E8E GPIO".as_slice(),
+                },
+                "008 SAM IAM SAM4E8E GPIO <3\n",
+            ),
             (Response::Ack, "008 SAM OKA <3\n"),
             (
                 Response::Value {
-                    pin: pin(0),
+                    target: b"PA00".as_slice(),
                     level: Level::High,
                 },
                 "008 SAM HYG PA00 HIGH <3\n",
             ),
             (
                 Response::State {
-                    pin: pin(0),
+                    target: b"PA00".as_slice(),
                     what: Query::Direction,
                     value: QueryValue::Direction(Direction::Input),
                 },
@@ -1246,7 +1384,7 @@ mod tests {
             ),
             (
                 Response::State {
-                    pin: pin(0),
+                    target: b"PA00".as_slice(),
                     what: Query::Pullup,
                     value: QueryValue::Enabled(true),
                 },
@@ -1254,7 +1392,7 @@ mod tests {
             ),
             (
                 Response::State {
-                    pin: pin(0),
+                    target: b"PA00".as_slice(),
                     what: Query::Listen,
                     value: QueryValue::Unset,
                 },
@@ -1265,16 +1403,16 @@ mod tests {
                 "008 SAM UMM BAD_PACKET <3\n",
             ),
             (
-                Response::Error(ResponseError::Pin {
-                    pin: pin(40),
-                    reason: PinError::Unavailable,
+                Response::Error(ResponseError::Target {
+                    target: b"PB08".as_slice(),
+                    reason: TargetError::Unavailable,
                 }),
                 "008 SAM UMM PB08 UNAVAILABLE <3\n",
             ),
             (
-                Response::Error(ResponseError::Pin {
-                    pin: pin(3),
-                    reason: PinError::Unset,
+                Response::Error(ResponseError::Target {
+                    target: b"PA03".as_slice(),
+                    reason: TargetError::Unset,
                 }),
                 "008 SAM UMM PA03 UNSET <3\n",
             ),
@@ -1341,13 +1479,66 @@ mod tests {
             Ok(Packet {
                 id: 9,
                 body: Request::Get {
-                    target: PinTarget::Pin(pin(116)),
+                    target: b"PE05".as_slice(),
                 },
             })
         );
         assert!(decoded_request(b"1000 SAM HAI").is_err());
         assert!(decoded_request(b"001 SAM GET 116 OK?").is_err());
-        assert!(decoded_request(b"001 SAM GET PE06 OK?").is_err());
+        assert_eq!(
+            decoded_request(b"001 SAM GET PE06 OK?"),
+            Ok(Packet {
+                id: 1,
+                body: Request::Get {
+                    target: b"PE06".as_slice(),
+                },
+            })
+        );
+        assert_eq!(
+            decoded_request(b"002 LPC GET PIO2_3 OK?"),
+            Ok(Packet {
+                id: 2,
+                body: Request::Get {
+                    target: b"PIO2_3".as_slice(),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn typed_codec_round_trips_non_sam_targets_and_identity() {
+        let request = Packet {
+            id: 21,
+            body: Request::Set {
+                target: b"PIO2_3".as_slice(),
+                level: Level::High,
+            },
+        };
+        let mut out = [0; MAX_PACKET_LEN];
+        let len = encode_request(request, b"LPC", &mut out).unwrap();
+        assert_eq!(&out[..len], b"021 LPC SET PIO2_3 HIGH OK?\n");
+        assert_eq!(decoded_request(&out[..len]), Ok(request));
+
+        let response = Packet {
+            id: 22,
+            body: Response::Value {
+                target: b"PIO2_3".as_slice(),
+                level: Level::Low,
+            },
+        };
+        let len = encode_response(response, b"LPC", &mut out).unwrap();
+        assert_eq!(&out[..len], b"022 LPC HYG PIO2_3 LOW <3\n");
+        assert_eq!(decoded_response(&out[..len]), Ok(response));
+
+        let status = Packet {
+            id: 23,
+            body: Response::<&[u8], &[u8]>::Status {
+                identity: b"LPC1115 GPIO",
+            },
+        };
+        let len = encode_response(status, b"LPC", &mut out).unwrap();
+        assert_eq!(&out[..len], b"023 LPC IAM LPC1115 GPIO <3\n");
+        assert_eq!(decoded_response(&out[..len]), Ok(status));
     }
 
     #[test]

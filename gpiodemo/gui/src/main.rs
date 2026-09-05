@@ -3,8 +3,8 @@ mod serial_log;
 
 use std::{collections::VecDeque, fmt, path::Path, time::Duration};
 
-use connection::{Connection, DeviceEvent, Event as ConnectionEvent};
-use da_vinci_protocol::{Direction, Level, Pin, PinTable, PinTarget, Port, Request, ResponseError};
+use connection::{Connection, DeviceEvent, Event as ConnectionEvent, Request};
+use da_vinci_protocol::{Direction, Level, Pin, PinTable, PinTarget, Port, ResponseError};
 use iced::{
     Background, Border, Color, Element, Length, Size, Subscription, Task, Theme,
     alignment::{Horizontal, Vertical},
@@ -1103,7 +1103,7 @@ impl App {
     fn handle_device_event(&mut self, event: DeviceEvent) {
         match event {
             DeviceEvent::Hello => self.device_status = "SAM4E8E replied HII".into(),
-            DeviceEvent::Status => self.device_status = "SAM4E8E GPIO".into(),
+            DeviceEvent::Status(identity) => self.device_status = identity,
             DeviceEvent::Ack(request) => match request {
                 Request::Direction { target, .. } => {
                     let Some(mode) = self.pending_mode(target) else {
@@ -1168,7 +1168,10 @@ impl App {
                 self.fail_request(request);
                 self.error = Some(match error {
                     ResponseError::BadPacket => "Device rejected a malformed packet".into(),
-                    ResponseError::Pin { pin, reason } => {
+                    ResponseError::Target {
+                        target: pin,
+                        reason,
+                    } => {
                         format!("{}: {reason:?}", pin_display(pin))
                     }
                     ResponseError::NoRoute { destination } => {

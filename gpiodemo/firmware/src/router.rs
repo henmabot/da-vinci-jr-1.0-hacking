@@ -119,14 +119,14 @@ impl<'a, const N: usize> Router<'a, N> {
         self.local_route
     }
 
-    pub fn dispatch<'frame, F>(
+    pub fn dispatch<'frame, F, T>(
         &mut self,
         frame: &'frame [u8],
         envelope: RequestEnvelope<'frame>,
         local: F,
-    ) -> Option<Packet<Response<&'frame [u8]>>>
+    ) -> Option<Packet<Response<T, &'frame [u8]>>>
     where
-        F: FnOnce(Packet<&'frame [u8]>) -> Packet<Response<&'frame [u8]>>,
+        F: FnOnce(Packet<&'frame [u8]>) -> Packet<Response<T, &'frame [u8]>>,
     {
         if envelope.destination == self.local_route {
             return Some(local(Packet {
@@ -165,7 +165,7 @@ impl<'a, const N: usize> Router<'a, N> {
         }
     }
 
-    pub fn poll_routes(&mut self) -> Option<Packet<Response<&'static [u8]>>> {
+    pub fn poll_routes(&mut self) -> Option<Packet<Response<&'static [u8], &'static [u8]>>> {
         if N == 0 {
             return None;
         }
@@ -344,7 +344,7 @@ mod tests {
     fn dispatch<'a, const N: usize>(
         router: &mut Router<'_, N>,
         frame: &'a [u8],
-    ) -> Option<Packet<Response<&'a [u8]>>> {
+    ) -> Option<Packet<Response<&'a [u8], &'a [u8]>>> {
         router.dispatch(frame, envelope(frame), |packet| Packet {
             id: packet.id,
             body: Response::Hello,
@@ -361,7 +361,7 @@ mod tests {
                 assert_eq!(packet.body, b"HAI");
                 Packet {
                     id: packet.id,
-                    body: Response::Hello,
+                    body: Response::<&[u8], &[u8]>::Hello,
                 }
             })
             .unwrap();
