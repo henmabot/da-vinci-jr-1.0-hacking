@@ -40,9 +40,8 @@ pub struct Packet<T> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Message<'a> {
-    pub id: RequestId,
     pub route: &'a [u8],
-    pub body: &'a [u8],
+    pub packet: Packet<&'a [u8]>,
 }
 
 pub(crate) fn valid_route_token(token: &[u8]) -> bool {

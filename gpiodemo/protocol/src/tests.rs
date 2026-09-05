@@ -14,18 +14,12 @@ fn encoded_request(id: RequestId, body: Request<&'static [u8]>) -> [u8; MAX_PACK
 
 fn decoded_request(line: &[u8]) -> Result<Packet<DecodedRequest<'_>>, DecodeError> {
     let envelope = decode_message(line)?;
-    decode_request(Packet {
-        id: envelope.id,
-        body: envelope.body,
-    })
+    decode_request(envelope.packet)
 }
 
 fn decoded_response(line: &[u8]) -> Result<Packet<DecodedResponse<'_>>, DecodeError> {
     let envelope = decode_message(line)?;
-    decode_response(Packet {
-        id: envelope.id,
-        body: envelope.body,
-    })
+    decode_response(envelope.packet)
 }
 #[test]
 fn line_buffer_frames_and_recovers_after_overflow() {
@@ -60,36 +54,44 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
     assert_eq!(
         envelope,
         Message {
-            id: id(1),
             route: b"SAM",
-            body: b"HAI",
+            packet: Packet {
+                id: id(1),
+                body: b"HAI",
+            },
         }
     );
     assert_eq!(envelope.route.as_ptr(), request[4..].as_ptr());
-    assert_eq!(envelope.body.as_ptr(), request[8..].as_ptr());
+    assert_eq!(envelope.packet.body.as_ptr(), request[8..].as_ptr());
 
     assert_eq!(
         decode_message(b"002 LPC GET PIO2_3 OK?"),
         Ok(Message {
-            id: id(2),
             route: b"LPC",
-            body: b"GET PIO2_3 OK?",
+            packet: Packet {
+                id: id(2),
+                body: b"GET PIO2_3 OK?",
+            },
         })
     );
     assert_eq!(
         decode_message(b"003 ABC WAT opaque body"),
         Ok(Message {
-            id: id(3),
             route: b"ABC",
-            body: b"WAT opaque body",
+            packet: Packet {
+                id: id(3),
+                body: b"WAT opaque body",
+            },
         })
     );
     assert_eq!(
         decode_message(b"002 LPC HYG PIO2_3 HIGH <3"),
         Ok(Message {
-            id: id(2),
             route: b"LPC",
-            body: b"HYG PIO2_3 HIGH <3",
+            packet: Packet {
+                id: id(2),
+                body: b"HYG PIO2_3 HIGH <3",
+            },
         })
     );
 }
@@ -98,18 +100,22 @@ fn routed_envelopes_borrow_route_and_opaque_body() {
 fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
     let mut out = [0; MAX_PACKET_LEN];
     let request = Message {
-        id: id(999),
         route: b"ABC",
-        body: b"HAI",
+        packet: Packet {
+            id: id(999),
+            body: b"HAI",
+        },
     };
     let len = encode_message(request, &mut out).unwrap();
     assert_eq!(&out[..len], b"999 ABC HAI\n");
     assert_eq!(decode_message(&out[..len]), Ok(request));
 
     let response = Message {
-        id: id(7),
         route: b"SAM",
-        body: b"HII <3",
+        packet: Packet {
+            id: id(7),
+            body: b"HII <3",
+        },
     };
     let len = encode_message(response, &mut out).unwrap();
     assert_eq!(&out[..len], b"007 SAM HII <3\n");
@@ -119,9 +125,11 @@ fn routed_envelope_encoding_validates_route_tokens_and_preserves_ids() {
         assert_eq!(
             encode_message(
                 Message {
-                    id: id(1),
                     route,
-                    body: b"HAI",
+                    packet: Packet {
+                        id: id(1),
+                        body: b"HAI",
+                    },
                 },
                 &mut out,
             ),

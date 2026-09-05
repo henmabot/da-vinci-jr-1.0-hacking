@@ -48,12 +48,15 @@ pub fn decode_message(line: &[u8]) -> Result<Message<'_>, DecodeError> {
     if body.is_empty() {
         return Err(malformed());
     }
-    Ok(Message { id, route, body })
+    Ok(Message {
+        route,
+        packet: Packet { id, body },
+    })
 }
 
 pub fn encode_message(message: Message<'_>, out: &mut [u8]) -> Result<usize, EncodeError> {
-    encode_message_with(message.id, message.route, out, |writer| {
-        writer.bytes(message.body)
+    encode_message_with(message.packet.id, message.route, out, |writer| {
+        writer.bytes(message.packet.body)
     })
 }
 

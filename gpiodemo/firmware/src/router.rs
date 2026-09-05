@@ -151,42 +151,38 @@ impl<'a, const N: usize> Router<'a, N> {
     where
         F: FnOnce(Packet<&'frame [u8]>) -> Packet<Response<T, &'frame [u8]>>,
     {
-        if envelope.route == self.local_route {
-            return Some(local(Packet {
-                id: envelope.id,
-                body: envelope.body,
-            }));
+        let Message { route, packet } = envelope;
+        if route == self.local_route {
+            return Some(local(packet));
         }
 
-        let Some(route) = self
+        let Some(route_link) = self
             .routes
             .iter_mut()
-            .find(|route| route.reaches(envelope.route))
+            .find(|route_link| route_link.reaches(route))
         else {
             return Some(Packet {
-                id: envelope.id,
-                body: Response::Error(ResponseError::NoRoute {
-                    destination: envelope.route,
-                }),
+                id: packet.id,
+                body: Response::Error(ResponseError::NoRoute { destination: route }),
             });
         };
 
-        match route.forward(envelope.id, frame) {
+        match route_link.forward(packet.id, frame) {
             Ok(()) => None,
             Err(RouteFailure::Busy) => Some(Packet {
-                id: envelope.id,
+                id: packet.id,
                 body: Response::Error(ResponseError::RouteBusy {
-                    next_hop: route.next_hop,
+                    next_hop: route_link.next_hop,
                 }),
             }),
             Err(RouteFailure::InvalidFrame) => Some(Packet {
-                id: envelope.id,
+                id: packet.id,
                 body: Response::Error(ResponseError::BadPacket),
             }),
             Err(RouteFailure::Down) => Some(Packet {
-                id: envelope.id,
+                id: packet.id,
                 body: Response::Error(ResponseError::RouteDown {
-                    next_hop: route.next_hop,
+                    next_hop: route_link.next_hop,
                 }),
             }),
         }
@@ -411,7 +407,7 @@ mod tests {
             assert_eq!(
                 dispatch(&mut router, frame),
                 Some(Packet {
-                    id: envelope(frame).id,
+                    id: envelope(frame).packet.id,
                     body: Response::Error(ResponseError::NoRoute { destination }),
                 })
             );
