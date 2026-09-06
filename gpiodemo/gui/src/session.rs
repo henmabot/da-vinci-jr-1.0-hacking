@@ -459,19 +459,127 @@ impl MapBuilder {
     }
 }
 
+#[derive(Default)]
+enum MapState {
+    #[default]
+    Unknown,
+    Discovering {
+        builder: MapBuilder,
+    },
+    Ready {
+        map: RouteMap,
+    },
+    Refreshing {
+        installed: RouteMap,
+        builder: MapBuilder,
+    },
+}
+
 struct RouteState {
     name: String,
-    map: Option<RouteMap>,
-    discovery: Option<MapBuilder>,
+    map_state: MapState,
 }
 
 impl RouteState {
     fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
-            map: None,
-            discovery: None,
+            map_state: MapState::Unknown,
         }
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn installed_map(&self) -> Option<&RouteMap> {
+        match &self.map_state {
+            MapState::Ready { map } | MapState::Refreshing { installed: map, .. } => Some(map),
+            MapState::Unknown | MapState::Discovering { .. } => None,
+        }
+    }
+
+    fn installed_map_mut(&mut self) -> Option<&mut RouteMap> {
+        match &mut self.map_state {
+            MapState::Ready { map } | MapState::Refreshing { installed: map, .. } => Some(map),
+            MapState::Unknown | MapState::Discovering { .. } => None,
+        }
+    }
+
+    fn begin_map(&mut self, route: RouteKey) -> Result<(), String> {
+        let state = core::mem::take(&mut self.map_state);
+        self.map_state = match state {
+            MapState::Unknown => MapState::Discovering {
+                builder: MapBuilder::new(route),
+            },
+            MapState::Ready { map } => MapState::Refreshing {
+                installed: map,
+                builder: MapBuilder::new(route),
+            },
+            active @ (MapState::Discovering { .. } | MapState::Refreshing { .. }) => {
+                self.map_state = active;
+                return Err(format!("MAP for {} is already in progress", self.name));
+            }
+        };
+        Ok(())
+    }
+
+    fn discovery_mut(&mut self) -> Option<&mut MapBuilder> {
+        match &mut self.map_state {
+            MapState::Discovering { builder } | MapState::Refreshing { builder, .. } => {
+                Some(builder)
+            }
+            MapState::Unknown | MapState::Ready { .. } => None,
+        }
+    }
+
+    fn finish_map(&mut self) -> Result<(), &'static str> {
+        let state = core::mem::take(&mut self.map_state);
+        self.map_state = match state {
+            MapState::Discovering { builder } | MapState::Refreshing { builder, .. } => {
+                MapState::Ready {
+                    map: builder.finish(),
+                }
+            }
+            other => {
+                self.map_state = other;
+                return Err("completed without discovery state");
+            }
+        };
+        Ok(())
+    }
+
+    fn abort_map(&mut self) {
+        let state = core::mem::take(&mut self.map_state);
+        self.map_state = match state {
+            MapState::Discovering { .. } => MapState::Unknown,
+            MapState::Refreshing { installed, .. } => MapState::Ready { map: installed },
+            other => other,
+        };
+    }
+
+    fn reset(&mut self) {
+        self.abort_map();
+        if let Some(map) = self.installed_map_mut() {
+            map.reset_pin_states();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.map_state = MapState::Unknown;
+    }
+
+    #[cfg(test)]
+    fn install_map(&mut self, map: RouteMap) {
+        self.map_state = MapState::Ready { map };
+    }
+
+    #[cfg(test)]
+    fn discovery_active(&self) -> bool {
+        matches!(
+            self.map_state,
+            MapState::Discovering { .. } | MapState::Refreshing { .. }
+        )
     }
 }
 
@@ -498,20 +606,19 @@ impl DeviceSession {
     pub(super) fn route_key(&self, name: &str) -> Option<RouteKey> {
         self.routes
             .iter()
-            .position(|route| route.name == name)
+            .position(|route| route.name() == name)
             .map(RouteKey)
     }
 
     pub(super) fn route_name(&self, route: RouteKey) -> &str {
-        &self.routes[route.0].name
+        self.routes[route.0].name()
     }
 
     #[cfg(test)]
     pub(super) fn pin_key(&self, route: RouteKey, token: &str) -> Option<PinKey> {
         self.routes
             .get(route.0)?
-            .map
-            .as_ref()?
+            .installed_map()?
             .pin_key(route, token.as_bytes())
     }
 
@@ -519,16 +626,14 @@ impl DeviceSession {
     pub(super) fn bank_key(&self, route: RouteKey, token: &str) -> Option<BankKey> {
         self.routes
             .get(route.0)?
-            .map
-            .as_ref()?
+            .installed_map()?
             .bank_key(route, token)
     }
 
     pub(super) fn pin_info(&self, pin: PinKey) -> Option<&PinInfo> {
         self.routes
             .get(pin.route.0)?
-            .map
-            .as_ref()?
+            .installed_map()?
             .pin(pin)
             .map(|pin| &pin.info)
     }
@@ -536,23 +641,22 @@ impl DeviceSession {
     pub(super) fn bank_token(&self, bank: BankKey) -> Option<&str> {
         self.routes
             .get(bank.route.0)?
-            .map
-            .as_ref()?
+            .installed_map()?
             .bank_token(bank)
     }
 
     pub(super) fn pins(&self, route: RouteKey) -> impl Iterator<Item = (PinKey, &PinInfo)> {
         self.routes[route.0]
-            .map
-            .iter()
+            .installed_map()
+            .into_iter()
             .flat_map(move |map| map.pins(route))
             .map(|(key, pin)| (key, &pin.info))
     }
 
     pub(super) fn banks(&self, route: RouteKey) -> impl Iterator<Item = (BankKey, &str)> {
         self.routes[route.0]
-            .map
-            .iter()
+            .installed_map()
+            .into_iter()
             .flat_map(move |map| map.banks(route))
     }
 
@@ -562,8 +666,8 @@ impl DeviceSession {
         target: Target,
     ) -> impl Iterator<Item = PinCapabilities> {
         self.routes[route.0]
-            .map
-            .iter()
+            .installed_map()
+            .into_iter()
             .flat_map(move |map| map.pins_for(route, target))
             .map(|(_, pin)| pin.info.capabilities())
     }
@@ -571,8 +675,7 @@ impl DeviceSession {
     pub(super) fn pin_state(&self, pin: PinKey) -> Option<PinState> {
         self.routes
             .get(pin.route.0)?
-            .map
-            .as_ref()?
+            .installed_map()?
             .pin(pin)
             .map(|pin| pin.state)
     }
@@ -581,7 +684,7 @@ impl DeviceSession {
         let Some(route_pin) = self
             .routes
             .get(pin.route.0)
-            .and_then(|route| route.map.as_ref())
+            .and_then(RouteState::installed_map)
             .and_then(|map| map.pin(pin))
         else {
             return Err("Unknown pin key".into());
@@ -646,8 +749,7 @@ impl DeviceSession {
     ) -> Result<Vec<String>, String> {
         if overwrite {
             if self.routes[route.0]
-                .map
-                .as_ref()
+                .installed_map()
                 .is_some_and(|map| map.target_has_pending(route, target))
             {
                 return Ok(Vec::new());
@@ -655,13 +757,12 @@ impl DeviceSession {
             let mut sent = Vec::with_capacity(2);
             if mode == Mode::Output
                 && self.routes[route.0]
-                    .map
-                    .as_ref()
+                    .installed_map()
                     .is_some_and(|map| map.target_has_listener(route, target))
             {
                 sent.extend(self.set_listener_scope(route, target, false)?);
             }
-            if let Some(map) = self.routes[route.0].map.as_mut() {
+            if let Some(map) = self.routes[route.0].installed_map_mut() {
                 map.for_target_mut(route, target, |_, pin| {
                     if pin.info.capabilities().available() {
                         pin.state.target_mode = Some(mode);
@@ -678,7 +779,7 @@ impl DeviceSession {
         }
 
         let mut pins = Vec::new();
-        if let Some(map) = self.routes[route.0].map.as_mut() {
+        if let Some(map) = self.routes[route.0].installed_map_mut() {
             map.for_target_mut(route, target, |key, pin| {
                 if pin.info.capabilities().available()
                     && pin.state.mode.is_none()
@@ -706,7 +807,7 @@ impl DeviceSession {
         route: RouteKey,
         target: Target,
     ) -> Result<Vec<String>, String> {
-        if let Some(map) = self.routes[route.0].map.as_mut() {
+        if let Some(map) = self.routes[route.0].installed_map_mut() {
             map.for_target_mut(route, target, |_, pin| {
                 if pin.state.mode.is_some() {
                     pin.state.value_pending = true;
@@ -728,7 +829,7 @@ impl DeviceSession {
             state: enabled.into(),
         };
         let (id, line) = self.send_tracked(route, request)?;
-        if let Some(map) = self.routes[route.0].map.as_mut() {
+        if let Some(map) = self.routes[route.0].installed_map_mut() {
             map.for_target_mut(route, target, |_, pin| {
                 if !pin.state.mode.is_some_and(Mode::is_input) {
                     return;
@@ -756,7 +857,7 @@ impl DeviceSession {
         target: Target,
         level: Level,
     ) -> Result<Vec<String>, String> {
-        if let Some(map) = self.routes[route.0].map.as_mut() {
+        if let Some(map) = self.routes[route.0].installed_map_mut() {
             map.for_target_mut(route, target, |_, pin| {
                 if pin.state.mode == Some(Mode::Output) {
                     pin.state.value_pending = true;
@@ -770,21 +871,21 @@ impl DeviceSession {
     fn fail_request_state(&mut self, id: RequestId, route: RouteKey, request: Request) {
         match request {
             Request::Direction { target, .. } | Request::Pullup { target, .. } => {
-                if let Some(map) = self.routes[route.0].map.as_mut() {
+                if let Some(map) = self.routes[route.0].installed_map_mut() {
                     map.for_target_mut(route, target, |_, pin| {
                         pin.state.target_mode = None;
                     });
                 }
             }
             Request::Get { target } | Request::Set { target, .. } => {
-                if let Some(map) = self.routes[route.0].map.as_mut() {
+                if let Some(map) = self.routes[route.0].installed_map_mut() {
                     map.for_target_mut(route, target, |_, pin| {
                         pin.state.value_pending = false;
                     });
                 }
             }
             Request::Listen { target, state } => {
-                if let Some(map) = self.routes[route.0].map.as_mut() {
+                if let Some(map) = self.routes[route.0].installed_map_mut() {
                     map.for_target_mut(route, target, |_, pin| {
                         pin.state.listener = match (state, pin.state.listener) {
                             (Toggle::On, ListenerState::Enabling { request_id })
@@ -828,12 +929,15 @@ impl DeviceSession {
                 state: PinState::UNSET,
             })
             .collect();
-        self.routes[route.0].map = Some(RouteMap { banks, pins });
+        self.routes[route.0].install_map(RouteMap { banks, pins });
     }
 
     #[cfg(test)]
     fn route_pin_mut(&mut self, pin: PinKey) -> Option<&mut RoutePin> {
-        self.routes.get_mut(pin.route.0)?.map.as_mut()?.pin_mut(pin)
+        self.routes
+            .get_mut(pin.route.0)?
+            .installed_map_mut()?
+            .pin_mut(pin)
     }
 
     pub(super) fn available_ports() -> Result<Vec<PortInfo>, String> {
@@ -932,30 +1036,32 @@ impl DeviceSession {
         if route.0 >= self.routes.len() {
             return Err("Unknown route key".into());
         }
-        if matches!(request, Request::Map) && self.routes[route.0].discovery.is_some() {
-            return Err(format!(
-                "MAP for {} is already in progress",
-                self.route_name(route)
-            ));
+        let is_map = matches!(request, Request::Map);
+        if is_map {
+            self.routes[route.0].begin_map(route)?;
         }
 
-        let id = self.allocate_request_id()?;
-        let destination = self.routes[route.0].name.clone();
-        let wire_request = request.try_map_target(|target| self.target_token(route, target))?;
-        let frame = Frame::try_from(Message {
-            route: destination.as_bytes(),
-            packet: Packet {
-                id,
-                body: wire_request,
-            },
-        })
-        .map_err(|error| format!("Could not encode request: {error:?}"))?;
+        let prepared = (|| {
+            let id = self.allocate_request_id()?;
+            let destination = self.routes[route.0].name().to_owned();
+            let wire_request = request.try_map_target(|target| self.target_token(route, target))?;
+            let frame = Frame::try_from(Message {
+                route: destination.as_bytes(),
+                packet: Packet {
+                    id,
+                    body: wire_request,
+                },
+            })
+            .map_err(|error| format!("Could not encode request: {error:?}"))?;
 
-        if matches!(request, Request::Map) {
-            self.routes[route.0].discovery = Some(MapBuilder::new(route));
+            self.pending[id.slot()] = Some(Pending { route, request });
+            Ok((id, frame))
+        })();
+
+        if prepared.is_err() && is_map {
+            self.routes[route.0].abort_map();
         }
-        self.pending[id.slot()] = Some(Pending { route, request });
-        Ok((id, frame))
+        prepared
     }
 
     fn target_token(&self, route: RouteKey, target: Target) -> Result<String, String> {
@@ -988,8 +1094,7 @@ impl DeviceSession {
         self.pending[id.slot()].is_some()
             || self.routes.iter().any(|route| {
                 route
-                    .map
-                    .as_ref()
+                    .installed_map()
                     .is_some_and(|map| map.uses_listener_id(id))
             })
     }
@@ -1078,8 +1183,7 @@ impl DeviceSession {
                     }
                 };
                 if let Some(route_pin) = self.routes[pending.route.0]
-                    .map
-                    .as_mut()
+                    .installed_map_mut()
                     .and_then(|map| map.pin_mut(pin))
                 {
                     route_pin.state.level = Some(level);
@@ -1143,8 +1247,7 @@ impl DeviceSession {
             return Err(format!("Unexpected MAP response for request {id}"));
         }
         self.routes[pending.route.0]
-            .discovery
-            .as_mut()
+            .discovery_mut()
             .ok_or_else(|| format!("MAP response for {id} has no active discovery"))
     }
 
@@ -1152,7 +1255,7 @@ impl DeviceSession {
         let pin = self
             .routes
             .get(route.0)
-            .and_then(|route_state| route_state.map.as_ref())
+            .and_then(RouteState::installed_map)
             .and_then(|map| map.pin_key(route, token));
         pin.ok_or_else(|| {
             format!(
@@ -1167,11 +1270,10 @@ impl DeviceSession {
         let mut follow_up = None;
         match pending.request {
             Request::Map => {
-                let Some(builder) = self.routes[pending.route.0].discovery.take() else {
+                if let Err(error) = self.routes[pending.route.0].finish_map() {
                     self.retire(id);
-                    return Err(format!("MAP {id} completed without discovery state"));
-                };
-                self.routes[pending.route.0].map = Some(builder.finish());
+                    return Err(format!("MAP {id} {error}"));
+                }
                 self.complete(id, true);
                 self.sync_listeners();
                 return Ok(DeviceEvent::MapReady {
@@ -1185,7 +1287,7 @@ impl DeviceSession {
                         state: (mode == Mode::InputPullup).into(),
                     };
                     follow_up = Some(request);
-                } else if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                } else if let Some(map) = self.routes[pending.route.0].installed_map_mut() {
                     map.for_target_mut(pending.route, target, |_, pin| {
                         if pin.info.capabilities().supports_direction(direction) {
                             pin.state.mode = Some(if direction == Direction::Input {
@@ -1201,7 +1303,7 @@ impl DeviceSession {
             }
             Request::Pullup { target, .. } => {
                 let mut read = false;
-                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                if let Some(map) = self.routes[pending.route.0].installed_map_mut() {
                     map.for_target_mut(pending.route, target, |_, pin| {
                         if let Some(mode) = pin.state.target_mode.take() {
                             pin.state.mode = Some(mode);
@@ -1220,7 +1322,7 @@ impl DeviceSession {
                 }
             }
             Request::Set { target, level } => {
-                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                if let Some(map) = self.routes[pending.route.0].installed_map_mut() {
                     map.for_target_mut(pending.route, target, |_, pin| {
                         if pin.state.mode == Some(Mode::Output) {
                             pin.state.level = Some(level);
@@ -1230,7 +1332,7 @@ impl DeviceSession {
                 }
             }
             Request::Listen { target, state } => {
-                if let Some(map) = self.routes[pending.route.0].map.as_mut() {
+                if let Some(map) = self.routes[pending.route.0].installed_map_mut() {
                     map.for_target_mut(pending.route, target, |_, pin| {
                         pin.state.listener = match (state, pin.state.listener) {
                             (Toggle::On, ListenerState::Enabling { request_id })
@@ -1264,15 +1366,13 @@ impl DeviceSession {
 
     fn pending_mode(&self, route: RouteKey, target: Target) -> Option<Mode> {
         self.routes[route.0]
-            .map
-            .as_ref()
+            .installed_map()
             .and_then(|map| map.pending_mode(route, target))
     }
 
     fn apply_query_state(&mut self, pin: PinKey, what: Query, value: QueryValue) {
         let Some(route_pin) = self.routes[pin.route.0]
-            .map
-            .as_mut()
+            .installed_map_mut()
             .and_then(|map| map.pin_mut(pin))
         else {
             return;
@@ -1316,7 +1416,7 @@ impl DeviceSession {
     fn listener_is_active(&self, pin: PinKey, id: RequestId) -> bool {
         self.routes
             .get(pin.route.0)
-            .and_then(|route| route.map.as_ref())
+            .and_then(RouteState::installed_map)
             .and_then(|map| map.pin(pin))
             .is_some_and(|pin| pin.state.listener.stream_id() == Some(id))
     }
@@ -1334,8 +1434,7 @@ impl DeviceSession {
                 }
                 self.routes
                     .get_mut(pin.route.0)?
-                    .map
-                    .as_mut()?
+                    .installed_map_mut()?
                     .pin_mut(pin)?
                     .state
                     .level = Some(value.level);
@@ -1358,7 +1457,7 @@ impl DeviceSession {
         if let Some(pending) = pending
             && pending.request == Request::Map
         {
-            self.routes[pending.route.0].discovery = None;
+            self.routes[pending.route.0].abort_map();
         }
         self.pending[id.slot()] = None;
         self.sync_listeners();
@@ -1368,17 +1467,14 @@ impl DeviceSession {
         if let Some(pending) = self.pending[id.slot()] {
             self.fail_request_state(id, pending.route, pending.request);
             if pending.request == Request::Map {
-                self.routes[pending.route.0].discovery = None;
+                self.routes[pending.route.0].abort_map();
             }
         }
         self.pending[id.slot()] = None;
     }
 
     fn reset_route(&mut self, route: RouteKey) {
-        if let Some(map) = self.routes[route.0].map.as_mut() {
-            map.reset_pin_states();
-        }
-        self.routes[route.0].discovery = None;
+        self.routes[route.0].reset();
         for pending in &mut self.pending {
             if pending.is_some_and(|pending| pending.route == route) {
                 *pending = None;
@@ -1390,8 +1486,7 @@ impl DeviceSession {
     fn clear(&mut self) {
         self.pending.fill(None);
         for route in &mut self.routes {
-            route.map = None;
-            route.discovery = None;
+            route.clear();
         }
         self.sync_listeners();
     }
@@ -1404,10 +1499,9 @@ impl DeviceSession {
             .map(|(route_index, route)| {
                 let route_key = RouteKey(route_index);
                 let pin_count = route
-                    .map
-                    .as_ref()
+                    .installed_map()
                     .map_or(0, |map| map.pins(route_key).count());
-                let pins = route.map.as_ref().map_or_else(Vec::new, |map| {
+                let pins = route.installed_map().map_or_else(Vec::new, |map| {
                     map.pins(route_key)
                         .filter_map(|(key, pin)| {
                             pin.state.listener.stream_id().map(|id| ListenerPin {
@@ -1419,7 +1513,7 @@ impl DeviceSession {
                         .collect()
                 });
                 ListenerRoute {
-                    name: route.name.as_bytes().into(),
+                    name: route.name().as_bytes().into(),
                     pin_count,
                     pins,
                 }
@@ -1488,7 +1582,7 @@ mod tests {
         let mut connection = DeviceSession::spawn(&["SAM", "LPC"]);
         let sam = connection.route_key("SAM").unwrap();
         let lpc = connection.route_key("LPC").unwrap();
-        connection.routes[sam.0].map = Some(RouteMap {
+        connection.routes[sam.0].install_map(RouteMap {
             banks: vec!["PIOA".into()],
             pins: vec![
                 RoutePin {
@@ -1519,7 +1613,7 @@ mod tests {
                 },
             ],
         });
-        connection.routes[lpc.0].map = Some(RouteMap {
+        connection.routes[lpc.0].install_map(RouteMap {
             banks: vec!["PIO2".into()],
             pins: vec![RoutePin {
                 info: PinInfo::new(
@@ -1631,7 +1725,7 @@ mod tests {
     #[test]
     fn map_stream_builds_dynamic_route_state_only_on_ack() {
         let (mut connection, sam, _, _, _, _) = setup();
-        connection.routes[sam.0].map = None;
+        connection.routes[sam.0].clear();
         let (id, wire) = connection.prepare(sam, Request::Map).unwrap();
         assert_eq!(wire.as_ref(), b"001 SAM MAP\n");
         assert_eq!(
@@ -1655,7 +1749,7 @@ mod tests {
                     .unwrap(),
                 DeviceEvent::Untracked
             );
-            assert!(connection.routes[sam.0].map.is_none());
+            assert!(connection.routes[sam.0].installed_map().is_none());
             assert!(connection.pending[id.slot()].is_some());
         }
 
@@ -1732,12 +1826,11 @@ mod tests {
     #[test]
     fn malformed_correlated_response_retires_partial_map() {
         let (mut connection, sam, _, _, _, _) = setup();
-        connection.routes[sam.0].map = None;
+        connection.routes[sam.0].clear();
         let (id, _) = connection.prepare(sam, Request::Map).unwrap();
         assert_eq!(id, request_id(1));
         connection.routes[sam.0]
-            .discovery
-            .as_mut()
+            .discovery_mut()
             .unwrap()
             .bank(b"PIOA")
             .unwrap();
@@ -1746,13 +1839,13 @@ mod tests {
         let event = connection.received_frame(&malformed);
         assert!(event.unwrap_err().contains("Malformed response"));
         assert!(connection.pending[id.slot()].is_none());
-        assert!(connection.routes[sam.0].discovery.is_none());
+        assert!(!connection.routes[sam.0].discovery_active());
     }
 
     #[test]
     fn map_validation_failure_retires_request_and_discards_partial_map() {
         let (mut connection, sam, _, _, _, _) = setup();
-        connection.routes[sam.0].map = None;
+        connection.routes[sam.0].clear();
         let (id, _) = connection.prepare(sam, Request::Map).unwrap();
         connection
             .received_frame(&incoming(
@@ -1774,8 +1867,8 @@ mod tests {
 
         assert!(error.contains("unknown bank MISSING"));
         assert!(connection.pending[id.slot()].is_none());
-        assert!(connection.routes[sam.0].discovery.is_none());
-        assert!(connection.routes[sam.0].map.is_none());
+        assert!(!connection.routes[sam.0].discovery_active());
+        assert!(connection.routes[sam.0].installed_map().is_none());
     }
 
     #[test]
@@ -1797,21 +1890,27 @@ mod tests {
     #[test]
     fn map_discovery_only_blocks_a_second_map() {
         let (mut connection, sam, _, _, _, _) = setup();
-        connection.routes[sam.0].map = None;
+        connection.routes[sam.0].clear();
         let (map_id, _) = connection.prepare(sam, Request::Map).unwrap();
 
         let (hello_id, hello) = connection.prepare(sam, Request::Hello).unwrap();
         let (status_id, status) = connection.prepare(sam, Request::Status).unwrap();
+        let (version_id, version) = connection.prepare(sam, Request::Version).unwrap();
+        let (help_id, help) = connection.prepare(sam, Request::Help).unwrap();
         assert_eq!(hello.as_ref(), b"002 SAM HAI\n");
         assert_eq!(status.as_ref(), b"003 SAM HRU\n");
+        assert_eq!(version.as_ref(), b"004 SAM VER\n");
+        assert_eq!(help.as_ref(), b"005 SAM HLP\n");
         assert_ne!(map_id, hello_id);
         assert_ne!(map_id, status_id);
+        assert_ne!(map_id, version_id);
+        assert_ne!(map_id, help_id);
         assert_eq!(
             connection.prepare(sam, Request::Map).unwrap_err(),
             "MAP for SAM is already in progress"
         );
         assert!(connection.pending[map_id.slot()].is_some());
-        assert!(connection.routes[sam.0].discovery.is_some());
+        assert!(connection.routes[sam.0].discovery_active());
     }
 
     #[test]
@@ -1838,6 +1937,16 @@ mod tests {
 
         assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
         assert_eq!(connection.pin_key(sam, "X0"), None);
+        let (get_id, get) = connection
+            .prepare(
+                sam,
+                Request::Get {
+                    target: Target::Pin(pa00),
+                },
+            )
+            .unwrap();
+        assert_eq!(get.as_ref(), b"002 SAM GET PA00 OK?\n");
+        connection.cancel(get_id);
 
         assert_eq!(
             connection
@@ -1873,7 +1982,7 @@ mod tests {
 
         assert!(error.contains("unknown bank MISSING"));
         assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
-        assert!(connection.routes[sam.0].discovery.is_none());
+        assert!(!connection.routes[sam.0].discovery_active());
         assert!(connection.pending[id.slot()].is_none());
     }
 
@@ -2099,6 +2208,9 @@ mod tests {
         };
         connection.route_pin_mut(lpc23).unwrap().state.mode = Some(Mode::Input);
         let (lpc_request, _) = connection.prepare(lpc, Request::Hello).unwrap();
+        let (sam_map, _) = connection.prepare(sam, Request::Map).unwrap();
+        assert!(connection.routes[sam.0].discovery_active());
+        assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
         let (sam_reset, _) = connection.prepare(sam, Request::Bye).unwrap();
 
         assert_eq!(
@@ -2109,10 +2221,29 @@ mod tests {
         );
 
         assert!(connection.pending[sam_reset.slot()].is_none());
+        assert!(connection.pending[sam_map.slot()].is_none());
+        assert!(!connection.routes[sam.0].discovery_active());
+        assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
         assert!(connection.pending[lpc_request.slot()].is_some());
         assert!(!connection.request_id_in_use(sam_stream));
         assert_eq!(connection.pin_state(pa00).unwrap(), PinState::UNSET);
         assert_eq!(connection.pin_state(lpc23).unwrap().mode, Some(Mode::Input));
+    }
+
+    #[test]
+    fn connection_clear_drops_installed_and_in_progress_maps() {
+        let (mut connection, sam, _, pa00, _, _) = setup();
+        let (map_id, _) = connection.prepare(sam, Request::Map).unwrap();
+
+        assert_eq!(connection.pin_key(sam, "PA00"), Some(pa00));
+        assert!(connection.routes[sam.0].discovery_active());
+        assert!(connection.pending[map_id.slot()].is_some());
+
+        connection.clear();
+
+        assert!(connection.routes[sam.0].installed_map().is_none());
+        assert!(!connection.routes[sam.0].discovery_active());
+        assert!(connection.pending.iter().all(Option::is_none));
     }
 
     #[test]
